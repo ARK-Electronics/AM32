@@ -3330,9 +3330,6 @@
 #	define RAMP_SPEED_HIGH_RPM 16
 #endif
 
-#ifndef RAMP_DIVIDER
-#define RAMP_DIVIDER 0
-#endif
 
 /************************************ F051 Hardware Groups
  * ****************************/
