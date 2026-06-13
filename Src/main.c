@@ -388,7 +388,6 @@ char brushed_direction_set = 0;
 
 uint16_t tenkhzcounter = 0;
 int32_t consumed_current = 0;
-int32_t smoothed_raw_current = 0;
 int16_t actual_current = 0;
 
 char lowkv = 0;
@@ -458,11 +457,10 @@ uint16_t adjusted_input = 0;
 #define TEMP30_CAL_VALUE ((uint16_t*)((uint32_t)0x1FFFF7B8))
 #define TEMP110_CAL_VALUE ((uint16_t*)((uint32_t)0x1FFFF7C2))
 
-uint16_t smoothedcurrent = 0;
-const uint8_t numReadings = 50; // the readings from the analog input
-uint8_t readIndex = 0; // the index of the current reading
-uint32_t total = 0;
-uint16_t readings[50];
+#define NUM_CURRENT_READINGS 50 // compile time constant so the divide becomes a multiply
+uint8_t current_read_index = 0;
+uint32_t current_total = 0;
+uint16_t current_readings[NUM_CURRENT_READINGS];
 
 uint8_t bemf_timeout_happened = 0;
 uint8_t changeover_step = 5;
@@ -801,15 +799,16 @@ void saveEEpromSettings()
 
 uint16_t getSmoothedCurrent()
 {
-    total = total - readings[readIndex];
-    readings[readIndex] = ADC_raw_current;
-    total = total + readings[readIndex];
-    readIndex = readIndex + 1;
-    if (readIndex >= numReadings) {
-        readIndex = 0;
+    current_total -= current_readings[current_read_index];
+    current_readings[current_read_index] = ADC_raw_current;
+    current_total += ADC_raw_current;
+
+    current_read_index++;
+    if (current_read_index >= NUM_CURRENT_READINGS) {
+        current_read_index = 0;
     }
-    smoothedcurrent = total / numReadings;
-    return smoothedcurrent;
+
+    return current_total / NUM_CURRENT_READINGS;
 }
 
 void getBemfState()
@@ -2113,15 +2112,14 @@ if(zero_crosses < 5){
             converted_degrees = getConvertedDegrees(ADC_raw_temp);
 #endif
             degrees_celsius = converted_degrees;
+            int32_t smoothed_raw_current = getSmoothedCurrent();
 #ifdef NXP
             //MCXA has 16-bit ADC data
             battery_voltage = ((7 * battery_voltage) + ((ADC_raw_volts * 3300 / 65535 * VOLTAGE_DIVIDER) / 100)) / 8;
-            smoothed_raw_current = getSmoothedCurrent();
             //Actual current is in 10mA, so 1 = 10mA
             actual_current = (((smoothed_raw_current * 3300 / 65535) - CURRENT_OFFSET) * 100) / (MILLIVOLT_PER_AMP);
 #else
             battery_voltage = ((7 * battery_voltage) + ((ADC_raw_volts * 3300 / 4095 * VOLTAGE_DIVIDER) / 100)) >> 3;
-            smoothed_raw_current = getSmoothedCurrent();
             actual_current = ((smoothed_raw_current * 3300 / 41) - (CURRENT_OFFSET * 100)) / (MILLIVOLT_PER_AMP);
 #endif
             if (actual_current < 0) {
