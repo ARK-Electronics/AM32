@@ -10,7 +10,7 @@
 extern uint16_t ADCDataDMA[];
 
 extern uint8_t buffersize;
-extern uint32_t dma_buffer[64];
+extern volatile uint32_t dma_buffer[64];
 
 extern uint8_t aTxBuffer[49];
 extern uint8_t nbDataToTransmit;
