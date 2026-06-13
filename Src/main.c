@@ -465,10 +465,10 @@ uint16_t adjusted_input = 0;
 #define TEMP110_CAL_VALUE ((uint16_t*)((uint32_t)0x1FFFF7C2))
 
 uint16_t smoothedcurrent = 0;
-const uint8_t numReadings = 50; // the readings from the analog input
+#define NUM_CURRENT_READINGS 50 // compile time constant so the divide becomes a multiply
 uint8_t readIndex = 0; // the index of the current reading
 uint32_t total = 0;
-uint16_t readings[50];
+uint16_t readings[NUM_CURRENT_READINGS];
 
 uint8_t bemf_timeout_happened = 0;
 uint8_t changeover_step = 5;
@@ -812,10 +812,10 @@ uint16_t getSmoothedCurrent()
     readings[readIndex] = ADC_raw_current;
     total = total + readings[readIndex];
     readIndex = readIndex + 1;
-    if (readIndex >= numReadings) {
+    if (readIndex >= NUM_CURRENT_READINGS) {
         readIndex = 0;
     }
-    smoothedcurrent = total / numReadings;
+    smoothedcurrent = total / NUM_CURRENT_READINGS;
     return smoothedcurrent;
 }
 
