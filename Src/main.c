@@ -419,6 +419,9 @@ char desync_check = 0;
 char low_kv_filter_level = 20;
 
 volatile uint16_t tim1_arr = TIM1_AUTORELOAD; // current auto reset value
+// Q16 fixed point scale factor equal to tim1_arr / 2000, recomputed in the main
+// loop when tim1_arr changes so the 20khz routine multiplies instead of divides
+volatile uint32_t pwm_to_arr_scale_q16 = ((uint32_t)TIM1_AUTORELOAD << 16) / 2000;
 uint16_t TIMER1_MAX_ARR = TIM1_AUTORELOAD; // maximum auto reset register value
 volatile uint16_t duty_cycle_maximum = 2000; // restricted by temperature or low rpm throttle protect
 uint16_t low_rpm_level = 20; // thousand erpm used to set range for throttle resrictions
@@ -1495,18 +1498,18 @@ void tenKhzRoutine()
         if ((armed && running) && input > 47) {
             if (eepromBuffer.variable_pwm) {
             }
-            adjusted_duty_cycle = ((duty_cycle * tim1_arr) / 2000) + 1;
+            adjusted_duty_cycle = (((uint32_t)duty_cycle * pwm_to_arr_scale_q16) >> 16) + 1;
 
         } else {
 
             if (prop_brake_active) {
-              adjusted_duty_cycle =  tim1_arr - ((prop_brake_duty_cycle * tim1_arr) / 2000);
+              adjusted_duty_cycle =  tim1_arr - (((uint32_t)prop_brake_duty_cycle * pwm_to_arr_scale_q16) >> 16);
             } else {
               if((eepromBuffer.brake_on_stop == 2) && armed){  // require arming for active brake
                 comStep(2);
-                adjusted_duty_cycle = DEAD_TIME + ((eepromBuffer.active_brake_power * tim1_arr) / 2000)* 10;
+                adjusted_duty_cycle = DEAD_TIME + (((uint32_t)eepromBuffer.active_brake_power * pwm_to_arr_scale_q16) >> 16)* 10;
             }else{
-                adjusted_duty_cycle = ((duty_cycle * tim1_arr) / 2000);
+                adjusted_duty_cycle = (((uint32_t)duty_cycle * pwm_to_arr_scale_q16) >> 16);
             }
             }
         }
@@ -1893,6 +1896,8 @@ int main(void)
   startup_max_duty_cycle = startup_max_duty_cycle + 400;
 #endif
 
+    uint16_t last_tim1_arr = 0; // force scale factor computation on first pass
+
     while (1) {
 e_com_time = ((commutation_intervals[0] + commutation_intervals[1] + commutation_intervals[2] + commutation_intervals[3] + commutation_intervals[4] + commutation_intervals[5]) + 4) >> 1; // COMMUTATION INTERVAL IS 0.5US INCREMENTS 
 
@@ -1932,7 +1937,7 @@ if(zero_crosses < 5){
             tim1_arr = map(commutation_interval, 96, 200, TIMER1_MAX_ARR / 2,
                 TIMER1_MAX_ARR);
         }
-        if (eepromBuffer.variable_pwm == 2) {      // uses automatic range   
+        if (eepromBuffer.variable_pwm == 2) {      // uses automatic range
           if(average_interval < 250 && average_interval > 100){
             tim1_arr = average_interval * (CPU_FREQUENCY_MHZ/9);
           }
@@ -1941,7 +1946,11 @@ if(zero_crosses < 5){
          }
           if((average_interval >= 250) || (average_interval == 0)){
               tim1_arr = 250 * (CPU_FREQUENCY_MHZ/9);
-          } 
+          }
+        }
+        if (tim1_arr != last_tim1_arr) { // keep the 20khz routine scale factor in sync, division
+            last_tim1_arr = tim1_arr;    // happens here at idle priority instead of in the interrupt
+            pwm_to_arr_scale_q16 = ((uint32_t)tim1_arr << 16) / 2000;
         }
         if (signaltimeout > (LOOP_FREQUENCY_HZ >> 1)) { // half second timeout when armed;
             if (armed) {
