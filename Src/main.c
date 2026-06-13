@@ -944,6 +944,11 @@ RAM_FUNC void interruptRoutine()
 //            return;
 //        }
 //    }
+        // Zero-cross confirm: return unless filter_level consecutive reads hold
+        // the post-crossing level. Loop speed sets the sampling window: with
+        // getCompOutputLevel inlined and this code in RAM (F051), one read is
+        // ~4 cycles instead of ~20, so filter_level 12 spans ~1.2us, not ~5us.
+        // Less wall-clock noise immunity per count; may need bench retuning.
         for (int i = 0; i < filter_level; i++) {
 #if defined(MCU_F031) || defined(MCU_G031)
             if (((current_GPIO_PORT->IDR & current_GPIO_PIN) == !(rising))) {
