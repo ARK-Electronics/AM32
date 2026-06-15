@@ -41,6 +41,11 @@ void setCaptureCompare()
     SET_DUTY_CYCLE_ALL(beep_volume); // volume of the beep, (duty cycle) 
 }
 
+// The BlueJay custom startup melody is a user-programmable tune stored in the
+// eeprom tune[] blob. Boards that never load a custom tune can compile it out
+// with DISABLE_CUSTOM_TUNE to save flash; playStartupTune() falls back to the
+// fixed three-beep startup below.
+#ifndef DISABLE_CUSTOM_TUNE
 /*
  * @Brief 	Freq in hz, bduration in ms
  */
@@ -113,15 +118,19 @@ void playBlueJayTune(void)
     signaltimeout = 0;
     RELOAD_WATCHDOG_COUNTER();
 }
+#endif // DISABLE_CUSTOM_TUNE
 
 
 void playStartupTune()
 {
     __disable_irq();
 comStep(3);
+#ifndef DISABLE_CUSTOM_TUNE
   if (eepromBuffer.tune[0] != ERASED_FLASH_BYTE) {
     playBlueJayTune();
-    } else {
+    } else
+#endif
+    {
         SET_AUTO_RELOAD_PWM(TIM1_AUTORELOAD);
         setCaptureCompare();
         comStep(3); // activate a pwm channel
