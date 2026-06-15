@@ -27,6 +27,7 @@
 #include "ADC.h"
 #include "targets.h"
 #include "common.h"
+#include "profiling.h"
 
 extern void transfercomplete();
 extern void PeriodElapsedCallback();
@@ -43,6 +44,31 @@ extern volatile char dshot_telemetry;
 extern volatile char armed;
 extern volatile char out_put;
 /* USER CODE END EV */
+
+#ifdef PROFILE_ISR
+volatile uint16_t prof_cyc_last[PROF_N];
+volatile uint16_t prof_cyc_max[PROF_N];
+volatile uint32_t prof_cyc_sum[PROF_N];
+volatile uint32_t prof_calls[PROF_N];
+
+// Repurpose TIM17 (unused on the F051: MX_TIM17_Init never enables its counter
+// and nothing reads it) as a 48 MHz free-running cycle counter, and configure
+// the optional logic-analyzer marker pin.
+void profiling_init(void)
+{
+    LL_APB1_GRP2_EnableClock(LL_APB1_GRP2_PERIPH_TIM17);
+    TIM17->PSC = 0;            // 48 MHz -> 1 tick per core cycle
+    TIM17->ARR = 0xFFFF;
+    TIM17->EGR = TIM_EGR_UG;   // latch the prescaler
+    TIM17->CR1 |= TIM_CR1_CEN; // free-running
+#ifdef PROFILE_GPIO_PORT
+    LL_GPIO_SetPinMode(PROFILE_GPIO_PORT, PROFILE_GPIO_PIN, LL_GPIO_MODE_OUTPUT);
+    LL_GPIO_SetPinOutputType(PROFILE_GPIO_PORT, PROFILE_GPIO_PIN, LL_GPIO_OUTPUT_PUSHPULL);
+    LL_GPIO_SetPinSpeed(PROFILE_GPIO_PORT, PROFILE_GPIO_PIN, LL_GPIO_SPEED_FREQ_HIGH);
+    PROFILE_GPIO_PORT->BRR = PROFILE_GPIO_PIN;
+#endif
+}
+#endif
 
 uint16_t interrupt_time = 0;
 /******************************************************************************/
@@ -194,8 +220,10 @@ void ADC1_COMP_IRQHandler(void)
   if (LL_EXTI_IsActiveFlag_0_31(LL_EXTI_LINE_21) != RESET) {
       if((INTERVAL_TIMER->CNT) > ((average_interval>>1))){
        EXTI->PR = EXTI_LINE;
+      PROF_ENTER(PROF_COMP_ZC);
       interruptRoutine();
-  }else{ 
+      PROF_EXIT(PROF_COMP_ZC);
+  }else{
       if (getCompOutputLevel() == rising){
       EXTI->PR = EXTI_LINE;
   }
@@ -210,7 +238,9 @@ void TIM6_DAC_IRQHandler(void)
 {
     if (LL_TIM_IsActiveFlag_UPDATE(TIM6) == 1) {
         LL_TIM_ClearFlag_UPDATE(TIM6);
+        PROF_ENTER(PROF_20KHZ);
         tenKhzRoutine();
+        PROF_EXIT(PROF_20KHZ);
     }
 }
 
@@ -220,7 +250,9 @@ void TIM6_DAC_IRQHandler(void)
 void TIM14_IRQHandler(void)
 {
     LL_TIM_ClearFlag_UPDATE(TIM14);
+    PROF_ENTER(PROF_TIM14);
     PeriodElapsedCallback();
+    PROF_EXIT(PROF_TIM14);
 }
 
 /**
@@ -310,7 +342,9 @@ void TIM1_BRK_UP_TRG_COM_IRQHandler(void)
 void EXTI4_15_IRQHandler(void)
 {
     LL_EXTI_ClearFlag_0_31(LL_EXTI_LINE_15);
+    PROF_ENTER(PROF_DSHOT);
     processDshot();
+    PROF_EXIT(PROF_DSHOT);
 }
 
 /* USER CODE END 1 */
