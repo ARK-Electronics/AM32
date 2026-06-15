@@ -2194,6 +2194,7 @@
 #ifdef ARK_4IN1_F051
 #define FILE_NAME "ARK_4IN1_F051"
 #define FIRMWARE_NAME "ARK 4IN1"
+#define DISABLE_CUSTOM_TUNE // flash-tight F051; ARK does not use custom startup melodies
 #define DEAD_TIME 25
 #define HARDWARE_GROUP_F0_B
 #define MILLIVOLT_PER_AMP 10
@@ -2216,6 +2217,7 @@
 #ifdef ARK_4IN1_RAMP_F051
 #define FILE_NAME "ARK_4IN1_RAMP_F051"
 #define FIRMWARE_NAME "ARK 4IN1 SLO"
+#define DISABLE_CUSTOM_TUNE // flash-tight F051; ARK does not use custom startup melodies
 #define DEAD_TIME 25
 #define HARDWARE_GROUP_F0_B
 #define MILLIVOLT_PER_AMP 10
