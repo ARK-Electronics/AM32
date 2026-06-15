@@ -12,6 +12,7 @@
 #include "ADC.h"
 #include "serial_telemetry.h"
 #include "targets.h"
+#include "profiling.h"
 
 void initCorePeripherals(void)
 {
@@ -28,6 +29,7 @@ void initCorePeripherals(void)
     MX_TIM6_Init();
     MX_TIM17_Init();
     UN_TIM_Init();
+    profiling_init(); // no-op unless PROFILE_ISR is defined
 #ifdef USE_SERIAL_TELEMETRY
     telem_UART_Init();
 #endif
