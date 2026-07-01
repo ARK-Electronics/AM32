@@ -1531,17 +1531,21 @@ void tenKhzRoutine()
 
 void processDshot()
 {
-    if (compute_dshot_flag == 1) {
+    // Snapshot and clear before processing to avoid a race where the DMA ISR
+    // (higher priority) sets compute_dshot_flag=2 inside the flag==1 branch,
+    // only for the trailing clear to overwrite it before the flag==2 check.
+    // Single-byte read/write is atomic on all ARM Cortex-M cores.
+    uint8_t flag = compute_dshot_flag;
+    compute_dshot_flag = 0;
+
+    if (flag == 1) {
         computeDshotDMA();
-        compute_dshot_flag = 0;
-    }
-    if (compute_dshot_flag == 2) {
+    } else if (flag == 2) {
       if(e_com_time > 65535){    // beyond dshot range
         make_dshot_package(65535);
       }else{
         make_dshot_package(e_com_time);
       }
-        compute_dshot_flag = 0;
         return;
     }
     setInput();
