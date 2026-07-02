@@ -71,3 +71,18 @@ def test_live_voltage_falls_back_to_perf_without_a_stand():
 
 def test_live_voltage_none_when_no_stand_and_perf_unreadable():
     assert _live_voltage(None, perf_source=_boom) is None
+
+
+def test_live_voltage_falls_back_to_esc_telemetry():
+    # A PX4 bench without an SWD probe: voltage comes from the ESC telemetry
+    # the FC relays (ESC_STATUS), read through the telem source.
+    frame = type("Frame", (), {"voltage_v": 23.4})()
+    assert _live_voltage(None, perf_source=_boom,
+                         telem_source=lambda: frame) == pytest.approx(23.4)
+
+
+def test_live_voltage_waits_briefly_for_first_telem_frame():
+    frames = iter([None, None, type("Frame", (), {"voltage_v": 22.8})()])
+    v = _live_voltage(None, perf_source=_boom,
+                      telem_source=lambda: next(frames), telem_wait_s=1.0)
+    assert v == pytest.approx(22.8)

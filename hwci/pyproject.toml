@@ -18,6 +18,7 @@ dependencies = [
 [project.optional-dependencies]
 plot = ["matplotlib>=3.7"]            # report plots
 flightstand = ["grpcio>=1.51"]        # real Flight Stand gRPC client
+px4 = ["pymavlink>=2.4.37"]           # PX4 FC as signal source (DShot/telemetry PRs)
 dev = ["pytest>=7.0", "grpcio-tools>=1.51"]
 
 [project.scripts]

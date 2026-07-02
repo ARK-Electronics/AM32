@@ -1,6 +1,6 @@
 """Throttle-source abstraction.
 
-The throttle source is whatever generates the ESC signal during a test. Two
+The throttle source is whatever generates the ESC signal during a test. Three
 backends are provided:
 
 * :class:`~hwci.throttle.flightstand_src.FlightStandThrottle` - the Flight Stand
@@ -8,6 +8,9 @@ backends are provided:
 * :class:`~hwci.throttle.external.ExternalSerialThrottle` - a separate DShot/PWM
   signal generator (e.g. an MCU bridge), for scripted DShot sequences or when
   the stand can't emit the protocol you need.
+* :class:`~hwci.throttle.px4_src.Px4Throttle` - a PX4 flight controller (ARK
+  FPV) over MAVLink, for bidirectional DShot and DShot-requested telemetry,
+  which neither of the above can produce.
 
 Throttle is always a normalized float in [0, 1]; each backend maps it to its
 native units (PWM microseconds, DShot 48..2047, stand output units).

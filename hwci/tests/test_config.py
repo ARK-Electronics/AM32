@@ -64,6 +64,40 @@ def test_none_backends_allowed(tmp_path):
     assert rig.stand_backend == "none"
 
 
+def test_px4_backends_load(tmp_path):
+    text = VALID_RIG.replace("throttle_backend: flightstand",
+                             "throttle_backend: px4")
+    text = text.replace("telem_backend: serial", "telem_backend: px4")
+    text = text.replace("stand_backend: grpc", "stand_backend: none")
+    text += "px4_url: /dev/ttyACM1\npx4_motor_index: 2\n"
+    rig = load_rig(_write(tmp_path, text))
+    assert rig.throttle_backend == "px4"
+    assert rig.px4_url == "/dev/ttyACM1"
+    assert rig.px4_motor_index == 2
+
+
+def test_px4_throttle_works_alongside_a_stand(tmp_path):
+    # FC drives the signal, the stand only measures - a valid combination.
+    text = VALID_RIG.replace("throttle_backend: flightstand",
+                             "throttle_backend: px4")
+    assert load_rig(_write(tmp_path, text)).stand_backend == "grpc"
+
+
+def test_px4_telem_requires_px4_throttle(tmp_path):
+    text = VALID_RIG.replace("telem_backend: serial", "telem_backend: px4")
+    with pytest.raises(ValueError, match="telem_backend 'px4'"):
+        load_rig(_write(tmp_path, text))
+
+
+def test_px4_motor_index_is_one_based(tmp_path):
+    text = VALID_RIG.replace("throttle_backend: flightstand",
+                             "throttle_backend: px4")
+    text = text.replace("stand_backend: grpc", "stand_backend: none")
+    text += "px4_motor_index: 0\n"
+    with pytest.raises(ValueError, match="1-based"):
+        load_rig(_write(tmp_path, text))
+
+
 def test_no_config_gives_sim_defaults():
     rig = load_rig(None)
     assert rig.stand_backend == "sim"

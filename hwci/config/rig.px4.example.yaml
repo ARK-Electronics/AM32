@@ -1,0 +1,67 @@
+# Rig configuration for testing DShot / telemetry PRs with a PX4 flight
+# controller (ARK FPV) as the ESC signal source.
+#
+# Why this bench exists: the Tyto Flight Stand's ESC output can emit plain
+# PWM/DShot but NOT bidirectional DShot, and it never sets the DShot telemetry
+# bit - so it cannot exercise the code paths a DShot or telemetry PR changes.
+# An ARK FPV running PX4 drives the ESC with genuine (bidirectional) DShot
+# from its own dshot driver, requests KISS telemetry over the telemetry wire,
+# and reports everything it hears back over MAVLink (ESC_STATUS/ESC_INFO),
+# which the harness records as the run's telemetry channel. Copy to rig.yaml
+# on the bench and edit.
+#
+# Wiring (ESC channel 1 by convention):
+#   ARK FPV motor-1 output pad  ->  ESC channel-1 signal pin (+ common GND)
+#   ESC channel-1 telemetry pad ->  ARK FPV UART RX chosen by DSHOT_TEL_CFG
+#   ARK FPV USB                 ->  host (this machine)
+#   ST-Link SWDIO1/SWCLK1       ->  optional, for CPU-load/loop-time data
+#
+# PX4 setup (QGC or shell) on the ARK FPV:
+#   - Actuators: assign Motor 1 to the wired output; protocol DShot300/600
+#   - DSHOT_BIDIR_EN = 1        # bidirectional DShot (eRPM over the signal line)
+#   - DSHOT_TEL_CFG  = <UART>   # ESC serial telemetry port (telemetry-PR testing)
+#   - MOT_POLE_COUNT = 2 * pole_pairs below (14 for a 7-pole-pair motor) -
+#     PX4 converts eRPM to RPM with this, and the harness converts back;
+#     a mismatch silently skews every RPM figure.
+#   - vehicle DISARMED, safety off; throttle goes out as actuator-test
+#     commands (the QGC actuator-slider mechanism), which PX4 only honours
+#     while disarmed.
+#
+# AM32 side: for telemetry-PR testing leave the EEPROM "30ms telemetry"
+# (telemetry_on_interval) OFF so the only frames on the wire are the ones the
+# FC requests via the DShot telemetry bit - that's the path under test.
+
+# --- firmware / build ---
+target: ARK_4IN1_F051
+
+# --- debug probe (optional but recommended: CPU load / loop times over SWD) ---
+debugger_backend: openocd      # set to "none" on a probe-less bench
+openocd_bin: openocd
+
+# --- ESC telemetry: what the FC heard back from the ESC ---
+# "px4" folds ESC_STATUS (eRPM/V/A from bidir DShot and/or requested KISS
+# frames) and ESC_INFO (temperature) into the run's telemetry channel, so the
+# full ESC -> FC -> host round trip is what gets graded. To read the KISS
+# wire directly with a USB-serial adapter instead, use "serial" (then the FC
+# must NOT also be wired to the telemetry pad).
+telem_backend: px4
+
+# --- throttle source: the PX4 FC's own DShot output ---
+throttle_backend: px4
+px4_url: /dev/ttyACM0          # pymavlink URL; also e.g. "udp:192.168.1.5:14550"
+px4_baud: 115200               # ignored for USB CDC / network URLs
+px4_motor_index: 1             # FC motor output wired to the ESC (1-based)
+# px4_esc_index: 0             # ESC_STATUS slot; default px4_motor_index - 1
+# px4_shell_quiesce: true      # `dshot stop` via MAVLink shell so the signal
+                               #   line idles low (the AM32 bootloader only
+                               #   jumps to the app on a low line at boot)
+
+# --- thrust stand: not needed to test DShot/telemetry paths ---
+# (Set to grpc + flightstand wiring if the motor IS on the stand and you only
+# use the FC for the signal - the two combine fine.)
+stand_backend: none
+
+# --- device under test ---
+motor_name: "T-Motor F60 Pro V"
+pole_pairs: 7                  # MUST match MOT_POLE_COUNT / 2 on the FC
+prop: "none (bench, no prop)"

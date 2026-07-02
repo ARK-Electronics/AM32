@@ -106,15 +106,30 @@ class BatteryTooLowError(RuntimeError):
 
 
 def _live_voltage(stand: ThrustStand | None,
-                  perf_source: PerfSourceFn) -> float | None:
+                  perf_source: PerfSourceFn,
+                  telem_source: TelemSourceFn = lambda: None,
+                  telem_wait_s: float = 0.0) -> float | None:
     """Best pack-voltage reading available before the throttle is armed: the
     stand's HV bus channel if one is wired, else the ESC's own ADC via the
     perf struct (already alive by the time build_live_sources calls this -
-    it runs after _ensure_app_alive). None if neither is available/readable."""
+    it runs after _ensure_app_alive), else the ESC telemetry channel (e.g. a
+    PX4 bench with no SWD probe). None if none is available/readable."""
     if stand is not None:
         return stand.read_sample().voltage_v
     pf = _safe(perf_source)
-    return pf.voltage if pf is not None else None
+    if pf is not None:
+        return pf.voltage
+    # The telemetry stream may only just have been brought up (e.g. the px4
+    # backend requests ESC_STATUS moments earlier), so give the first frame a
+    # bounded moment to arrive rather than failing the pre-flight check.
+    deadline = time.monotonic() + telem_wait_s
+    while True:
+        tm = _safe(telem_source)
+        if tm is not None:
+            return tm.voltage_v
+        if time.monotonic() >= deadline:
+            return None
+        time.sleep(0.05)
 
 
 def check_battery(voltage_v: float | None, battery_cells: int,
@@ -421,7 +436,8 @@ def build_live_sources(rig: RigConfig, profile: Profile, *,
                        battery_cells: int | None = None,
                        min_cell_voltage: float = DEFAULT_MIN_CELL_VOLTAGE,
                        tare: bool = True) -> Sources:
-    """Wire OpenOCD + serial telemetry + gRPC/external throttle on the rig.
+    """Wire OpenOCD + telemetry + throttle (gRPC stand, external generator,
+    or a PX4 flight controller over MAVLink) on the rig.
 
     Backend values dispatch STRICTLY: an unknown value raises instead of
     falling back to a simulator (fabricated data gating a hardware run is the
@@ -456,6 +472,7 @@ def build_live_sources(rig: RigConfig, profile: Profile, *,
             "(expected 'grpc' or 'none')")
 
     # --- throttle source ---
+    px4_client = None
     if rig.throttle_backend == "external":
         from .throttle.external import ExternalSerialThrottle
         throttle = ExternalSerialThrottle(rig.throttle_port, rig.throttle_baud)
@@ -465,10 +482,18 @@ def build_live_sources(rig: RigConfig, profile: Profile, *,
                 "throttle_backend 'flightstand' needs stand_backend 'grpc'")
         from .throttle.flightstand_src import FlightStandThrottle
         throttle = FlightStandThrottle(stand, arm_settle_s=profile.arm_settle_s)
+    elif rig.throttle_backend == "px4":
+        from .px4.client import Px4Mavlink
+        from .throttle.px4_src import Px4Throttle
+        px4_client = Px4Mavlink(rig.px4_url, rig.px4_baud).open()
+        closers.append(px4_client.close)
+        throttle = Px4Throttle(px4_client, motor_index=rig.px4_motor_index,
+                               arm_settle_s=profile.arm_settle_s,
+                               shell_quiesce=rig.px4_shell_quiesce)
     else:
         raise ValueError(
             f"throttle_backend {rig.throttle_backend!r} is not a live backend "
-            "(expected 'flightstand' or 'external')")
+            "(expected 'flightstand', 'external' or 'px4')")
     closers.append(throttle.close)
 
     # --- perf struct via debugger ---
@@ -497,10 +522,20 @@ def build_live_sources(rig: RigConfig, profile: Profile, *,
         telem = _SerialTelemetry(rig.telem_port, rig.telem_baud)
         telem_source = telem.latest
         closers.append(telem.close)
+    elif rig.telem_backend == "px4":
+        if px4_client is None:
+            raise ValueError(
+                "telem_backend 'px4' needs throttle_backend 'px4' (it reads "
+                "ESC_STATUS off the same MAVLink link)")
+        px4_client.request_esc_telemetry()
+        esc_index = (rig.px4_esc_index if rig.px4_esc_index is not None
+                     else rig.px4_motor_index - 1)
+        pole_pairs = rig.pole_pairs
+        telem_source = lambda: px4_client.esc_frame(esc_index, pole_pairs)
     elif rig.telem_backend != "none":
         raise ValueError(
             f"telem_backend {rig.telem_backend!r} is not a live backend "
-            "(expected 'serial' or 'none')")
+            "(expected 'serial', 'px4' or 'none')")
 
     sources = Sources(throttle=throttle, stand=stand, perf_source=perf_source,
                       telem_source=telem_source, perf_reader=perf_reader,
@@ -509,8 +544,9 @@ def build_live_sources(rig: RigConfig, profile: Profile, *,
         if perf_reader is not None:
             _ensure_app_alive(dbg, perf_reader, throttle)
         if battery_cells is not None:
-            check_battery(_live_voltage(stand, perf_source), battery_cells,
-                         min_cell_voltage)
+            check_battery(_live_voltage(stand, perf_source, telem_source,
+                                        telem_wait_s=2.0),
+                          battery_cells, min_cell_voltage)
         if tare and stand is not None:
             residual_gf = tare_for_run(stand, throttle)
             if residual_gf is not None:

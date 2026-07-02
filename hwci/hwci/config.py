@@ -24,8 +24,8 @@ DEFAULT_TARGET = "ARK_4IN1_F051"
 # default RigConfig (offline runs); load_rig() rejects them in a rig file.
 BACKEND_CHOICES: dict[str, set[str]] = {
     "debugger_backend": {"openocd", "sim", "none"},
-    "telem_backend": {"serial", "sim", "none"},
-    "throttle_backend": {"flightstand", "external", "sim"},
+    "telem_backend": {"serial", "px4", "sim", "none"},
+    "throttle_backend": {"flightstand", "external", "px4", "sim"},
     "stand_backend": {"grpc", "sim", "none"},
 }
 _SIM_ONLY = {"sim"}
@@ -141,9 +141,17 @@ class RigConfig:
     telem_port: str = "/dev/ttyUSB0"
     telem_baud: int = 115200
 
-    throttle_backend: str = "sim"           # "flightstand" | "external" (| "sim")
+    throttle_backend: str = "sim"           # "flightstand" | "external" | "px4" (| "sim")
     throttle_port: str = "/dev/ttyACM0"
     throttle_baud: int = 115200
+
+    # PX4 flight controller as the signal source (ARK FPV bench, for testing
+    # bidirectional-DShot / telemetry PRs the Flight Stand output can't drive).
+    px4_url: str = "/dev/ttyACM0"           # pymavlink URL: serial device, "udp:host:port", ...
+    px4_baud: int = 115200                  # ignored for USB CDC / network URLs
+    px4_motor_index: int = 1                # FC motor output wired to the ESC (1-based)
+    px4_esc_index: int | None = None        # index into ESC_STATUS; default motor_index - 1
+    px4_shell_quiesce: bool = True          # `dshot stop` over the MAVLink shell to idle the line low
 
     stand_backend: str = "sim"              # "grpc" | "none" (| "sim" offline)
     stand_host: str = "127.0.0.1"
@@ -179,6 +187,16 @@ class RigConfig:
                 "rig config: throttle_backend 'flightstand' needs a stand "
                 "(stand_backend 'grpc'); use throttle_backend 'external' on a "
                 "stand-less bench")
+        if self.telem_backend == "px4" and self.throttle_backend != "px4":
+            raise ValueError(
+                "rig config: telem_backend 'px4' reads ESC_STATUS off the "
+                "same MAVLink link the px4 throttle source opens; it needs "
+                "throttle_backend 'px4' (use telem_backend 'serial' to read "
+                "the KISS wire directly instead)")
+        if self.px4_motor_index < 1:
+            raise ValueError(
+                "rig config: px4_motor_index is 1-based (Motor 1 is the "
+                "first FC output)")
 
 
 def load_rig(path: str | None) -> RigConfig:

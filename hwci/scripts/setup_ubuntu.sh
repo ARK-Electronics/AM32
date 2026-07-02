@@ -32,7 +32,7 @@ python3 -m venv .venv
 # shellcheck disable=SC1091
 . .venv/bin/activate
 pip install --upgrade pip
-pip install -e '.[plot,flightstand,dev]'
+pip install -e '.[plot,flightstand,px4,dev]'
 
 echo "==> self-test (simulator, no hardware needed)"
 python -m hwci selftest

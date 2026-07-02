@@ -94,7 +94,10 @@ per-motor.
 
 * **Throttle**: Flight Stand ESC output → channel-1 signal pin (PWM or DShot).
   If your stand can't emit the protocol you want, use an external DShot
-  generator (`throttle_backend: external`).
+  generator (`throttle_backend: external`) — or a PX4 flight controller
+  (`throttle_backend: px4`) when the test needs bidirectional DShot or
+  DShot-requested telemetry, which the stand can't produce (see the next
+  section).
 * **ESC telemetry**: channel-1 telemetry pad → USB-serial adapter (115200 8N1)
   → host. The ARK target already has `USE_SERIAL_TELEMETRY`.
 * **Power**: bench supply or battery within the ARK 4IN1's 3–8S range; common
@@ -113,6 +116,56 @@ per-motor.
   `safety:` limits above. It reads the stand's voltage channel, or the perf
   struct on a stand-less bench. Opt-in and hardware-only (has no effect under
   `--sim`, since the simulator's pack has no real cell count).
+
+### PX4 signal source: testing DShot / telemetry PRs (ARK FPV)
+
+The Flight Stand's ESC output can emit plain PWM/DShot, but it can **not**
+emit bidirectional DShot and never sets the DShot telemetry bit — so it can't
+exercise the code paths a DShot or telemetry PR changes. For those PRs the
+signal source is an **ARK FPV flight controller running PX4** instead: its
+dshot driver drives the ESC with genuine (bidirectional) DShot, requests KISS
+telemetry over the telemetry wire, and reports everything it hears back over
+MAVLink (`ESC_STATUS`/`ESC_INFO`), which the harness records as the run's
+telemetry channel. The full **ESC → FC → host round trip** is what gets
+graded: a PR that breaks eRPM feedback or the KISS frame format shows up as a
+dead or diverging telemetry channel instead of passing unnoticed.
+
+* **Wiring**: FC motor-1 output pad → ESC channel-1 signal pin; ESC channel-1
+  telemetry pad → the FC UART RX selected by `DSHOT_TEL_CFG`; FC USB → host;
+  common ground everywhere. ST-Link on channel 1 as usual (optional, for the
+  CPU-load/loop-time channel).
+* **PX4 config**: assign Motor 1 to the wired output with protocol
+  DShot300/600 (Actuators page), `DSHOT_BIDIR_EN = 1` for bidirectional
+  DShot, `DSHOT_TEL_CFG = <uart>` for serial-telemetry requests, and
+  `MOT_POLE_COUNT = 2 * pole_pairs` — PX4 divides eRPM down to mechanical
+  RPM with it and the harness multiplies back up, so a mismatch silently
+  skews every RPM figure. Keep the vehicle **disarmed**: throttle goes out as
+  `MAV_CMD_ACTUATOR_TEST` (the QGroundControl actuator-slider mechanism),
+  which PX4 only honours while disarmed, and every command carries an
+  FC-side deadman timeout so the motor stops by itself if the host dies
+  mid-run.
+* **Rig config**: `cp config/rig.px4.example.yaml rig.yaml` and edit
+  (`throttle_backend: px4`, `telem_backend: px4`; `pip install -e '.[px4]'`
+  pulls in pymavlink). A thrust stand isn't needed for these tests
+  (`stand_backend: none` + the `noprop_smoke`/`noprop_baseline` profiles),
+  but `px4` throttle + `grpc` stand combine fine when the motor is on the
+  stand and only the signal comes from the FC.
+* **Bootloader note**: PX4 keeps emitting DShot frames even at zero throttle,
+  which would park a rebooting ESC in the AM32 bootloader (the signal line
+  must idle low at boot). The harness stops/starts the PX4 dshot driver over
+  the MAVLink system shell when it needs the line quiet
+  (`px4_shell_quiesce`, on by default).
+* **AM32 EEPROM**: for telemetry-PR testing leave "30ms telemetry"
+  (`telemetry_on_interval`) **off**, so the only frames on the wire are the
+  ones the FC requests via the DShot telemetry bit — that's the path under
+  test. The interval mode stays testable on the USB-serial bench
+  (`telem_backend: serial`).
+
+Then gate a DShot/telemetry PR on the FC bench exactly like any other run:
+
+```bash
+hwci ci --profile noprop_smoke --config rig.yaml --battery-cells 6 --out runs/pr
+```
 
 ## Software setup (Ubuntu 24.04)
 
@@ -149,7 +202,10 @@ Then, manually (vendor bits the script can't automate):
    `/dev/esc-telem` (and `/dev/esc-throttle`) appear.
 5. ESC telemetry only streams if the AM32 EEPROM setting
    `telemetry_on_interval` is enabled (AM32 configurator: "30ms telemetry").
-   With it off, the KISS channel is silent even when wired correctly. On a
+   With it off, the KISS channel is silent even when wired correctly. (This
+   applies to the USB-serial bench with `telem_backend: serial`; on the PX4
+   bench the FC requests each frame via the DShot telemetry bit instead, and
+   the interval setting should stay off — see the PX4 section above.) On a
    bench without the telemetry wire, set `telem_backend: none` — the perf
    struct still reports eRPM/voltage/current/temperature over SWD.
 
@@ -157,7 +213,7 @@ Verify the harness with **no hardware** at any time:
 
 ```bash
 python -m hwci selftest          # runs ci_smoke in the built-in simulator
-python -m pytest                 # 75 offline tests
+python -m pytest                 # 137 offline tests
 ```
 
 ## Usage
@@ -234,11 +290,12 @@ hwci/hwci/perf.py, elf.py          perf struct decode + ELF/DWARF symbol lookup
 hwci/hwci/debugger/                OpenOCD (ST-Link) + Mock backends
 hwci/hwci/flightstand/             gRPC client + simulator + base interface
 hwci/hwci/esc_telem/kiss.py        KISS telemetry parser
-hwci/hwci/throttle/                flight-stand / external / base throttle sources
+hwci/hwci/px4/                     MAVLink client for a PX4 FC as signal source
+hwci/hwci/throttle/                flight-stand / external / px4 / base throttle sources
 hwci/hwci/sim.py                   offline rig simulator (all 3 channels)
 hwci/hwci/runner.py metrics.py baseline.py report.py config.py cli.py
 hwci/hwci/profiles/*.yaml          test profiles
-hwci/tests/                        75 offline tests (sim, DWARF layout, fail-closed gating)
+hwci/tests/                        137 offline tests (sim, DWARF layout, fail-closed gating)
 ```
 
 ## Honest limitations
@@ -264,3 +321,12 @@ hwci/tests/                        75 offline tests (sim, DWARF layout, fail-clo
 * CPU load is a statistical idle-residual figure, not a per-function profile
   (the M0 can't do PC sampling); it's stable and comparable run-to-run, which is
   what regression gating needs.
+* The **PX4 backend** commands throttle with `MAV_CMD_ACTUATOR_TEST`, which
+  PX4 only honours while disarmed — right for a bench, but it means arming
+  behaviour of the FC itself is out of scope. `ESC_STATUS` carries PX4's
+  *mechanical* RPM, so the harness reconstructs eRPM as `rpm * pole_pairs`
+  and `MOT_POLE_COUNT` on the FC must equal `2 * pole_pairs` in `rig.yaml`;
+  consumption isn't reported over MAVLink (the column reads 0). Quiescing
+  the signal line (AM32-bootloader exit) shells `dshot stop`/`dshot start`
+  over `SERIAL_CONTROL` — verified against PX4 v1.14/v1.15; re-check if the
+  module CLI changes.
