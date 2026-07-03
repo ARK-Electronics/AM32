@@ -916,6 +916,7 @@ void PeriodElapsedCallback()
     if (zero_crosses < 10000) {
         zero_crosses++;
     }
+    HWCI_PERF_ZC();
 }
 
 /*
