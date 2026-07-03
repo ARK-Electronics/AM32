@@ -370,6 +370,13 @@ uint32_t desync_happened = 0;
 #else
 uint8_t desync_happened = 0;
 #endif
+uint8_t demag_comp_level = 0; // 0=off, 1=low, 2=medium, 3=high
+volatile uint16_t blanking_length = 0; // measured demag time in interval timer ticks
+volatile uint8_t auto_blanking = 0; // comparator armed for the demag release edge first
+uint8_t active_demag = 0; // circulate demag current through the fet instead of the body diode
+volatile uint8_t active_demag_fet_on = 0;
+volatile uint16_t active_demag_ticks = 0; // fet on time, half of last measured demag time
+volatile uint32_t demag_happened = 0;
 char maximum_throttle_change_ramp = 1;
 
 char crawler_mode = 0; // no longer used //
@@ -406,7 +413,7 @@ uint16_t low_pin_count = 0;
 uint8_t max_duty_cycle_change = 2;
 char fast_accel = 1;
 char fast_deccel = 0;
-uint16_t last_duty_cycle = 0;
+volatile uint16_t last_duty_cycle = 0;
 uint16_t duty_cycle_setpoint = 0;
 char play_tone_flag = 0;
 
@@ -806,8 +813,21 @@ void loadEEpromSettings()
             low_rpm_throttle_limit = 0;
         }
         low_rpm_level = motor_kv / 100 / (32 / eepromBuffer.motor_poles);
-        high_rpm_level = motor_kv / 12 / (32 / eepromBuffer.motor_poles);				
+        high_rpm_level = motor_kv / 12 / (32 / eepromBuffer.motor_poles);
     }
+#ifdef HAS_DEMAG_COMP
+    if (eepromBuffer.can.demag_compensation > 3) { // erased flash reads 0xff, default off
+        eepromBuffer.can.demag_compensation = 0;
+    }
+    demag_comp_level = eepromBuffer.can.demag_compensation;
+    if (eepromBuffer.can.active_demag > 1) { // erased flash reads 0xff, default off
+        eepromBuffer.can.active_demag = 0;
+    }
+    active_demag = eepromBuffer.can.active_demag && demag_comp_level; // needs the demag time measurement running
+#else
+    demag_comp_level = 0;
+    active_demag = 0;
+#endif
     reverse_speed_threshold = map(motor_kv, 300, 3000, 1000, 500);
     if (eepromBuffer.bi_direction){
       polling_mode_changeover = POLLING_MODE_THRESHOLD / 2;
