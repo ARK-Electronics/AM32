@@ -5263,6 +5263,16 @@
 #define COMP_PA0 0b1100001
 #define COMP_PA4 0b1000001
 #define COMP_PA5 0b1010001
+// PWM-synchronized comparator blanking (software; F051 COMP has no HW
+// blanking). TIM1 runs PWM1 mode up-counting, so the turn-off edge lands at
+// CNT=CCR and the turn-on edge at rollover CNT=0, each smeared by
+// DEAD_TIME(25) ticks of driver dead-time plus a fixed-duration switching
+// ring - hence fixed windows in TIM1 ticks (= CPU cycles at 48 MHz).
+#define COMP_PWM_BLANKING
+#define COMP_BLANK_ON_TICKS  64u  // TIM1 ticks (=CPU cycles, 48 MHz): DT(25)+ring+margin
+#define COMP_BLANK_OFF_LEAD  8u   // lead before CCR: CCR-preload/ramp staleness
+#define COMP_BLANK_OFF_LEN   72u  // LEAD + DT(25) + ring + margin
+#define COMP_BLANK_MAX_SPIN  24u  // hard iteration cap: progress guarantee
 #endif
 
 #ifdef  MCU_F031

@@ -420,6 +420,12 @@ char desync_check = 0;
 char low_kv_filter_level = 20;
 
 volatile uint16_t tim1_arr = TIM1_AUTORELOAD; // current auto reset value
+#ifdef COMP_PWM_BLANKING
+// Lower bound of the off-edge dirty window, TIM1 ticks. Published by the
+// 20 kHz routine; read by the comparator ISR. Single uint16_t: 16-bit
+// load/store is atomic on M0, so no pairing/masking is needed.
+volatile uint16_t comp_blank_off_lo = 0;
+#endif
 // Q16 fixed point scale factor equal to tim1_arr / 2000, recomputed in the main
 // loop when tim1_arr changes so the 20khz routine multiplies instead of divides
 volatile uint32_t pwm_to_arr_scale_q16 = ((uint32_t)TIM1_AUTORELOAD << 16) / 2000;
@@ -1572,6 +1578,15 @@ RAM_FUNC void tenKhzRoutine()
         last_duty_cycle = duty_cycle;
         SET_AUTO_RELOAD_PWM(tim1_arr);
         SET_DUTY_CYCLE_ALL(adjusted_duty_cycle);
+#ifdef COMP_PWM_BLANKING
+        // Publish the off-edge window lower bound for the comparator ISR.
+        // This is the single SET_DUTY_CYCLE_ALL that runs while the
+        // comparator can be active (all running/brake paths funnel through
+        // it); the other call sites run with phase interrupts masked
+        // (brushed mode, sine startup, disarm/stop paths).
+        comp_blank_off_lo = (adjusted_duty_cycle > COMP_BLANK_OFF_LEAD)
+            ? (uint16_t)(adjusted_duty_cycle - COMP_BLANK_OFF_LEAD) : 0u;
+#endif
     }
 #endif // ndef brushed_mode
 #if defined(FIXED_DUTY_MODE) || defined(FIXED_SPEED_MODE)

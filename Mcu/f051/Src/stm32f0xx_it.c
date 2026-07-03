@@ -185,6 +185,16 @@ void DMA1_Channel4_5_IRQHandler(void)
 #endif
 }
 
+#ifdef COMP_PWM_BLANKING
+// Dirty when near the PWM turn-on edge (rollover) or turn-off edge (CCR).
+// The unsigned-subtract idiom makes the CCR window one compare.
+static inline uint32_t compBlankDirty(uint16_t cnt, uint16_t lo)
+{
+    return (cnt < COMP_BLANK_ON_TICKS) ||
+           ((uint16_t)(cnt - lo) < COMP_BLANK_OFF_LEN);
+}
+#endif
+
 /**
  * @brief This function handles ADC and COMP interrupts (COMP interrupts
  * through EXTI lines 21 and 22).
@@ -194,8 +204,26 @@ RAM_FUNC void ADC1_COMP_IRQHandler(void)
   if (LL_EXTI_IsActiveFlag_0_31(LL_EXTI_LINE_21) != RESET) {
       if((INTERVAL_TIMER->CNT) > ((average_interval>>1))){
        EXTI->PR = EXTI_LINE;
+#ifdef COMP_PWM_BLANKING
+    // PWM-synchronized blanking: if this edge fired inside a dirty window
+    // around a PWM switching edge, spin (bounded) until TIM1 leaves the
+    // window, then let the confirm loop judge a clean signal. The edge is
+    // only ever DELAYED (<= COMP_BLANK_MAX_SPIN iterations, ~4.2 us), never
+    // discarded - a discarded true crossing may never re-trigger.
+    {
+        uint16_t lo = comp_blank_off_lo;       // one ldrh, atomic
+        uint16_t cnt = TIM1->CNT;
+        if (compBlankDirty(cnt, lo)) {         // rare path
+            for (uint32_t i = 0; i < COMP_BLANK_MAX_SPIN; i++) {
+                cnt = TIM1->CNT;
+                if (!compBlankDirty(cnt, lo))
+                    break;
+            }
+        }
+    }
+#endif
       interruptRoutine();
-  }else{ 
+  }else{
       if (getCompOutputLevel() == rising){
       EXTI->PR = EXTI_LINE;
   }
