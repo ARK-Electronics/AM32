@@ -827,6 +827,9 @@ void loadEEpromSettings()
 #ifdef HWCI_DEMAG_COMP
     demag_comp_level = HWCI_DEMAG_COMP; // bench build: force on without touching the eeprom
 #endif
+#ifdef HWCI_ACTIVE_DEMAG
+    active_demag = (demag_comp_level != 0); // bench build: active demag rides on demag comp
+#endif
 #else
     demag_comp_level = 0;
     active_demag = 0;
