@@ -824,6 +824,9 @@ void loadEEpromSettings()
         eepromBuffer.can.active_demag = 0;
     }
     active_demag = eepromBuffer.can.active_demag && demag_comp_level; // needs the demag time measurement running
+#ifdef HWCI_DEMAG_COMP
+    demag_comp_level = HWCI_DEMAG_COMP; // bench build: force on without touching the eeprom
+#endif
 #else
     demag_comp_level = 0;
     active_demag = 0;

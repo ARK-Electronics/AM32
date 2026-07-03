@@ -59,6 +59,14 @@ ifeq ($(HWCI_PERF),1)
 CFLAGS_COMMON += -DHWCI_PERF
 endif
 
+# Bench enablement for demag compensation (opt-in, off by default).
+# `make <TARGET> DEMAG_COMP=<1|2|3>` forces demag_comp_level at boot regardless
+# of the eeprom (byte 184 stays untouched, so a config-tool flash is not
+# needed between A/B runs). Production/release builds leave it unset.
+ifneq ($(DEMAG_COMP),)
+CFLAGS_COMMON += -DHWCI_DEMAG_COMP=$(DEMAG_COMP)
+endif
+
 # Linker options
 LDFLAGS_COMMON := -specs=nano.specs $(LIBS) -Wl,--gc-sections -Wl,--print-memory-usage
 
