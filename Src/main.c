@@ -1094,9 +1094,71 @@ RAM_FUNC void interruptRoutine()
 #endif
     SET_INTERVAL_TIMER_COUNT(0);
     SET_AND_ENABLE_COM_INT(waitTime+1); // enable COM_TIMER interrupt
+    if (demag_comp_level && (input > 400) && (commutation_interval > 100)) {
+        auto_blanking = 1; // next commutation watches for the demag release edge first
+    }
     __enable_irq();
     HWCI_PERF_ZC_PHASE_COMMIT(); // accepted edge: bin its PWM phase
 }
+
+#ifdef HAS_DEMAG_COMP
+/*
+ * @brief   Called by the comparator interrupt handler when the reversed
+ *          polarity edge fires while auto_blanking is armed. This is the
+ *          moment the freewheel diode stops clamping the floating phase;
+ *          the time from commutation to this edge is the demag time.
+ *          RAM_FUNC is mandatory: the caller is a RAM-resident ISR.
+ */
+RAM_FUNC void demagEdgeRoutine()
+{
+    uint16_t time_since_zc = INTERVAL_TIMER_COUNT;
+    auto_blanking = 0;
+    changeCompInput(); // polarity back to normal to catch the real zero cross
+    if (time_since_zc > waitTime) { // commutation happened at ~waitTime after the last zero cross
+        blanking_length = time_since_zc - waitTime;
+        if (blanking_length > average_interval) {
+            blanking_length = average_interval; // measurement can't be longer than a commutation
+        }
+        active_demag_ticks = blanking_length >> 1; // active freewheel for half the measured demag time
+        if (active_demag_ticks > (waitTime >> 1)) {
+            active_demag_ticks = waitTime >> 1; // fet always off well before the expected zero cross
+        }
+    } else { // edge fired before commutation: noise, measurement is invalid
+        blanking_length = 0;
+        active_demag_ticks = 0; // no stale active freewheel from a bad measurement
+    }
+    if (blanking_length > (average_interval >> 1)) { // demag ran past the expected zero cross point
+        demag_happened++;
+        allOff(); // power off until next commutation, winding current must decay
+        uint16_t dc = duty_cycle; // snapshot, ISRs can change duty_cycle between reads
+        uint16_t demag_cut;
+        switch (demag_comp_level) {
+        case 1:
+            demag_cut = dc - (dc >> 2); // cut 25 percent
+            break;
+        case 2:
+            demag_cut = dc >> 1; // cut 50 percent
+            break;
+        case 3:
+            demag_cut = dc >> 2; // cut 75 percent
+            break;
+        default:
+            demag_cut = dc; // no cut
+            break;
+        }
+        if (demag_cut < minimum_duty_cycle) {
+            demag_cut = minimum_duty_cycle;
+        }
+        last_duty_cycle = demag_cut;
+        duty_cycle = demag_cut;
+        // Re-entering interruptRoutine() is safe: auto_blanking is already
+        // cleared so the comparator re-arms with normal polarity, and the
+        // zero-cross confirm loop at its top guards against treating this
+        // demag edge as a false commutation.
+        interruptRoutine();
+    }
+}
+#endif
 
 void startMotor()
 {
@@ -1105,6 +1167,9 @@ void startMotor()
         commutation_interval = 10000;
         SET_INTERVAL_TIMER_COUNT(5000);
         running = 1;
+        auto_blanking = 0;
+        active_demag_fet_on = 0;
+        active_demag_ticks = 0;
     }
     enableCompInterrupts();
 }
@@ -2203,6 +2268,9 @@ if(zero_crosses < 5){
                     average_interval = 5000;
                 }
                 last_duty_cycle = min_startup_duty / 2;
+                auto_blanking = 0;
+                active_demag_fet_on = 0;
+                active_demag_ticks = 0;
             }
             desync_check = 0;
             //	}
@@ -2403,6 +2471,9 @@ if(zero_crosses < 5){
                 bemf_timeout_happened++;
 
                 maskPhaseInterrupts();
+                auto_blanking = 0;
+                active_demag_fet_on = 0;
+                active_demag_ticks = 0;
                 old_routine = 1;
                 if (input < 48) {
                     running = 0;
