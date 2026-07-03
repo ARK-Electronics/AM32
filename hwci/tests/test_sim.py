@@ -93,3 +93,21 @@ def test_perf_channel_carries_confirm_reject_counter():
     ratio = (b["zc_confirm_reject"] - a["zc_confirm_reject"]) / (
         b["zc_count"] - a["zc_count"])
     assert 0.001 < ratio < 0.05
+
+
+def test_perf_channel_carries_demag_fields():
+    # v4 struct: demag fields present, zero on a clean (non-demag-prone) run.
+    rig = RigSimulator(noise=0.0)
+    _settle(rig, 0.7)
+    r = perf.decode(rig.perf_bytes()).raw
+    assert r["demag_events"] == 0
+    assert r["blanking_len_last"] == 0
+    assert r["blanking_len_max"] == 0
+
+
+def test_demag_events_count_injected_desyncs():
+    rig = RigSimulator(params=MotorParams(demag_prone=True), noise=0.0)
+    _settle(rig, 0.1, n=50)
+    rig.step(0.005, 1.0)  # aggressive step into high current -> desync
+    r = perf.decode(rig.perf_bytes()).raw
+    assert r["demag_events"] == rig.desync_count == 1

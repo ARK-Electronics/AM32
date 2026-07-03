@@ -332,3 +332,32 @@ def test_confirm_rejects_none_for_v2_runs():
     )
     m = metricsmod.compute(RunResult(rows=rows), _profile())
     assert m["steady_points"][0]["confirm_rejects_per_zc"] is None
+
+def test_fw_demag_events_from_counter_delta():
+    # Firmware demag_happened is a monotonic u32 (struct v3+): the metric is
+    # the first-to-last snapshot delta, per steady tail and over the run.
+    n = 100
+    rows = _rows(n, perf_demag_events=lambda i: 3 + (2 if i >= 50 else 0))
+    m = metricsmod.compute(RunResult(rows=rows), _profile())
+    assert m["summary"]["fw_demag_events"] == 2
+    # the steady tail (last half of the segment) starts after the jump
+    assert m["steady_points"][0]["fw_demag_events"] == 0
+    # host-derived detection is untouched by the firmware counter
+    assert m["summary"]["demag_events"] == 0
+
+
+def test_fw_demag_events_none_for_pre_v3_runs():
+    # Runs captured on pre-v3 firmware have no perf_demag_events column: the
+    # metric must report None (unavailable), never 0.
+    rows = _rows(50, perf_loop_iters=lambda i: 1200 * i)
+    m = metricsmod.compute(RunResult(rows=rows), _profile())
+    assert m["summary"]["fw_demag_events"] is None
+    assert m["steady_points"][0]["fw_demag_events"] is None
+
+
+def test_fw_demag_events_survives_u32_wrap():
+    start = (1 << 32) - 1
+    rows = _rows(50, perf_demag_events=lambda i: (start + (1 if i >= 25 else 0))
+                 % (1 << 32))
+    m = metricsmod.compute(RunResult(rows=rows), _profile())
+    assert m["summary"]["fw_demag_events"] == 1

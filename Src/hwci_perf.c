@@ -42,6 +42,7 @@ void hwci_perf_reset_stats(void)
     hwci_perf.main_loop_us_max = 0;
     hwci_perf.commutation_interval_max = 0;
     hwci_perf.zc_jitter_max = 0;
+    hwci_perf.blanking_len_max = 0;
 }
 
 /*

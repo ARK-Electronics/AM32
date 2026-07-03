@@ -42,8 +42,9 @@
 #define HWCI_PERF_MAGIC   0x31435748u
 /* v2: appended the zero-cross jitter block (zc_*) after host_cmd.
  * v3: appended zc_confirm_reject after the v2 jitter block (host_cmd stays
- *     frozen at offset 60). */
-#define HWCI_PERF_VERSION 3u
+ *     frozen at offset 60).
+ * v4: appended the demag compensation block (demag_events, blanking_len_*). */
+#define HWCI_PERF_VERSION 4u
 
 /* Commands the host may write to hwci_perf.host_cmd (cleared by firmware). */
 #define HWCI_CMD_NONE          0u
@@ -113,7 +114,16 @@ typedef struct hwci_perf_s {
      * rejected-edges-per-accepted-commutation ratio - the live monitor for
      * the F051 glitch-tolerant confirm loop's reject mechanism. */
     uint32_t zc_confirm_reject;        /* off 80 : confirm-loop early-outs  */
-} hwci_perf_t;                         /* total size: 84 bytes              */
+
+    /* --- v4: demag compensation stats (fed from the main-loop snapshot
+     * path, zero ISR cost). demag_events mirrors main.c's monotonic
+     * demag_happened counter; blanking_len_* mirror the measured demag time
+     * (INTERVAL_TIMER ticks) from demagEdgeRoutine(). Appended after the v3
+     * block so host_cmd stays frozen at offset 60. */
+    uint32_t demag_events;             /* off 84 : demag_happened mirror    */
+    uint16_t blanking_len_last;        /* off 88 : last measured demag time */
+    uint16_t blanking_len_max;         /* off 90 : worst measured demag time*/
+} hwci_perf_t;                         /* total size: 92 bytes              */
 
 extern volatile hwci_perf_t hwci_perf;
 
@@ -257,6 +267,13 @@ void hwci_perf_reset_stats(void);
             hwci_perf.running = (uint8_t)running;                              \
             hwci_perf.zero_cross_count = zero_crosses;                         \
             hwci_perf.commutation_interval = _ci;                              \
+            {                                                                  \
+                uint16_t _bl = blanking_length; /* cache the ISR-written u16 */\
+                hwci_perf.demag_events = demag_happened;                       \
+                hwci_perf.blanking_len_last = _bl;                             \
+                if (_bl > hwci_perf.blanking_len_max)                          \
+                    hwci_perf.blanking_len_max = _bl;                          \
+            }                                                                  \
             if (_ci > hwci_perf.commutation_interval_max)                      \
                 hwci_perf.commutation_interval_max = _ci;                      \
             if (_armed && !_hwci_prev_armed)                                   \

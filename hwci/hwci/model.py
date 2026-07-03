@@ -36,6 +36,9 @@ COLUMNS = [
     "perf_zc_jitter_max",
     # confirm-loop rejection counter (struct v3+; blank on older firmware)
     "perf_zc_confirm_reject",
+    # demag compensation stats (struct v4+; blank when the flashed firmware
+    # predates them - metrics treat blank as "metric unavailable")
+    "perf_demag_events", "perf_blanking_len_last", "perf_blanking_len_max",
     "perf_bemf_timeout", "perf_e_rpm",
     # ESC input/arming state (proves the ESC decoded the throttle protocol)
     "perf_input", "perf_armed", "perf_running",
@@ -101,6 +104,12 @@ def make_row(t: float, segment: str, throttle_cmd: float,
             )
         if "zc_confirm_reject" in r:  # struct v3+
             row.update(perf_zc_confirm_reject=r["zc_confirm_reject"])
+        if "demag_events" in r:  # struct v4+
+            row.update(
+                perf_demag_events=r["demag_events"],
+                perf_blanking_len_last=r["blanking_len_last"],
+                perf_blanking_len_max=r["blanking_len_max"],
+            )
     return row
 
 

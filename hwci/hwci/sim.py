@@ -69,6 +69,13 @@ class RigSimulator:
         self.zc_jitter_max = 0
         # confirm-loop rejection counter (perf struct v3)
         self.zc_confirm_reject = 0
+        # demag compensation stats (perf struct v4). The sim maps each injected
+        # desync to one firmware-counted demag event; blanking_len_* stay 0
+        # (the sim has no demag-time model - 0 is what real firmware reports
+        # with demag compensation disabled).
+        self.demag_events = 0
+        self.blanking_len_last = 0
+        self.blanking_len_max = 0
 
     # --- model -------------------------------------------------------
     def _rpm_max(self) -> float:
@@ -89,6 +96,7 @@ class RigSimulator:
                 and provisional_current > p.demag_current_a):
             self.desync_remaining = p.desync_ticks
             self.desync_count += 1
+            self.demag_events = (self.demag_events + 1) & 0xFFFFFFFF
 
         if self.desync_remaining > 0:
             # Loss of sync: rotor falls back, electrical drive flails.
@@ -237,4 +245,7 @@ class RigSimulator:
             "zc_interval_sum": self.zc_interval_sum,
             "zc_jitter_max": self.zc_jitter_max,
             "zc_confirm_reject": self.zc_confirm_reject,
+            "demag_events": self.demag_events,
+            "blanking_len_last": self.blanking_len_last,
+            "blanking_len_max": self.blanking_len_max,
         })

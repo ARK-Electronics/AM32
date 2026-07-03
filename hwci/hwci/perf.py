@@ -22,7 +22,7 @@ from dataclasses import dataclass
 
 # ASCII "HWC1" little-endian == 0x31435748
 MAGIC = 0x31435748
-VERSION = 3
+VERSION = 4
 
 # (name, struct_code).  Order and codes must match Inc/hwci_perf.h exactly.
 # Pad fields are decoded then dropped from the public dict.
@@ -70,10 +70,19 @@ FIELDS_V3: list[tuple[str, str]] = FIELDS_V2 + [
     ("zc_confirm_reject", "I"),
 ]
 
-FIELDS = FIELDS_V3
+# v4 appends the demag compensation block (demag_events mirrors the firmware's
+# monotonic demag_happened counter; blanking_len_* mirror the measured demag
+# time from demagEdgeRoutine, in INTERVAL_TIMER ticks).
+FIELDS_V4: list[tuple[str, str]] = FIELDS_V3 + [
+    ("demag_events", "I"),
+    ("blanking_len_last", "H"),
+    ("blanking_len_max", "H"),
+]
+
+FIELDS: list[tuple[str, str]] = FIELDS_V4  # canonical == newest
 
 FIELDS_BY_VERSION: dict[int, list[tuple[str, str]]] = {
-    1: FIELDS_V1, 2: FIELDS_V2, 3: FIELDS_V3}
+    1: FIELDS_V1, 2: FIELDS_V2, 3: FIELDS_V3, 4: FIELDS_V4}
 
 
 def _format(fields: list[tuple[str, str]]) -> str:
@@ -84,7 +93,7 @@ _FORMAT_BY_VERSION = {v: _format(f) for v, f in FIELDS_BY_VERSION.items()}
 SIZE_BY_VERSION = {v: struct.calcsize(fmt) for v, fmt in _FORMAT_BY_VERSION.items()}
 
 _FORMAT = _FORMAT_BY_VERSION[VERSION]
-SIZE = SIZE_BY_VERSION[VERSION]  # 84 bytes (v2: 80, v1: 64)
+SIZE = SIZE_BY_VERSION[VERSION]  # 92 bytes (v3: 84, v2: 80, v1: 64)
 _NAMES = [name for name, _ in FIELDS]
 
 # magic + version + size header, enough to pick the right layout for the rest.
@@ -114,7 +123,8 @@ class PerfSample:
     """One decoded snapshot of the firmware instrumentation struct.
 
     ``raw`` holds only the fields the sampled firmware actually has: a v1
-    sample has no ``zc_*`` keys. Downstream consumers use ``raw.get()``.
+    sample has no ``zc_*`` keys, and pre-v3 samples have no ``demag_events``
+    or ``blanking_len_*`` keys. Downstream consumers use ``raw.get()``.
     """
 
     raw: dict
