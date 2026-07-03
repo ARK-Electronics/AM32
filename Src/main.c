@@ -2398,7 +2398,13 @@ if(zero_crosses < 5){
                 }
             }
 #endif
-            if (INTERVAL_TIMER_COUNT > 45000 && running == 1) {
+            uint32_t interval_threshold;
+            if (zero_crosses > 50) { // running steadily: a missing zero cross shows up
+                interval_threshold = average_interval * 4; // within a few commutations
+            } else {
+                interval_threshold = 45000; // starting: keep the long fixed timeout
+            }
+            if (INTERVAL_TIMER_COUNT > interval_threshold && running == 1) {
                 bemf_timeout_happened++;
 
                 maskPhaseInterrupts();
