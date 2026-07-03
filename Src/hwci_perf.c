@@ -42,6 +42,10 @@ void hwci_perf_reset_stats(void)
     hwci_perf.main_loop_us_max = 0;
     hwci_perf.commutation_interval_max = 0;
     hwci_perf.zc_jitter_max = 0;
+    /* zc_count/zc_*_sum and the v3 zc_blank_engaged/zc_confirm_reject
+     * counters are monotonic by contract (the host differences snapshots),
+     * so they are deliberately NOT reset here; they start at 0 from the
+     * static initializer like every other unlisted field. */
 }
 
 /*

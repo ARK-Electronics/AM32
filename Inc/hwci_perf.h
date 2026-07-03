@@ -40,8 +40,10 @@
 /* ASCII "HWC1" in little-endian memory order - lets the host locate/validate
  * the struct either by ELF symbol or by scanning RAM for the magic. */
 #define HWCI_PERF_MAGIC   0x31435748u
-/* v2: appended the zero-cross jitter block (zc_*) after host_cmd. */
-#define HWCI_PERF_VERSION 2u
+/* v2: appended the zero-cross jitter block (zc_*) after host_cmd.
+ * v3: appended the PWM-blanking / confirm-reject counters after the v2
+ *     jitter block (host_cmd stays frozen at offset 60). */
+#define HWCI_PERF_VERSION 3u
 
 /* Commands the host may write to hwci_perf.host_cmd (cleared by firmware). */
 #define HWCI_CMD_NONE          0u
@@ -104,7 +106,14 @@ typedef struct hwci_perf_s {
     uint32_t zc_interval_sum;          /* off 72 : sum raw interval, ticks  */
     uint16_t zc_jitter_max;            /* off 76 : worst single deviation   */
     uint16_t _pad2;                    /* off 78 : keep sizeof 4-aligned    */
-} hwci_perf_t;                         /* total size: 80 bytes              */
+
+    /* --- v3: comparator-ISR gate counters (monotonic; host differences
+     * consecutive snapshots like zc_count). zc_blank_engaged counts accepted
+     * comparator edges that landed inside a PWM-blanking dirty window (see
+     * COMP_PWM_BLANKING); zc_confirm_reject counts confirm-loop early-outs. */
+    uint32_t zc_blank_engaged;         /* off 80 : blanking spin-waits      */
+    uint32_t zc_confirm_reject;        /* off 84 : confirm-loop rejections  */
+} hwci_perf_t;                         /* total size: 88 bytes              */
 
 extern volatile hwci_perf_t hwci_perf;
 
@@ -192,6 +201,16 @@ void hwci_perf_reset_stats(void);
     } while (0)
 
 /*
+ * Comparator-ISR gate counters. BLANK_ENGAGED fires when an accepted edge
+ * lands inside a PWM-blanking dirty window (the rare path of the
+ * COMP_PWM_BLANKING gate); CONFIRM_REJECT fires on the zero-cross confirm
+ * loop's early-out reject. Both run in the comparator ISR: a single volatile
+ * u32 increment each, on paths that are already off the hot quiet path.
+ */
+#define HWCI_PERF_BLANK_ENGAGED()  do { hwci_perf.zc_blank_engaged++; } while (0)
+#define HWCI_PERF_CONFIRM_REJECT() do { hwci_perf.zc_confirm_reject++; } while (0)
+
+/*
  * Background-loop instrumentation. Call once at the top of the main while(1).
  *
  * Every iteration: measures iteration time and counts iterations (the host
@@ -252,10 +271,12 @@ void hwci_perf_reset_stats(void);
 
 #else /* !HWCI_PERF - all hooks vanish, no struct, no code */
 
-#define HWCI_PERF_CTRL_ENTER() do {} while (0)
-#define HWCI_PERF_CTRL_EXIT()  do {} while (0)
-#define HWCI_PERF_ZC()         do {} while (0)
-#define HWCI_PERF_MAIN_LOOP()  do {} while (0)
+#define HWCI_PERF_CTRL_ENTER()     do {} while (0)
+#define HWCI_PERF_CTRL_EXIT()      do {} while (0)
+#define HWCI_PERF_ZC()             do {} while (0)
+#define HWCI_PERF_MAIN_LOOP()      do {} while (0)
+#define HWCI_PERF_BLANK_ENGAGED()  do {} while (0)
+#define HWCI_PERF_CONFIRM_REJECT() do {} while (0)
 
 #endif /* HWCI_PERF */
 

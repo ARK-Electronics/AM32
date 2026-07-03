@@ -67,6 +67,9 @@ class RigSimulator:
         self.zc_jitter_sum = 0
         self.zc_interval_sum = 0
         self.zc_jitter_max = 0
+        # comparator-ISR gate counters (perf struct v3)
+        self.zc_blank_engaged = 0
+        self.zc_confirm_reject = 0
 
     # --- model -------------------------------------------------------
     def _rpm_max(self) -> float:
@@ -115,6 +118,15 @@ class RigSimulator:
             self.zc_jitter_sum = (self.zc_jitter_sum + dev * n_comm) & 0xFFFFFFFF
             self.zc_interval_sum = (self.zc_interval_sum + interval * n_comm) & 0xFFFFFFFF
             self.zc_jitter_max = min(max(self.zc_jitter_max, dev), 0xFFFF)
+            # v3 gate counters: a healthy ~10-20% of accepted edges land in a
+            # PWM switching dirty window and spin; confirm-loop rejects stay
+            # rare in clean running and balloon during a desync
+            blank_frac = self._rng.uniform(0.10, 0.20)
+            self.zc_blank_engaged = (self.zc_blank_engaged
+                                     + int(n_comm * blank_frac)) & 0xFFFFFFFF
+            reject_frac = 0.2 if self.desync_remaining > 0 else 0.01
+            self.zc_confirm_reject = (self.zc_confirm_reject
+                                      + int(n_comm * reject_frac)) & 0xFFFFFFFF
         # idle loop iterations: ~120 kHz when idle, dropping with motor load
         idle_hz = 120000.0 * (1.0 - 0.25 * throttle)
         self.loop_iters += int(idle_hz * dt)
@@ -228,4 +240,6 @@ class RigSimulator:
             "zc_jitter_sum": self.zc_jitter_sum,
             "zc_interval_sum": self.zc_interval_sum,
             "zc_jitter_max": self.zc_jitter_max,
+            "zc_blank_engaged": self.zc_blank_engaged,
+            "zc_confirm_reject": self.zc_confirm_reject,
         })

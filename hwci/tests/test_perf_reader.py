@@ -87,6 +87,24 @@ def test_v1_firmware_reads_and_resets(host_perf_elf_v1):
     assert int.from_bytes(word, "little") == perf.CMD_RESET_STATS
 
 
+def test_v2_firmware_reads_and_resets(host_perf_elf_v2):
+    # v2-vintage firmware (80-byte struct, zc jitter block but no v3 gate
+    # counters): the reader must size its SWD read from the ELF, pass the
+    # DWARF cross-check against the v2 canonical table, decode without the
+    # v3 keys, and land RESET_STATS at the version-stable offset 60.
+    reader, dbg = _reader_with_mock(host_perf_elf_v2)
+    assert reader._read_size == perf.SIZE_BY_VERSION[2]
+    dbg.poke(reader.address, perf.encode(
+        {"zc_count": 777, "loop_iters": 31337}, version=2))
+    sample = reader.read()
+    assert sample.raw["zc_count"] == 777
+    assert sample.loop_iters == 31337
+    assert "zc_blank_engaged" not in sample.raw
+    reader.reset_stats(verify=False)
+    word = dbg.read_memory(reader.address + perf.HOST_CMD_OFFSET, 4)
+    assert int.from_bytes(word, "little") == perf.CMD_RESET_STATS
+
+
 def test_missing_struct_die_fails_hard(host_perf_elf, monkeypatch):
     # DWARF present but the struct tag gone (rename/LTO): decoding on faith is
     # exactly the drift the cross-check exists to catch -> must raise.

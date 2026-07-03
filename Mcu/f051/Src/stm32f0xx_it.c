@@ -27,6 +27,7 @@
 #include "ADC.h"
 #include "targets.h"
 #include "common.h"
+#include "hwci_perf.h" // no-op macros unless built with HWCI_PERF
 
 extern void transfercomplete();
 extern void PeriodElapsedCallback();
@@ -214,6 +215,7 @@ RAM_FUNC void ADC1_COMP_IRQHandler(void)
         uint16_t lo = comp_blank_off_lo;       // one ldrh, atomic
         uint16_t cnt = TIM1->CNT;
         if (compBlankDirty(cnt, lo)) {         // rare path
+            HWCI_PERF_BLANK_ENGAGED();
             for (uint32_t i = 0; i < COMP_BLANK_MAX_SPIN; i++) {
                 cnt = TIM1->CNT;
                 if (!compBlankDirty(cnt, lo))

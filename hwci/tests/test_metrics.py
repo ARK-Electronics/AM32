@@ -187,6 +187,66 @@ def test_zc_jitter_none_for_v1_runs():
     assert m["summary"]["worst_zc_jitter_pct"] is None
 
 
+def test_blank_engaged_per_zc_from_accumulator_deltas():
+    # 100 commutations per tick, 15 of them blanking-engaged -> ratio 0.15
+    # from first/last snapshot deltas over the steady tail.
+    n = 100
+    rows = _rows(
+        n,
+        perf_zc_count=lambda i: 100 * i,
+        perf_zc_jitter_sum=lambda i: 2 * 100 * i,
+        perf_zc_interval_sum=lambda i: 200 * 100 * i,
+        perf_zc_jitter_max=lambda i: 9,
+        perf_zc_blank_engaged=lambda i: 15 * i,
+    )
+    m = metricsmod.compute(RunResult(rows=rows), _profile())
+    assert m["steady_points"][0]["blank_engaged_per_zc"] == 0.15
+
+
+def test_blank_engaged_per_zc_survives_u32_wrap():
+    # blank_engaged wraps u32 mid-window; modular differencing must keep the
+    # ratio exact (same wrap-safety contract as zc_jitter_window).
+    n = 100
+    start = (1 << 32) - 15 * 50  # wraps halfway through the run
+    rows = _rows(
+        n,
+        perf_zc_count=lambda i: 100 * i,
+        perf_zc_blank_engaged=lambda i: (start + 15 * i) % (1 << 32),
+    )
+    m = metricsmod.compute(RunResult(rows=rows), _profile())
+    assert m["steady_points"][0]["blank_engaged_per_zc"] == 0.15
+
+
+def test_blank_engaged_none_for_pre_v3_runs():
+    # Runs captured on pre-v3 firmware have no blank_engaged column: the
+    # metric must report None (unavailable), never 0 (which would read as
+    # "gate never engages" - a real, alarming condition).
+    n = 50
+    rows = _rows(
+        n,
+        perf_zc_count=lambda i: 100 * i,
+        perf_zc_jitter_sum=lambda i: 2 * 100 * i,
+        perf_zc_interval_sum=lambda i: 200 * 100 * i,
+        perf_zc_jitter_max=lambda i: 9,
+    )
+    m = metricsmod.compute(RunResult(rows=rows), _profile())
+    pt = m["steady_points"][0]
+    assert pt["zc_jitter_pct"] == 1.0       # v2 metrics still computed
+    assert pt["blank_engaged_per_zc"] is None
+
+
+def test_blank_engaged_none_when_no_commutations_accumulate():
+    # Counters present but frozen (motor stopped): no window delta, so the
+    # ratio is unavailable rather than 0/0 noise.
+    rows = _rows(
+        50,
+        perf_zc_count=lambda i: 5000,
+        perf_zc_blank_engaged=lambda i: 750,
+    )
+    m = metricsmod.compute(RunResult(rows=rows), _profile())
+    assert m["steady_points"][0]["blank_engaged_per_zc"] is None
+
+
 def test_zc_jitter_none_when_no_commutations_accumulate():
     # Counters present but frozen (motor stopped / startup-gated): no window
     # delta, so the metric is unavailable rather than 0/0 noise.

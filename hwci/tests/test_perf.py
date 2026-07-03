@@ -8,7 +8,8 @@ from hwci import perf
 
 def test_layout_sizes():
     assert perf.SIZE_BY_VERSION[1] == 64
-    assert perf.SIZE == perf.SIZE_BY_VERSION[2] == 80
+    assert perf.SIZE_BY_VERSION[2] == 80
+    assert perf.SIZE == perf.SIZE_BY_VERSION[3] == 88
 
 
 def test_host_cmd_offset_matches_layout():
@@ -58,6 +59,30 @@ def test_roundtrip_zc_jitter_fields():
     assert r["zc_jitter_max"] == 41
 
 
+def test_roundtrip_v3_gate_counters():
+    blob = perf.encode({
+        "zc_blank_engaged": 123456,
+        "zc_confirm_reject": 4200000000,   # near the u32 limit
+    })
+    assert len(blob) == 88
+    r = perf.decode(blob).raw
+    assert r["zc_blank_engaged"] == 123456
+    assert r["zc_confirm_reject"] == 4200000000
+
+
+def test_v2_roundtrip_has_no_v3_keys():
+    # v2-vintage firmware (B side of an A/B session) reports an 80-byte
+    # struct: it must decode cleanly, keep the zc jitter block, and simply
+    # not carry the v3 gate counters.
+    blob = perf.encode({"zc_count": 99, "zc_jitter_max": 7}, version=2)
+    assert len(blob) == perf.SIZE_BY_VERSION[2]
+    s = perf.decode(blob)
+    assert s.raw["zc_count"] == 99
+    assert s.raw["zc_jitter_max"] == 7
+    assert "zc_blank_engaged" not in s.raw
+    assert "zc_confirm_reject" not in s.raw
+
+
 def test_v1_roundtrip_has_no_zc_keys():
     # Old firmware (A side of an A/B session) reports a 64-byte v1 struct;
     # it must decode cleanly and simply not carry the jitter fields.
@@ -70,7 +95,7 @@ def test_v1_roundtrip_has_no_zc_keys():
 
 
 def test_v1_decodes_from_oversized_read():
-    # PerfReader sizes its read from the ELF symbol, but a v2-sized buffer
+    # PerfReader sizes its read from the ELF symbol, but a v3-sized buffer
     # holding a v1 struct (plus trailing junk) must still decode as v1.
     blob = perf.encode({"loop_iters": 7}, version=1) + b"\xa5" * 16
     s = perf.decode(blob)

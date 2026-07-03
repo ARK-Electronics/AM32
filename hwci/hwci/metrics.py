@@ -157,6 +157,31 @@ def zc_jitter_window(count: np.ndarray, jsum: np.ndarray, isum: np.ndarray,
     return out
 
 
+def blank_engaged_window(blank: np.ndarray, count: np.ndarray,
+                         idx: np.ndarray) -> float | None:
+    """PWM-blanking engagement ratio over the sample window ``idx``.
+
+    ``delta(zc_blank_engaged) / delta(zc_count)`` between the first and last
+    valid snapshot (both monotonic u32 counters, differenced wrap-safe like
+    :func:`zc_jitter_window`): the fraction of accepted comparator edges that
+    landed inside a PWM switching dirty window and spun. Report-only sanity
+    signal for COMP_PWM_BLANKING - healthy runs sit around 0.05-0.3; 0 means
+    the gate never engages (windows missing the noise), ~1.0 means the
+    windows are miscomputed and everything reads dirty. ``None`` when the
+    firmware predates struct v3 or nothing accumulated in the window.
+    """
+    if idx.size == 0:
+        return None
+    valid = idx[~np.isnan(blank[idx]) & ~np.isnan(count[idx])]
+    if valid.size < 2:
+        return None
+    a, b = valid[0], valid[-1]
+    n = _wrap32(count[a], count[b])
+    if n <= 0:
+        return None
+    return round(_wrap32(blank[a], blank[b]) / n, 4)
+
+
 def compute(run: RunResult, profile: Profile) -> dict:
     rows = run.rows
     seg = np.array([r.get("segment") for r in rows], dtype=object)
@@ -180,6 +205,7 @@ def compute(run: RunResult, profile: Profile) -> dict:
     zc_jsum = _col(rows, "perf_zc_jitter_sum")
     zc_isum = _col(rows, "perf_zc_interval_sum")
     zc_jmax = _col(rows, "perf_zc_jitter_max")
+    zc_blank = _col(rows, "perf_zc_blank_engaged")
 
     steady_points = []
     for s in profile.segments:
@@ -208,6 +234,8 @@ def compute(run: RunResult, profile: Profile) -> dict:
             # bench has repeat captures establishing its run-to-run spread)
             "zc_jitter_pct": jitter["mean_pct"],
             "zc_jitter_max_pct": jitter["max_pct"],
+            # PWM-blanking engagement ratio (report-only, struct v3+)
+            "blank_engaged_per_zc": blank_engaged_window(zc_blank, zc_count, tail),
         })
 
     demag = detect_demag(run, profile)

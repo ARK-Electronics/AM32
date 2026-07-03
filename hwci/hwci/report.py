@@ -43,7 +43,7 @@ def render_markdown(metrics: dict, comparison: dict | None = None,
         cols = ["segment", "throttle", "rpm", "thrust_gf", "current_a",
                 "voltage_v", "elec_power_w", "eff_gf_per_w",
                 "ctrl_exec_us_max", "cpu_load_pct",
-                "zc_jitter_pct", "zc_jitter_max_pct"]
+                "zc_jitter_pct", "zc_jitter_max_pct", "blank_engaged_per_zc"]
         out.append("| " + " | ".join(cols) + " |")
         out.append("|" + "---|" * len(cols))
         for p in pts:
