@@ -300,7 +300,7 @@ def compute(run: RunResult, profile: Profile) -> dict:
             "zc_jitter_max_pct": jitter["max_pct"],
             # rejected edges per accepted zero-cross (report-only, v3+)
             "confirm_rejects_per_zc": counter_per_zc(zc_reject, zc_count, tail),
-            # firmware-counted demag events in this steady tail (struct v4+,
+            # firmware-counted demag events in this steady tail (struct v5+,
             # monotonic demag_happened mirror). A NEW key alongside the
             # host-derived detection so old baselines stay comparable.
             "fw_demag_events": fw_counter_delta(fw_demag, tail),
