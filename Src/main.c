@@ -249,7 +249,7 @@ an settings option)
 #include "DroneCAN/DroneCAN.h"
 #endif
 
-#include <version.h>
+#include "version.h"
 
 void zcfoundroutine(void);
 
@@ -1837,6 +1837,10 @@ void runBrushedLoop()
  */
 static void checkDeviceInfo(void)
 {
+#ifdef MCU_SITL
+    // no bootloader device info page in SITL
+    return;
+#endif
 #ifdef NXP
     uint32_t pflashBlockBase  = 0U;
     uint32_t pflashTotalSize  = 0U;
