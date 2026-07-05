@@ -353,6 +353,19 @@
 #define MILLIVOLT_PER_AMP 9
 #endif
 ///
+#ifdef AM32_SITL_CAN
+#define FIRMWARE_NAME "AM32 SITL"
+#define FILE_NAME "AM32_SITL_CAN"
+#define DRONECAN_SUPPORT 1
+#define DRONECAN_NODE_NAME "org.am32.sitl"
+#define DEAD_TIME 80
+#define HARDWARE_GROUP_SITL_A
+#define TARGET_STALL_PROTECTION_INTERVAL 20000
+#define TARGET_VOLTAGE_DIVIDER 110
+#define MILLIVOLT_PER_AMP 20
+#define CURRENT_OFFSET 0
+#endif
+
 #ifdef REF_G431
 #define FIRMWARE_NAME "Ref G431"
 #define FILE_NAME "REF_G431"
@@ -4065,6 +4078,12 @@
 
 #endif
 
+#ifdef HARDWARE_GROUP_SITL_A
+
+#define MCU_SITL
+
+#endif
+
 #ifdef HARDWARE_GROUP_G4_A
 
 #define MCU_G431
@@ -5561,6 +5580,30 @@
   #define COMPARATOR_IRQ   EXTI2_IRQn
 #endif
 
+#endif
+
+#ifdef MCU_SITL
+// software in the loop simulation, emulating a G431 class MCU with the
+// hardware replaced by a motor/battery simulation. See Mcu/SITL
+#define STMICRO
+#define CPU_FREQUENCY_MHZ 160
+#ifndef EEPROM_START_ADD
+#define EEPROM_START_ADD (uint32_t)0x0800F800
+#endif
+#define INTERVAL_TIMER TIM2
+#define TEN_KHZ_TIMER TIM6
+#define UTILITY_TIMER TIM17
+#define COM_TIMER TIM16
+#define APPLICATION_ADDRESS 0x08001000
+#define TARGET_MIN_BEMF_COUNTS 3
+#define COMPARATOR_IRQ SITL_IRQ_COMP
+#define COM_TIMER_IRQ SITL_IRQ_COM
+#define IC_DMA_IRQ_NAME SITL_IRQ_DMA
+#define USE_ADC
+#define DSHOT_PRIORITY_THRESHOLD 60
+// the SITL harness provides the real main(), the firmware main() is
+// started by the harness under this name
+#define main am32_main
 #endif
 
 #ifndef LOOP_FREQUENCY_HZ
