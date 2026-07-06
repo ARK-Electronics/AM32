@@ -51,7 +51,16 @@ void maskPhaseInterrupts()
     EXTI->PR1 = LL_EXTI_LINE_21;
 }
 
-void enableCompInterrupts() { EXTI->IMR1 |= current_EXTI_LINE; }
+void enableCompInterrupts()
+{
+    // discard any edge latched while masked so the first edge after unmask is
+    // genuine (the demag release edge branch in the ISR has no interval/confirm
+    // gate); clear both comparator lines so a stale flag on the non-current
+    // line cannot be consumed by the two-line ISR dispatch
+    EXTI->PR1 = LL_EXTI_LINE_22;
+    EXTI->PR1 = LL_EXTI_LINE_21;
+    EXTI->IMR1 |= current_EXTI_LINE;
+}
 
 void changeCompInput()
 {
