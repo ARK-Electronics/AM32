@@ -222,6 +222,7 @@ def compute(run: RunResult, profile: Profile) -> dict:
     zc_jmax = _col(rows, "perf_zc_jitter_max")
     zc_reject = _col(rows, "perf_zc_confirm_reject")
     fw_demag = _col(rows, "perf_demag_events")
+    fw_interlock = _col(rows, "perf_interlock_skips")
 
     steady_points = []
     for s in profile.segments:
@@ -297,6 +298,11 @@ def compute(run: RunResult, profile: Profile) -> dict:
         # baselines stay comparable.
         "fw_demag_events": fw_counter_delta(
             fw_demag, np.arange(len(rows))),
+        # Active-demag interlock vetoes over the whole run (struct v5+, None
+        # on older firmware). ~0 healthy; ~= total commutations means the
+        # step/rising -> fet mapping is wrong - abort active-demag benching.
+        "fw_interlock_skips": fw_counter_delta(
+            fw_interlock, np.arange(len(rows))),
         "bemf_timeout_samples": demag["bemf_timeout_samples"],
         # start-attempt outcomes; None/0 unless the profile has start* segments
         "start_attempts": starts["attempts"] or None,

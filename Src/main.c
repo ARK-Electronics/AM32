@@ -376,6 +376,7 @@ volatile uint8_t auto_blanking = 0; // comparator armed for the demag release ed
 uint8_t active_demag = 0; // circulate demag current through the fet instead of the body diode
 volatile uint8_t active_demag_fet_on = 0;
 volatile uint16_t active_demag_ticks = 0; // fet on time, half of last measured demag time
+volatile uint32_t active_demag_interlock_skips = 0; // freewheels vetoed by the comparator interlock
 volatile uint32_t demag_happened = 0;
 char maximum_throttle_change_ramp = 1;
 
@@ -973,15 +974,29 @@ RAM_FUNC void PeriodElapsedCallback()
     HWCI_PERF_ZC(); // active demag scheduling stays after this so jitter metrics are unaffected
 #ifdef HAS_PHASE_HIGH
     if (active_demag && auto_blanking && running && (active_demag_ticks > 3)) {
-        // The previously conducting fet has been off since comStep() at the top
-        // of commutate(), several microseconds ago, so no cross conduction here.
-        uint16_t t = active_demag_ticks;
-        if (t > (waitTime >> 1)) {
-            t = waitTime >> 1; // re-cap: waitTime may have shrunk since the measurement
+        // Interlock: during demag the floating phase is diode-clamped to the
+        // far rail, which the comparator reads as the post-cross level
+        // (!rising - see the reversed-polarity demag-edge arm). Reading the
+        // pre-cross level here means either the step/rising -> fet mapping is
+        // wrong for this hardware/direction (energizing that fet would fight
+        // the conducting diode with an uncontrolled VBAT/L current ramp) or
+        // demag has already released (the fet would short the bemf). Both
+        // veto the freewheel for this step; the counter makes a systematic
+        // mapping fault visible on the bench as skips ~= commutations.
+        if (getCompOutputLevel() == (uint8_t)rising) {
+            active_demag_interlock_skips++;
+        } else {
+            // The previously conducting fet has been off since comStep() at the
+            // top of commutate(), several microseconds ago, so no cross
+            // conduction here.
+            uint16_t t = active_demag_ticks;
+            if (t > (waitTime >> 1)) {
+                t = waitTime >> 1; // re-cap: waitTime may have shrunk since the measurement
+            }
+            activeDemagFetOn();
+            active_demag_fet_on = 1;
+            SET_AND_ENABLE_COM_INT(t); // schedule the fet off event
         }
-        activeDemagFetOn();
-        active_demag_fet_on = 1;
-        SET_AND_ENABLE_COM_INT(t); // schedule the fet off event
     }
 #endif
 }

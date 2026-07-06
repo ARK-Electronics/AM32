@@ -361,3 +361,16 @@ def test_fw_demag_events_survives_u32_wrap():
                  % (1 << 32))
     m = metricsmod.compute(RunResult(rows=rows), _profile())
     assert m["summary"]["fw_demag_events"] == 1
+
+
+def test_fw_interlock_skips_from_counter_delta():
+    # v5 interlock veto counter: whole-run first-to-last delta in the summary.
+    rows = _rows(100, perf_interlock_skips=lambda i: 1 + (5 if i >= 80 else 0))
+    m = metricsmod.compute(RunResult(rows=rows), _profile())
+    assert m["summary"]["fw_interlock_skips"] == 5
+
+
+def test_fw_interlock_skips_none_for_pre_v5_runs():
+    rows = _rows(50, perf_loop_iters=lambda i: 1200 * i)
+    m = metricsmod.compute(RunResult(rows=rows), _profile())
+    assert m["summary"]["fw_interlock_skips"] is None
