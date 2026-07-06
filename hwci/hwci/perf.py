@@ -22,7 +22,7 @@ from dataclasses import dataclass
 
 # ASCII "HWC1" little-endian == 0x31435748
 MAGIC = 0x31435748
-VERSION = 5
+VERSION = 6
 
 # (name, struct_code).  Order and codes must match Inc/hwci_perf.h exactly.
 # Pad fields are decoded then dropped from the public dict.
@@ -86,10 +86,18 @@ FIELDS_V5: list[tuple[str, str]] = FIELDS_V4 + [
     ("blanking_len_max", "H"),
 ]
 
-FIELDS = FIELDS_V5  # canonical == newest
+# v6 appends the active-demag comparator-interlock veto counter (monotonic;
+# freewheel turn-ons skipped because the floating phase did not read as
+# diode-clamped - the mapping-fault detector for active demag).
+FIELDS_V6: list[tuple[str, str]] = FIELDS_V5 + [
+    ("active_demag_interlock_skips", "I"),
+]
+
+FIELDS: list[tuple[str, str]] = FIELDS_V6  # canonical == newest
 
 FIELDS_BY_VERSION: dict[int, list[tuple[str, str]]] = {
-    1: FIELDS_V1, 2: FIELDS_V2, 3: FIELDS_V3, 4: FIELDS_V4, 5: FIELDS_V5}
+    1: FIELDS_V1, 2: FIELDS_V2, 3: FIELDS_V3,
+    4: FIELDS_V4, 5: FIELDS_V5, 6: FIELDS_V6}
 
 
 def _field_count(code: str) -> int:
@@ -105,7 +113,7 @@ _FORMAT_BY_VERSION = {v: _format(f) for v, f in FIELDS_BY_VERSION.items()}
 SIZE_BY_VERSION = {v: struct.calcsize(fmt) for v, fmt in _FORMAT_BY_VERSION.items()}
 
 _FORMAT = _FORMAT_BY_VERSION[VERSION]
-SIZE = SIZE_BY_VERSION[VERSION]  # 156 bytes (v4: 148, v3: 84, v2: 80, v1: 64)
+SIZE = SIZE_BY_VERSION[VERSION]  # 160 bytes (v5: 156, v4: 148, v3: 84, v2: 80, v1: 64)
 _NAMES = [name for name, _ in FIELDS]
 
 # magic + version + size header, enough to pick the right layout for the rest.
