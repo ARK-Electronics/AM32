@@ -66,6 +66,10 @@ endif
 ifneq ($(DEMAG_COMP),)
 CFLAGS_COMMON += -DHWCI_DEMAG_COMP=$(DEMAG_COMP)
 endif
+# `ACTIVE_DEMAG=1` additionally enables the active freewheel (requires DEMAG_COMP).
+ifeq ($(ACTIVE_DEMAG),1)
+CFLAGS_COMMON += -DHWCI_ACTIVE_DEMAG=1
+endif
 
 # Linker options
 LDFLAGS_COMMON := -specs=nano.specs $(LIBS) -Wl,--gc-sections -Wl,--print-memory-usage

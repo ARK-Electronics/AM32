@@ -10,7 +10,8 @@ def test_layout_sizes():
     assert perf.SIZE_BY_VERSION[1] == 64
     assert perf.SIZE_BY_VERSION[2] == 80
     assert perf.SIZE_BY_VERSION[3] == 84
-    assert perf.SIZE == perf.SIZE_BY_VERSION[4] == 92
+    assert perf.SIZE_BY_VERSION[4] == 92
+    assert perf.SIZE == perf.SIZE_BY_VERSION[5] == 96
 
 
 def test_host_cmd_offset_matches_layout():
@@ -157,3 +158,19 @@ def test_v2_decodes_from_oversized_read():
     s = perf.decode(blob)
     assert s.raw["zc_count"] == 9
     assert "demag_events" not in s.raw
+
+
+def test_v5_roundtrip_interlock_skips():
+    blob = perf.encode({"active_demag_interlock_skips": 31337})
+    assert len(blob) == 96
+    assert perf.decode(blob).raw["active_demag_interlock_skips"] == 31337
+
+
+def test_v4_roundtrip_has_no_interlock_key():
+    # v4 firmware (demag block, pre interlock counter) must keep decoding
+    # without the v5 key - the base demag-comp PR flashes exactly this layout.
+    blob = perf.encode({"demag_events": 3}, version=4)
+    assert len(blob) == perf.SIZE_BY_VERSION[4]
+    s = perf.decode(blob)
+    assert s.raw["demag_events"] == 3
+    assert "active_demag_interlock_skips" not in s.raw
