@@ -373,10 +373,25 @@ uint8_t desync_happened = 0;
 uint8_t demag_comp_level = 0; // 0=off, 1=low, 2=medium, 3=high
 volatile uint16_t blanking_length = 0; // measured demag time in interval timer ticks
 volatile uint8_t auto_blanking = 0; // comparator armed for the demag release edge first
+volatile uint16_t demag_wait_ticks = 0; // zc-to-commutation delay that scheduled the armed cycle
+volatile uint16_t demag_cut_latch = 0; // duty cut written by demagEdgeRoutine
+volatile uint8_t demag_cut_pending = 0; // tells tenKhzRoutine a cut landed mid-tick
 uint8_t active_demag = 0; // circulate demag current through the fet instead of the body diode
 volatile uint8_t active_demag_fet_on = 0;
 volatile uint16_t active_demag_ticks = 0; // fet on time, half of last measured demag time
 volatile uint32_t demag_happened = 0;
+
+// Reset all per-run demag state. Called wherever commutation (re)starts or a
+// fault tears down the running state, so no stale armed polarity, cut, or
+// measurement survives into the next spin-up. static inline because callers
+// include RAM_FUNC ISRs - this must not become a flash call.
+static inline void resetDemagState(void)
+{
+    auto_blanking = 0;
+    demag_cut_pending = 0;
+    active_demag_fet_on = 0;
+    active_demag_ticks = 0;
+}
 char maximum_throttle_change_ramp = 1;
 
 char crawler_mode = 0; // no longer used //
@@ -820,13 +835,13 @@ void loadEEpromSettings()
         eepromBuffer.can.demag_compensation = 0;
     }
     demag_comp_level = eepromBuffer.can.demag_compensation;
+#ifdef HWCI_DEMAG_COMP
+    demag_comp_level = HWCI_DEMAG_COMP; // bench build: force on without touching the eeprom
+#endif
     if (eepromBuffer.can.active_demag > 1) { // erased flash reads 0xff, default off
         eepromBuffer.can.active_demag = 0;
     }
     active_demag = eepromBuffer.can.active_demag && demag_comp_level; // needs the demag time measurement running
-#ifdef HWCI_DEMAG_COMP
-    demag_comp_level = HWCI_DEMAG_COMP; // bench build: force on without touching the eeprom
-#endif
 #else
     demag_comp_level = 0;
     active_demag = 0;
@@ -1097,9 +1112,14 @@ RAM_FUNC void interruptRoutine()
 #endif
     SET_INTERVAL_TIMER_COUNT(0);
     SET_AND_ENABLE_COM_INT(waitTime+1); // enable COM_TIMER interrupt
+#ifdef HAS_DEMAG_COMP
     if (demag_comp_level && (input > 400) && (commutation_interval > 100)) {
         auto_blanking = 1; // next commutation watches for the demag release edge first
+        demag_wait_ticks = waitTime; // the zc->commutation delay THIS cycle is
+        // scheduled with; PeriodElapsedCallback recomputes waitTime for the next
+        // cycle before the demag edge fires, so snapshot it for the measurement
     }
+#endif
     __enable_irq();
     HWCI_PERF_ZC_PHASE_COMMIT(); // accepted edge: bin its PWM phase
 }
@@ -1115,16 +1135,17 @@ RAM_FUNC void interruptRoutine()
 RAM_FUNC void demagEdgeRoutine()
 {
     uint16_t time_since_zc = INTERVAL_TIMER_COUNT;
+    uint16_t wait_ticks = demag_wait_ticks; // the delay THIS cycle was scheduled with
     auto_blanking = 0;
     changeCompInput(); // polarity back to normal to catch the real zero cross
-    if (time_since_zc > waitTime) { // commutation happened at ~waitTime after the last zero cross
-        blanking_length = time_since_zc - waitTime;
+    if (time_since_zc > wait_ticks) { // commutation happened at ~wait_ticks after the last zero cross
+        blanking_length = time_since_zc - wait_ticks;
         if (blanking_length > average_interval) {
             blanking_length = average_interval; // measurement can't be longer than a commutation
         }
         active_demag_ticks = blanking_length >> 1; // active freewheel for half the measured demag time
-        if (active_demag_ticks > (waitTime >> 1)) {
-            active_demag_ticks = waitTime >> 1; // fet always off well before the expected zero cross
+        if (active_demag_ticks > (wait_ticks >> 1)) {
+            active_demag_ticks = wait_ticks >> 1; // fet always off well before the expected zero cross
         }
     } else { // edge fired before commutation: noise, measurement is invalid
         blanking_length = 0;
@@ -1152,8 +1173,14 @@ RAM_FUNC void demagEdgeRoutine()
         if (demag_cut < minimum_duty_cycle) {
             demag_cut = minimum_duty_cycle;
         }
-        last_duty_cycle = demag_cut;
-        duty_cycle = demag_cut;
+        // Hand the cut to tenKhzRoutine instead of writing duty_cycle/
+        // last_duty_cycle here: this ISR preempts tenKhzRoutine, and its
+        // unguarded "last_duty_cycle = duty_cycle" write-back would otherwise
+        // clobber a directly-written cut. The PWM CCRs only change in
+        // tenKhzRoutine anyway, so applying the cut there is race-free and
+        // takes effect on the same tick the old direct write would have.
+        demag_cut_latch = demag_cut;
+        demag_cut_pending = 1;
         // Re-entering interruptRoutine() is safe: auto_blanking is already
         // cleared so the comparator re-arms with normal polarity, and the
         // zero-cross confirm loop at its top guards against treating this
@@ -1166,13 +1193,13 @@ RAM_FUNC void demagEdgeRoutine()
 void startMotor()
 {
     if (running == 0) {
+        resetDemagState(); // clear BEFORE commutate(): commutate()->changeCompInput()
+                           // programs comparator polarity off auto_blanking, so a
+                           // stale arm from a prior run must be cleared first
         commutate();
         commutation_interval = 10000;
         SET_INTERVAL_TIMER_COUNT(5000);
         running = 1;
-        auto_blanking = 0;
-        active_demag_fet_on = 0;
-        active_demag_ticks = 0;
     }
     enableCompInterrupts();
 }
@@ -1554,6 +1581,17 @@ RAM_FUNC void tenKhzRoutine()
 { // 20khz as of 2.00 to be renamed
     HWCI_PERF_CTRL_ENTER();
     duty_cycle = duty_cycle_setpoint;
+#ifdef HAS_DEMAG_COMP
+    if (demag_cut_pending) { // demagEdgeRoutine detected demag past the zero cross
+        demag_cut_pending = 0;
+        uint16_t cut = demag_cut_latch;
+        last_duty_cycle = cut; // anchor the ramp at the cut; the slew block below
+                               // ramps back up from here over the next ticks
+        if (duty_cycle > cut) {
+            duty_cycle = cut; // and cut this tick's output immediately
+        }
+    }
+#endif
     tenkhzcounter++;
     ledcounter++;
     ramp_count++;
@@ -2271,9 +2309,7 @@ if(zero_crosses < 5){
                     average_interval = 5000;
                 }
                 last_duty_cycle = min_startup_duty / 2;
-                auto_blanking = 0;
-                active_demag_fet_on = 0;
-                active_demag_ticks = 0;
+                resetDemagState();
             }
             desync_check = 0;
             //	}
@@ -2473,6 +2509,11 @@ if(zero_crosses < 5){
             uint32_t interval_threshold;
             if (zero_crosses > 50) { // running steadily: a missing zero cross shows up
                 interval_threshold = average_interval * 4; // within a few commutations
+                if (interval_threshold > 45000) {
+                    // INTERVAL_TIMER counts to 0xffff: an unclamped threshold
+                    // above that is unreachable and stall detection never fires
+                    interval_threshold = 45000;
+                }
             } else {
                 interval_threshold = 45000; // starting: keep the long fixed timeout
             }
@@ -2480,9 +2521,7 @@ if(zero_crosses < 5){
                 bemf_timeout_happened++;
 
                 maskPhaseInterrupts();
-                auto_blanking = 0;
-                active_demag_fet_on = 0;
-                active_demag_ticks = 0;
+                resetDemagState();
                 old_routine = 1;
                 if (input < 48) {
                     running = 0;
