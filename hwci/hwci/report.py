@@ -44,7 +44,7 @@ def render_markdown(metrics: dict, comparison: dict | None = None,
         cols = ["segment", "throttle", "rpm", "thrust_gf", "current_a",
                 "voltage_v", "elec_power_w", "eff_gf_per_w",
                 "ctrl_exec_us_max", "cpu_load_pct",
-                "zc_jitter_pct", "zc_jitter_max_pct"]
+                "zc_jitter_pct", "zc_jitter_max_pct", "fw_demag_events"]
         out.append("| " + " | ".join(cols) + " |")
         out.append("|" + "---|" * len(cols))
         for p in pts:
@@ -64,7 +64,10 @@ def render_markdown(metrics: dict, comparison: dict | None = None,
 
     d = metrics.get("demag", {})
     out.append("## Demag / desync\n")
-    out.append(f"- events: **{d.get('event_count', 0)}**")
+    out.append(f"- events (host-derived): **{d.get('event_count', 0)}**")
+    fw_ev = metrics.get("summary", {}).get("fw_demag_events")
+    out.append(f"- firmware demag counter (struct v3+): "
+               f"{_fmt(fw_ev)}")
     out.append(f"- bemf-timeout samples: {d.get('bemf_timeout_samples', 0)}")
     out.append(f"- commutation-spike samples: {d.get('comm_spike_samples', 0)}")
     out.append(f"- ESC-eRPM vs stand-RPM mismatch samples: "

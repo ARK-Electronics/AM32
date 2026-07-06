@@ -109,6 +109,24 @@ def test_perf_channel_carries_phase_histogram():
     assert max(range(32), key=delta.__getitem__) == peak
 
 
+def test_perf_channel_carries_demag_fields():
+    # v5 struct: demag fields present, zero on a clean (non-demag-prone) run.
+    rig = RigSimulator(noise=0.0)
+    _settle(rig, 0.7)
+    r = perf.decode(rig.perf_bytes()).raw
+    assert r["demag_events"] == 0
+    assert r["blanking_len_last"] == 0
+    assert r["blanking_len_max"] == 0
+
+
+def test_demag_events_count_injected_desyncs():
+    rig = RigSimulator(params=MotorParams(demag_prone=True), noise=0.0)
+    _settle(rig, 0.1, n=50)
+    rig.step(0.005, 1.0)  # aggressive step into high current -> desync
+    r = perf.decode(rig.perf_bytes()).raw
+    assert r["demag_events"] == rig.desync_count == 1
+
+
 # --------------------------------------------------------------------------
 # AM32 settings model (SimSettings)
 # --------------------------------------------------------------------------
