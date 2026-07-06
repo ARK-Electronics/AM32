@@ -77,6 +77,21 @@ SRC_COMMON := $(foreach dir,$(SRC_DIRS_COMMON),$(wildcard $(dir)/*.[cs]))
 OBJ := obj
 BIN_DIR := $(ROOT)/$(OBJ)
 
+# Feature flags passed on the command line (HWCI_PERF, DEMAG_COMP) become -D
+# defines but are NOT part of any object's path, so a rebuild with a changed
+# flag would silently reuse stale objects - e.g. an A/B bench run flashing
+# firmware built at the wrong DEMAG_COMP level, or without the perf struct.
+# Record the flags in a stamp file and make every ELF depend on it: when the
+# flags change, the stamp's contents (and mtime) change and the ELF rebuilds.
+# $(file) is used instead of the shell for portability (no cmd.exe/sh split).
+BUILD_FLAGS := HWCI_PERF=$(HWCI_PERF) DEMAG_COMP=$(DEMAG_COMP)
+FLAGS_STAMP := $(OBJ)/.build_flags
+$(shell $(MKDIR) -p $(OBJ))
+PREV_BUILD_FLAGS := $(if $(wildcard $(FLAGS_STAMP)),$(strip $(file < $(FLAGS_STAMP))))
+ifneq ($(PREV_BUILD_FLAGS),$(BUILD_FLAGS))
+$(file > $(FLAGS_STAMP),$(BUILD_FLAGS))
+endif
+
 # Function to check for _CAN suffix
 has_can_suffix = $(findstring _CAN,$1)
 
@@ -127,7 +142,7 @@ LDFLAGS_$(2) = $(LDFLAGS_COMMON) $(LDFLAGS_$(1)) -T$(xLDSCRIPT)
 
 -include $$($(2)_BASENAME).d
 
-$$($(2)_BASENAME).elf: $(SRC_COMMON) $$(SRC_$(1)) $(xSRC)
+$$($(2)_BASENAME).elf: $(SRC_COMMON) $$(SRC_$(1)) $(xSRC) $(FLAGS_STAMP)
 	@$(ECHO) Compiling $$(notdir $$@)
 	$(QUIET)$(MKDIR) -p $(OBJ)
 	$(QUIET)$(xCC) $$(CFLAGS_$(2)) $$(LDFLAGS_$(2)) -MMD -MP -MF $$(@:.elf=.d) -o $$(@) $(SRC_COMMON) $$(SRC_$(1)) $(xSRC)
