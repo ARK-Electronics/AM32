@@ -17,7 +17,14 @@ RAM_FUNC void maskPhaseInterrupts()
   EXTI->PR = EXTI_LINE;
 }
 
-RAM_FUNC void enableCompInterrupts() { EXTI->IMR |= (1 << 21); }
+RAM_FUNC void enableCompInterrupts()
+{
+  EXTI->PR = EXTI_LINE; // discard any edge latched while masked (comStep/PWM
+                        // ring during the wait window) so the first edge after
+                        // unmask is genuine - critical for the demag release
+                        // edge, whose ISR branch has no interval/confirm gate
+  EXTI->IMR |= (1 << 21);
+}
 
 RAM_FUNC void changeCompInput()
 {

@@ -12,6 +12,9 @@ void maskPhaseInterrupts(){
 }
 
 void enableCompInterrupts(){
+	LL_EXTI_ClearFlag_0_31(EXTI_LINE); // discard any edge latched while masked so
+	                                   // the first edge after unmask is genuine
+	                                   // (demag release branch has no gate)
     EXTI->IMR1 |= EXTI_LINE;
 }
 
