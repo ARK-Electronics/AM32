@@ -64,6 +64,17 @@ from .settings import (DEFAULT_EEPROM_ADDRESS, EEPROM_SIZE, Settings,
 
 MANIFEST_VERSION = 1
 
+# Transient current headroom for the ramp stage's snap profiles (step_profile,
+# ramp_measure_profile): a legitimate 0.3->0.95 (or 0.2->0.55) snap draws well
+# above the STEADY probe.safety.max_current_a, so these profiles floor their
+# own limit at this value regardless of the spec's steady-state setting.
+# Raised 55 -> 100 (2026-07-07 bench session, JS 2306 1800KV + 5" prop on 6S):
+# a quick-tune efficiency winner (advance_level=18) hit a bare current-ceiling
+# disqualification at 79.6 A on the 0.3->0.95 snap with NO demag/bemf faults
+# reported - i.e. 55-60A was cutting the transient off before we could tell
+# whether it settles clean or actually desyncs at the higher current.
+RAMP_TRANSIENT_MAX_CURRENT_A = 100.0
+
 
 class TuneSpecError(ValueError):
     """A tune spec failed strict validation (unknown key, bad value)."""
@@ -420,15 +431,15 @@ def step_profile(spec: TuneSpec) -> Profile:
             {"label": "rampdn", "throttle": 0.0, "duration_s": 1.5, "ramp": True},
         ],
         # The snaps are the point of this profile, and a legitimate
-        # 0.3->0.95 snap transient peaks near 50 A on the 6S bench (see
-        # demag_step_stress.yaml's 55 A precedent). Probe-level current
+        # 0.3->0.95 snap transient can draw into the 80-100 A range on this
+        # bench (see RAMP_TRANSIENT_MAX_CURRENT_A). Probe-level current
         # limits would abort every candidate on that transient before demag
         # is even assessed, so give the current limit snap headroom; all
         # other probe safety limits apply unchanged.
         "safety": {**(spec.probe.safety or {}),
                    "max_current_a": max(
                        (spec.probe.safety or {}).get("max_current_a") or 0.0,
-                       55.0)},
+                       RAMP_TRANSIENT_MAX_CURRENT_A)},
     })
 
 
@@ -444,7 +455,8 @@ def ramp_measure_profile(spec: TuneSpec) -> Profile:
     arriving at fresh-pack t70)."""
     safety = dict(spec.probe.safety or {})
     # deliberate snaps: same transient headroom rationale as step_profile
-    safety["max_current_a"] = max(safety.get("max_current_a") or 0.0, 55.0)
+    safety["max_current_a"] = max(safety.get("max_current_a") or 0.0,
+                                  RAMP_TRANSIENT_MAX_CURRENT_A)
     return profile_from_dict({
         "name": "tune_ramp_measure",
         "description": "inline powertrain step-response measurement "
@@ -1362,72 +1374,192 @@ class Tuner:
         with open(path, newline="") as f:
             return list(csv.DictReader(f))
 
+    def _ramp_fallback_candidates(self) -> list[dict]:
+        """Ranked (best efficiency score first) alternative FULL settings
+        combos to retry ramp certification against, if the coordinate
+        search's efficiency winner has no safe max_ramp anywhere in range.
+
+        Scope: only backs off the advance_level choice, re-combined with
+        whatever pwm_frequency/variable_pwm the rest of the coordinate
+        search already settled on. advance_level is the one dimension the
+        2026-07-07 bench session tied to snap desyncs (a quick-tune winner
+        that only differed from a clean-snapping combo in advance_level).
+        Falls back to pure firmware defaults ({}) last, if no advance_level
+        value is ramp-safe either.
+
+        Candidates are looked up by (stage identity, advance_level value)
+        rather than exact-dict-equality on the recorded overrides, and
+        scored the same way _pick_winner scores the original coordinate
+        search - median across that value's "trial"-kind entries, the whole
+        value excluded if ANY of its entries were disqualified - so this
+        stays correct even if the advance-sweeping stage carries its own
+        `fixed` (e.g. pinning variable_pwm during the sweep, the same idiom
+        the shipped pwm stage already uses) or ran with repeats > 1; a bare
+        overrides == {"advance_level": v} check would silently stop
+        matching anything the moment either of those becomes true, and a
+        first-match lookup would score off a single noisy sample instead of
+        the median the coordinate search itself judged that value on.
+
+        Landing on an efficient-but-desync-prone winner defeats the point
+        of tuning: a setting that can't survive a real throttle snap isn't
+        usable regardless of its steady-state g/W."""
+        adv = self.spec.parameters.get("advance_level")
+        adv_stage = next((s for s in self.spec.stages
+                          if s.sweep == "advance_level"), None)
+        seen = {frozenset(self.incumbent.items())}
+        ranked: list[tuple[dict, float]] = []
+        if adv is not None and adv_stage is not None:
+            for v in dict.fromkeys(adv.values):
+                full = {**self.incumbent, "advance_level": v}
+                key = frozenset(full.items())
+                if key in seen:
+                    continue
+                entries = [t for t in self.manifest["trials"]
+                          if t.get("stage") == adv_stage.name
+                          and t.get("kind") == "trial"
+                          and t.get("overrides", {}).get("advance_level") == v
+                          and not t.get("discarded")]
+                if not entries or any(e.get("disqualified") for e in entries):
+                    continue
+                vals = [e.get("score_norm") if e.get("score_norm") is not None
+                       else e.get("score_raw") for e in entries]
+                vals = [x for x in vals if x is not None]
+                if not vals:
+                    continue
+                seen.add(key)
+                ranked.append((full, statistics.median(vals)))
+        ranked.sort(key=lambda item: item[1], reverse=True)
+        out = [full for full, _ in ranked]
+        if frozenset() not in seen:
+            out.append({})
+        return out
+
     def _run_measure_stage(self, stage: StageSpec) -> None:
         """Physics-based max_ramp: measure the powertrain's step response
         once (firmware slew unrestricted), compute the fastest ramp whose
         worst-case transient stays inside the current budget, then VERIFY
-        it on the step-stress profile (backing off 0.7x on failure)."""
+        it on the step-stress profile (backing off 0.7x on failure).
+
+        If the measurement run itself is disqualified (or yields no usable
+        step response) - e.g. the unrestricted snap desyncs before a clean
+        rise can be extracted - a bad measurement must not silently skip the
+        search: fall back to the same verify+backoff loop starting from the
+        field maximum, so a desync-prone incumbent still gets a real answer
+        (a certified value, or a confirmed 'nothing in range is safe')
+        instead of quietly keeping whatever max_ramp predates this stage.
+
+        And if NO max_ramp in range certifies for the coordinate search's
+        efficiency winner, that winner must not become the session's answer
+        just because its finals ABBA never re-tests high throttle: retry
+        the whole measure+verify+backoff search against progressively
+        lower-ranked (but already-scored) alternative settings from
+        _ramp_fallback_candidates, and adopt the first one that IS
+        ramp-safe as the new incumbent - trading some efficiency for a
+        setting that actually survives a snap."""
         f = resolve_field("max_ramp", None)
-        e = self._trial(TrialPlan(
-            stage=stage.name, kind="measure",
-            overrides=self._merged(stage, {"max_ramp": f.hi}),
-            profile=ramp_measure_profile(self.spec)))
-        indices = [e["index"]]
-        stats = None
-        if e.get("disqualified"):
-            self.log(f"stage {stage.name}: measurement run disqualified "
-                     f"({e['disqualified']}); keeping incumbent max_ramp")
-        else:
+        indices: list[int] = []
+
+        def measure_and_compute() -> tuple[Optional[dict], Optional[int]]:
+            e = self._trial(TrialPlan(
+                stage=stage.name, kind="measure",
+                overrides=self._merged(stage, {"max_ramp": f.hi}),
+                profile=ramp_measure_profile(self.spec)))
+            indices.append(e["index"])
+            if e.get("disqualified"):
+                self.log(f"stage {stage.name}: measurement run disqualified "
+                         f"({e['disqualified']}); falling back to a direct "
+                         "max_ramp search from the ceiling")
+                return None, None
             stats = mech_ramp_stats(self._trial_rows(e))
             if stats is None:
                 self.log(f"stage {stage.name}: no usable step response in "
-                         "the measurement run; keeping incumbent max_ramp")
-
-        winner_val = None
-        computed = None
-        if stats is not None:
+                         "the measurement run; falling back to a direct "
+                         "max_ramp search from the ceiling")
+                return None, None
             limit = ramp_measure_profile(self.spec).safety.max_current_a
-            budget = max(0.75 * (limit or 55.0) - stats["i_hi_a"], 5.0)
+            budget = max(0.75 * (limit or RAMP_TRANSIENT_MAX_CURRENT_A)
+                         - stats["i_hi_a"], 5.0)
             computed = compute_max_ramp(stats, current_budget_a=budget,
-                                        lo=f.lo, hi=f.hi,
-                                        margin=stage.margin)
+                                        lo=f.lo, hi=f.hi, margin=stage.margin)
             self.log(
                 f"stage {stage.name}: tau {stats['tau_ms']:.0f} ms, slew "
                 f"{stats['slew_erpm_per_s']:.0f} eRPM/s, "
                 f"k {stats['k_a_per_pct']:.2f} A/%, budget {budget:.1f} A "
                 f"-> max_ramp {computed}")
-            v = computed
+            return stats, computed
+
+        def verify_with_backoff(base_ov: dict, start_v: int) -> Optional[int]:
+            v = start_v
             while True:
                 ev = self._trial(TrialPlan(
                     stage=stage.name, kind="verify",
-                    overrides=self._merged(stage, {"max_ramp": v}),
+                    overrides={**base_ov, "max_ramp": v},
                     profile=step_profile(self.spec)))
                 indices.append(ev["index"])
                 if not ev.get("disqualified"):
-                    winner_val = v
-                    break
+                    return v
                 nxt = max(f.lo, int(v * 0.7))
                 if nxt == v:
-                    break               # already at the floor: no winner
+                    return None         # already at the floor: no winner
                 self.log(f"stage {stage.name}: verify failed at max_ramp "
                          f"{v}; backing off to {nxt}")
                 v = nxt
 
+        stats, computed = measure_and_compute()
+        winner_val = verify_with_backoff(
+            self._merged(stage, {}), computed if computed is not None else f.hi)
+
+        winner_ov: Optional[dict] = None   # None => the top incumbent won
+        if winner_val is None:
+            candidates = self._ramp_fallback_candidates()
+            if candidates:
+                self.log(f"stage {stage.name}: incumbent has no safe "
+                         f"max_ramp anywhere in range; trying "
+                         f"{len(candidates)} alternative setting(s) from "
+                         "the coordinate search instead of keeping it")
+            for cand in candidates:
+                self.log(f"stage {stage.name}: retrying ramp certification "
+                         f"at {cand or '(firmware defaults)'}")
+                wv = verify_with_backoff({**cand, **stage.fixed}, f.hi)
+                if wv is not None:
+                    winner_val, winner_ov = wv, cand
+                    self.log(f"stage {stage.name}: {cand or '(defaults)'} "
+                             f"is ramp-safe (max_ramp {wv}) - overriding "
+                             "the coordinate search's efficiency winner")
+                    break
+
         if winner_val is not None:
-            self.manifest["incumbent"] = self._merged(
-                stage, {"max_ramp": winner_val})
+            base = self.incumbent if winner_ov is None else winner_ov
+            self.manifest["incumbent"] = {
+                **base, **stage.fixed, "max_ramp": winner_val}
+        elif self.incumbent:
+            # Nothing in range - not the efficiency winner, not any
+            # fallback, not even pure defaults - could be shown ramp-safe.
+            # Keeping the (proven-unsafe) efficiency winner as the incumbent
+            # would let finals silently confirm and ship it anyway, since
+            # finals never re-tests above 60% throttle. Reset to firmware
+            # defaults so an all-fallbacks-failed session ships nothing
+            # (finals' winner_ov becomes falsy, so confirmed is forced
+            # False and self.base gets flashed) rather than an
+            # unsafe-under-snap "efficient" combo.
+            self.log(f"stage {stage.name}: no candidate (including "
+                     "firmware defaults) is ramp-safe; resetting the "
+                     "incumbent to firmware defaults for the rest of the "
+                     "session")
+            self.manifest["incumbent"] = {}
         self.manifest["stages"][stage.name] = {
             "winner": (None if winner_val is None
-                       else {"max_ramp": winner_val}),
+                       else {**(winner_ov or {}), "max_ramp": winner_val}),
             "winner_score": None,
             "measured": (None if stats is None
                          else {k: round(v, 3) for k, v in stats.items()}),
             "computed_max_ramp": computed,
+            "used_fallback_settings": winner_ov,
             "trials": indices,
         }
         self._save()
         self.log(f"stage {stage.name}: winner "
-                 f"{None if winner_val is None else {'max_ramp': winner_val}}")
+                 f"{None if winner_val is None else {**(winner_ov or {}), 'max_ramp': winner_val}}")
 
     def _run_constraint_stage(self, stage: StageSpec) -> None:
         """Constraint-only sweep (e.g. max_ramp on a step profile): values are

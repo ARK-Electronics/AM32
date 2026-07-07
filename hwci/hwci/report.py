@@ -138,7 +138,9 @@ def write_tune_pdf(out_dir: str | Path, manifest: dict, result: dict,
     pdf_path = out_dir / "tune_report.pdf"
     try:
         with PdfPages(pdf_path) as pdf:
-            _pdf_cover_page(plt, pdf, manifest, result, diff_rows or [])
+            _pdf_cover_page(plt, pdf, out_dir, manifest, result,
+                           diff_rows or [], settings_rows)
+            _pdf_efficiency_curve_page(plt, pdf, out_dir, manifest, result)
             _pdf_settings_pages(plt, pdf, settings_rows or [])
             _pdf_settings_impact_pages(plt, pdf, manifest, settings_rows or [])
             _pdf_progress_page(plt, pdf, manifest, result)
@@ -168,11 +170,15 @@ def _wrap(v, width: int) -> str:
 
 
 def _place_table(ax, rows: list, cols: list, widths: list,
-                 fontsize: float = 8.0, line_h: float = 0.032) -> None:
+                 fontsize: float = 8.0, line_h: float = 0.032,
+                 dim_rows: set[int] | None = None) -> None:
     """Left-aligned table pinned to the top of ``ax`` with EXPLICIT column
     width fractions (auto_set_column_width lets wide tables overflow the
     page and clip - seen on real trial tables). Cell text may contain
-    newlines (pre-wrapped); row heights follow the tallest cell."""
+    newlines (pre-wrapped); row heights follow the tallest cell.
+    ``dim_rows`` (0-indexed into ``rows``, i.e. excluding the header) is
+    rendered in grey - e.g. a setting the configurator itself greys out /
+    disables under the current combination of settings."""
     ax.axis("off")
     if not rows:
         ax.text(0.5, 0.5, "(none)", ha="center", va="center",
@@ -193,9 +199,168 @@ def _place_table(ax, rows: list, cols: list, widths: list,
         if r == 0:
             cell.set_facecolor(_HEADER_BG)
             cell.set_text_props(fontweight="bold")
+        elif dim_rows and (r - 1) in dim_rows:
+            cell.set_text_props(color=_DEFAULT_GRAY)
 
 
-def _pdf_cover_page(plt, pdf, manifest: dict, result: dict, diff_rows: list):
+# Raw EEPROM byte -> the value shown in the AM32 web configurator, for
+# direct transcription into that tool. Sources: Inc/eeprom.h + Src/main.c
+# loadEEpromSettings() (advance_level's old(0-3)<->new(10-42) format
+# conversion; new format subtracts 10 then advances in 0.9375 deg steps,
+# i.e. degrees = (advance_level - 10) * 0.9375 - cross-checked against
+# wiki.am32.ca's EEPROM format doc, which gives old-format raw 2 = 15
+# degrees: old->new gives raw 26, (26-10)*0.9375 = 15, matching), and
+# wiki.am32.ca's "ESC Settings Explained" + community docs for the
+# configurator's field labels and units (PWM Frequency in kHz and
+# max_ramp/Ramp Speed in %/ms are stored directly in those units already;
+# Variable PWM's 0/1/2 map to the configurator's Fixed/Variable(Low-High)/
+# By RPM options).
+_CONFIGURATOR_LABELS = {
+    "advance_level": "Motor Timing",
+    "pwm_frequency": "PWM Frequency",
+    "variable_pwm": "Variable PWM",
+    "max_ramp": "Ramp Speed",
+    "startup_power": "Startup Power",
+    "auto_advance": "Auto Timing Advance",
+}
+_VARIABLE_PWM_LABELS = {0: "Fixed", 1: "Variable (Low/High)", 2: "By RPM"}
+
+
+def _configurator_value(name: str, raw) -> str | None:
+    """The AM32 web configurator's displayed value for one raw EEPROM byte,
+    or None if this setting isn't one of the configurator-exposed fields
+    this table covers."""
+    if raw is None or name not in _CONFIGURATOR_LABELS:
+        return None
+    raw = int(raw)
+    if name == "advance_level":
+        return f"{(raw - 10) * 0.9375:.1f}°"
+    if name == "pwm_frequency":
+        return f"{raw} kHz"
+    if name == "variable_pwm":
+        return _VARIABLE_PWM_LABELS.get(raw, str(raw))
+    if name == "max_ramp":
+        return f"{raw * 0.1:.1f} %/ms"
+    if name == "startup_power":
+        return f"{raw}%"
+    if name == "auto_advance":
+        return "On" if raw else "Off"
+    return None
+
+
+def _configurator_settings_rows(
+        settings_rows: list[dict]) -> tuple[list[list[str]], set[int]]:
+    """([configurator label, configurator value], dim_row_indices) for the
+    WINNING ("best") settings, in the standard AM32 tune order - a settings
+    table a user can read straight off and type into the AM32 web
+    configurator. Raw bytes are already shown in the adjacent settings-diff
+    table, so they're intentionally left out here to keep this one
+    skimmable.
+
+    When Variable PWM is "By RPM" the configurator itself greys out and
+    disables the PWM Frequency field (the firmware picks it dynamically
+    from RPM instead) - that row is flagged in ``dim_row_indices`` and
+    annotated, so this table doesn't read as "type this value in" for a
+    field the real UI won't let you edit."""
+    best_by_name = {r.get("setting"): r.get("best") for r in settings_rows}
+    by_rpm = best_by_name.get("variable_pwm") == 2
+
+    rows: list[list[str]] = []
+    dim: set[int] = set()
+    for r in settings_rows:
+        name = r.get("setting")
+        label = _CONFIGURATOR_LABELS.get(name)
+        val = _configurator_value(name, r.get("best"))
+        if label is None or val is None:
+            continue
+        if name == "pwm_frequency" and by_rpm:
+            val += " (locked - By RPM sets this)"
+            dim.add(len(rows))
+        rows.append([label, val])
+    return rows, dim
+
+
+def _final_stage_segment_effs(out_dir: str | Path, manifest: dict,
+                              kind: str) -> list[tuple[float, list[float]]]:
+    """[(throttle, [eff_gf_per_w per repeat])] sorted by throttle, pooled
+    across every steady-point segment seen in the ABBA finals trials of the
+    given ``kind`` (``"final_winner"`` or ``"final_default"``)."""
+    seg_effs: dict[str, list[float]] = {}
+    seg_throttle: dict[str, float] = {}
+    for e, metrics in _load_trial_metrics(out_dir, manifest):
+        if e.get("kind") != kind or metrics.get("_load_error"):
+            continue
+        for p in metrics.get("steady_points", []):
+            seg, eff = p.get("segment"), p.get("eff_gf_per_w")
+            if seg is None or eff is None:
+                continue
+            seg_effs.setdefault(seg, []).append(eff)
+            seg_throttle.setdefault(seg, p.get("throttle"))
+    return sorted(((seg_throttle[s], vals) for s, vals in seg_effs.items()
+                  if seg_throttle.get(s) is not None),
+                 key=lambda t: t[0])
+
+
+def _peak_efficiency_row(out_dir: str | Path,
+                         manifest: dict) -> tuple[float, float] | None:
+    """(eff_gf_per_w, throttle) of the most efficient steady-state segment
+    for the confirmed winner, medianed across the ABBA final-winner sweeps
+    (``final_winner`` trials) - consistent with how every other winner
+    metric in this tool is aggregated across repeats. Returns None if no
+    final-winner steady-point data is available (e.g. default settings
+    were kept, so there's no separate winner sweep)."""
+    points = _final_stage_segment_effs(out_dir, manifest, "final_winner")
+    if not points:
+        return None
+    throttle, effs = max(points, key=lambda t: statistics.median(t[1]))
+    return statistics.median(effs), throttle
+
+
+def _pdf_efficiency_curve_page(plt, pdf, out_dir: str | Path, manifest: dict,
+                               result: dict) -> None:
+    """Full-page efficiency-vs-throttle curve for the confirmed winner
+    (median across ABBA repeats, individual repeats shown as faint points),
+    with the factory-default sweep overlaid for context. Skipped if there's
+    no separate winner sweep to show (e.g. default settings were kept)."""
+    winner_pts = _final_stage_segment_effs(out_dir, manifest, "final_winner")
+    if not winner_pts:
+        return
+    default_pts = _final_stage_segment_effs(out_dir, manifest, "final_default")
+
+    fig, ax = plt.subplots(figsize=_PAGE)
+    fig.suptitle("Efficiency vs. throttle", fontsize=18, fontweight="bold",
+                 x=0.06, ha="left", y=0.97)
+
+    def _plot(points, color, label, marker):
+        thr = [t * 100 for t, _ in points]
+        med = [statistics.median(vals) for _, vals in points]
+        ax.plot(thr, med, marker + "-", color=color, label=label,
+               linewidth=2, ms=5, zorder=3)
+        for t, vals in points:
+            if len(vals) > 1:
+                ax.plot([t * 100] * len(vals), vals, marker, color=color,
+                       alpha=0.35, ms=4, zorder=2)
+
+    if default_pts:
+        _plot(default_pts, _DEFAULT_GRAY, "default (factory)", "s")
+    ov = result.get("winner_overrides") or {}
+    _plot(winner_pts, _CONFIRMED_GREEN, f"winner ({_fmt_ov(ov)})", "o")
+
+    ax.set_xlabel("throttle %")
+    ax.set_ylabel("efficiency (g/W)")
+    ax.set_xlim(0, 100)
+    ax.set_xticks(range(0, 101, 10))
+    ax.set_ylim(bottom=0)
+    ax.grid(True, alpha=0.3)
+    ax.legend(loc="upper right")
+    fig.tight_layout(rect=(0, 0, 1, 0.94))
+    pdf.savefig(fig)
+    plt.close(fig)
+
+
+def _pdf_cover_page(plt, pdf, out_dir: str | Path, manifest: dict,
+                    result: dict, diff_rows: list,
+                    settings_rows: list | None = None):
     fig = plt.figure(figsize=_PAGE)
     fig.text(0.06, 0.955, "AM32 Auto-Tune Report", fontsize=22,
              fontweight="bold", va="top")
@@ -244,21 +409,37 @@ def _pdf_cover_page(plt, pdf, manifest: dict, result: dict, diff_rows: list):
     st = result.get("startup")
     if st is not None:
         detail.append(f"startup: {st.get('failed')}/{st.get('cycles')} failed")
+    peak = _peak_efficiency_row(out_dir, manifest) if confirmed else None
+    if peak is not None:
+        eff, throttle = peak
+        detail.append(f"peak efficiency: {eff:.3f} g/W at "
+                      f"{throttle * 100:.0f}% throttle")
+    # Fixed line_h (0.026) at up to 4 lines matches the fixed 0.46 y-position
+    # of the "Settings diff" header below; compress spacing for any extra
+    # lines instead of overflowing into that header.
     y = 0.565
+    line_h = min(0.026, (0.565 - 0.484) / max(len(detail) - 1, 1))
     for line in detail:
         fig.text(0.06, y, line, fontsize=11, va="top")
-        y -= 0.026
+        y -= line_h
 
-    # -- settings diff table --
+    # -- settings diff table (left) + AM32 configurator translation (right) --
     fig.text(0.06, 0.46, "Settings diff (default → best)", fontsize=13,
              fontweight="bold", va="top")
     if diff_rows:
         rows = [[name, _fmt(a), _fmt(b)] for name, a, b in diff_rows]
     else:
         rows = [["(no change — default settings won)", "", ""]]
-    _place_table(fig.add_axes([0.06, 0.29, 0.60, 0.15]), rows,
-                 ["setting", "default", "best"], [0.50, 0.25, 0.25],
+    _place_table(fig.add_axes([0.06, 0.29, 0.42, 0.15]), rows,
+                 ["setting", "default", "best"], [0.48, 0.26, 0.26],
                  line_h=0.10)
+
+    fig.text(0.52, 0.46, "AM32 configurator settings (winner)", fontsize=13,
+             fontweight="bold", va="top")
+    config_rows, config_dim_rows = _configurator_settings_rows(settings_rows or [])
+    _place_table(fig.add_axes([0.52, 0.29, 0.42, 0.15]), config_rows,
+                 ["setting", "value"], [0.55, 0.45], line_h=0.10,
+                 dim_rows=config_dim_rows)
 
     # -- stage winners (was its own near-empty page) --
     fig.text(0.06, 0.25, "Stage winners", fontsize=13,
@@ -610,52 +791,100 @@ def render_tune_raw_markdown(out_dir: str | Path, manifest: dict) -> str:
     return "\n".join(out)
 
 
-def _pdf_metric_rows(out_dir: str | Path,
-                     manifest: dict) -> tuple[list[list[str]], list[list[str]]]:
-    summary_rows = []
-    steady_rows = []
-    for e, metrics in _load_trial_metrics(out_dir, manifest):
-        stage_kind = f"{e.get('stage')}/{e.get('kind')}"
-        if metrics.get("_load_error"):
-            summary_rows.append([_fmt(e.get("index")), _wrap(stage_kind, 22),
-                                 _fmt(e.get("profile")), "metrics.json",
-                                 _wrap(metrics["_load_error"], 70)])
-            continue
-        for name, value in _iter_run_metrics(metrics):
-            summary_rows.append([_fmt(e.get("index")), _wrap(stage_kind, 22),
-                                 _fmt(e.get("profile")), _wrap(name, 28),
-                                 _wrap(_fmt_raw(value), 60)])
-        for point in metrics.get("steady_points", []):
-            segment = point.get("segment")
-            for name, value in point.items():
-                if name == "segment":
-                    continue
-                steady_rows.append([_fmt(e.get("index")), _wrap(stage_kind, 20),
-                                    _wrap(_fmt(segment), 18), _wrap(name, 28),
-                                    _wrap(_fmt_raw(value), 56)])
-    return summary_rows, steady_rows
+# zc_phase_hist is a per-bin commutation histogram (a list of ~20-30 counts,
+# not a scalar) - it doesn't fit a table cell and is excluded from the raw
+# data pages; read metrics.json directly for it.
+_STEADY_ID_FIELDS = {"segment", "throttle"}
+_STEADY_SKIP_FIELDS = _STEADY_ID_FIELDS | {"zc_phase_hist"}
+_RAW_GROUP_SIZE = 6
 
 
-def _pdf_raw_data_pages(plt, pdf, out_dir: str | Path, manifest: dict) -> None:
-    summary_rows, steady_rows = _pdf_metric_rows(out_dir, manifest)
-    for title, rows, cols, widths in (
-            ("Run summary raw data", summary_rows,
-             ["#", "stage/kind", "profile", "metric", "value"],
-             [0.05, 0.18, 0.12, 0.28, 0.37]),
-            ("Steady-point raw data", steady_rows,
-             ["#", "stage/kind", "segment", "metric", "value"],
-             [0.05, 0.18, 0.16, 0.28, 0.33])):
-        if not rows:
-            continue
-        for i, chunk in enumerate(_paginate_rows(rows, 30)):
+def _chunked(seq: list, n: int) -> list[list]:
+    return [seq[i:i + n] for i in range(0, len(seq), n)]
+
+
+def _wide_metric_pages(plt, pdf, title: str, id_cols: list[str],
+                       id_widths: list[float], entries: list[tuple[list, dict]],
+                       metric_names: list[str], group_size: int) -> None:
+    """One set of pages per ``group_size`` metric columns, a row per entry
+    (trial, or trial+segment) - unlike a melted one-row-per-metric layout,
+    this doesn't repeat the identifying columns for every metric and scales
+    to far fewer pages for the same data."""
+    metric_width = (0.92 - sum(id_widths)) / max(min(group_size,
+                                                      len(metric_names)), 1)
+    for gi, names in enumerate(_chunked(metric_names, group_size)):
+        cols = list(id_cols) + [_wrap(n, 14) for n in names]
+        widths = list(id_widths) + [metric_width] * len(names)
+        rows = [list(ids) + [_wrap(_fmt_raw(vals.get(n)), 14) for n in names]
+                for ids, vals in entries]
+        for pi, chunk in enumerate(_paginate_rows(rows, 26)):
             fig = plt.figure(figsize=_PAGE_LS)
-            page_title = title if i == 0 else f"{title} (cont. {i + 1})"
-            fig.text(0.04, 0.94, page_title, fontsize=18,
+            page_title = title
+            if len(metric_names) > group_size:
+                page_title += f" ({gi + 1}/{-(-len(metric_names) // group_size)})"
+            if pi:
+                page_title += f" cont. {pi + 1}"
+            fig.text(0.04, 0.94, page_title, fontsize=16,
                      fontweight="bold", va="top")
             _place_table(fig.add_axes([0.04, 0.05, 0.92, 0.80]), chunk,
                          cols, widths, fontsize=7.2, line_h=0.026)
             pdf.savefig(fig)
             plt.close(fig)
+
+
+def _pdf_raw_data_pages(plt, pdf, out_dir: str | Path, manifest: dict) -> None:
+    data = _load_trial_metrics(out_dir, manifest)
+
+    error_rows = [[_fmt(e.get("index")),
+                   _wrap(f"{e.get('stage')}/{e.get('kind')}", 20),
+                   _fmt(e.get("profile")), _wrap(m["_load_error"], 70)]
+                  for e, m in data if m.get("_load_error")]
+    if error_rows:
+        for pi, chunk in enumerate(_paginate_rows(error_rows, 26)):
+            fig = plt.figure(figsize=_PAGE_LS)
+            title = "Run summary raw data - load errors" + (
+                f" cont. {pi + 1}" if pi else "")
+            fig.text(0.04, 0.94, title, fontsize=16, fontweight="bold", va="top")
+            _place_table(fig.add_axes([0.04, 0.05, 0.92, 0.80]), chunk,
+                         ["#", "stage/kind", "profile", "error"],
+                         [0.05, 0.20, 0.12, 0.63], fontsize=7.2, line_h=0.026)
+            pdf.savefig(fig)
+            plt.close(fig)
+
+    summary_names: list[str] = []
+    summary_entries: list[tuple[list, dict]] = []
+    for e, metrics in data:
+        if metrics.get("_load_error"):
+            continue
+        vals = dict(_iter_run_metrics(metrics))
+        summary_names.extend(k for k in vals if k not in summary_names)
+        ids = [_fmt(e.get("index")),
+               _wrap(f"{e.get('stage')}/{e.get('kind')}", 18),
+               _fmt(e.get("profile"))]
+        summary_entries.append((ids, vals))
+    if summary_entries:
+        _wide_metric_pages(plt, pdf, "Run summary raw data",
+                           ["#", "stage/kind", "profile"], [0.04, 0.16, 0.08],
+                           summary_entries, summary_names, _RAW_GROUP_SIZE)
+
+    steady_names: list[str] = []
+    steady_entries: list[tuple[list, dict]] = []
+    for e, metrics in data:
+        if metrics.get("_load_error"):
+            continue
+        stage_kind = f"{e.get('stage')}/{e.get('kind')}"
+        for point in metrics.get("steady_points", []):
+            vals = {k: v for k, v in point.items()
+                    if k not in _STEADY_SKIP_FIELDS}
+            steady_names.extend(k for k in vals if k not in steady_names)
+            ids = [_fmt(e.get("index")), _wrap(stage_kind, 16),
+                   _fmt(point.get("segment")), _fmt(point.get("throttle"))]
+            steady_entries.append((ids, vals))
+    if steady_entries:
+        _wide_metric_pages(plt, pdf, "Steady-point raw data",
+                           ["#", "stage/kind", "segment", "throttle"],
+                           [0.04, 0.14, 0.07, 0.07], steady_entries,
+                           steady_names, _RAW_GROUP_SIZE)
 
 
 def _pdf_tables_pages(plt, pdf, manifest: dict):
