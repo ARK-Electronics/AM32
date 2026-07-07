@@ -332,13 +332,17 @@ def test_step_profile_current_limit_has_snap_headroom():
         probe={"dwell_s": 1.0,
                "safety": {"max_current_a": 40.0, "max_thrust_n": 16.0}}))
     p = step_profile(spec)
-    # deliberate 0.3->0.95 snaps peak near 50 A on the bench: headroom to 55,
-    # while the other limits pass through unchanged
-    assert p.safety.max_current_a == 55.0
+    # deliberate 0.3->0.95 snaps can draw 80-100 A on the bench: headroom to
+    # RAMP_TRANSIENT_MAX_CURRENT_A, while the other limits pass through
+    # unchanged
+    from hwci.tuner import RAMP_TRANSIENT_MAX_CURRENT_A
+    assert p.safety.max_current_a == RAMP_TRANSIENT_MAX_CURRENT_A
     assert p.safety.max_thrust_n == 16.0
     spec_hi = tune_spec_from_dict(small_spec(
-        probe={"dwell_s": 1.0, "safety": {"max_current_a": 70.0}}))
-    assert step_profile(spec_hi).safety.max_current_a == 70.0
+        probe={"dwell_s": 1.0,
+               "safety": {"max_current_a": RAMP_TRANSIENT_MAX_CURRENT_A + 20}}))
+    assert (step_profile(spec_hi).safety.max_current_a
+            == RAMP_TRANSIENT_MAX_CURRENT_A + 20)
 
 
 # --------------------------------------------------------------------------
@@ -543,3 +547,284 @@ def test_e2e_measure_stage_sets_max_ramp(tmp_path):
     assert kinds[0] == "measure" and "verify" in kinds
     if st["winner"] is not None:
         assert m["incumbent"]["max_ramp"] == st["winner"]["max_ramp"]
+
+
+def test_measure_stage_falls_back_to_direct_search_when_measurement_desyncs(
+        tmp_path):
+    """A disqualified measurement run (e.g. the unrestricted snap itself
+    desyncs) must not silently give up on the ramp stage: it should fall
+    back to the same verify+backoff search, starting from the field max,
+    that a successful measurement would have used."""
+    import json
+    spec_d = small_spec(stages=[
+        {"name": "ramp", "measure": "ramp_rate", "margin": 0.8}])
+    # demag_step_threshold scaled so the unrestricted (max_ramp=255) snap
+    # desyncs on both the measure and the first verify attempt, and the
+    # backoff search only clears the sim's desync condition once max_ramp
+    # backs off to 42 (160/max_ramp scaling - see sim.py _demag_step_threshold).
+    backend = make_backend(demag_prone=True, demag_step_threshold=0.2,
+                           demag_current_a=1.0)
+    _, result = run_tune(tmp_path, spec_d, backend)
+    m = json.loads((tmp_path / "tune" / "manifest.json").read_text())
+    st = m["stages"]["ramp"]
+    assert st["measured"] is None          # measurement itself desynced
+    assert st["computed_max_ramp"] is None  # no physics to compute from
+    trials = [t for t in m["trials"] if t["stage"] == "ramp"]
+    assert trials[0]["kind"] == "measure" and trials[0]["disqualified"]
+    verifies = [t for t in trials if t["kind"] == "verify"]
+    # the search kept trying lower max_ramp values instead of stopping after
+    # the failed measurement
+    assert len(verifies) > 1
+    assert st["winner"] == {"max_ramp": 42}
+    assert m["incumbent"]["max_ramp"] == 42
+
+
+def _spec_with_advance_and_ramp(**ramp_kwargs) -> dict:
+    """A spec with a real 'advance' StageSpec (sweep=advance_level) ahead of
+    the ramp stage, so _ramp_fallback_candidates can find it by identity -
+    matching what the shipped tune specs actually look like. Tests still
+    drive the ramp stage directly (t._run_measure_stage(...)); the advance
+    stage is never actually executed, only its presence in spec.stages
+    matters, plus whatever fabricated ledger history a test supplies."""
+    return small_spec(stages=[
+        {"name": "advance", "sweep": "advance_level"},
+        {"name": "ramp", "measure": "ramp_rate", **ramp_kwargs}])
+
+
+def _ledger_entry(idx, stage, kind, overrides, score_norm=None,
+                   disqualified=None, discarded=False):
+    return {"index": idx, "stage": stage, "kind": kind,
+            "overrides": overrides, "score_norm": score_norm,
+            "disqualified": disqualified, "discarded": discarded}
+
+
+def test_ramp_fallback_candidates_ranks_by_score_and_excludes_incumbent(
+        tmp_path):
+    """Pure logic test of the candidate generator: alternative advance_level
+    values from an already-run 'advance' stage, ranked best-score first,
+    excluding whatever is already the (failing) incumbent, with pure
+    firmware defaults appended last."""
+    import yaml
+    spec_d = _spec_with_advance_and_ramp()
+    spec = tune_spec_from_dict(spec_d)
+    t = Tuner(spec, make_backend(), tmp_path / "tune",
+              spec_text=yaml.safe_dump(spec_d), no_prompt=True,
+              log=lambda s: None)
+    t.manifest["incumbent"] = {"advance_level": 18}
+    t.manifest["trials"] = [
+        _ledger_entry(0, "advance", "trial", {"advance_level": 18}, 3.0),
+        _ledger_entry(1, "advance", "trial", {"advance_level": 26}, 2.8),
+        _ledger_entry(2, "advance", "trial", {"advance_level": 34}, 2.9),
+        # disqualified trials must not become candidates
+        _ledger_entry(3, "advance", "trial", {"advance_level": 14},
+                      disqualified=["run aborted: safety"]),
+    ]
+    cands = t._ramp_fallback_candidates()
+    # 34 (2.9) outranks 26 (2.8); 18 excluded (== incumbent); 14 excluded
+    # (disqualified); untested values (22, 30, 38) excluded (no score);
+    # pure defaults appended last.
+    assert cands == [{"advance_level": 34}, {"advance_level": 26}, {}]
+
+
+def test_ramp_fallback_candidates_uses_median_across_repeats(tmp_path):
+    """Ranking must match _pick_winner's own convention for the coordinate
+    search it's re-deriving alternatives from: the median across ALL of a
+    value's "trial"-kind entries, not whichever entry happens to be first
+    in the ledger. A single noisy sample must not outrank the true median."""
+    import yaml
+    spec_d = _spec_with_advance_and_ramp()
+    spec = tune_spec_from_dict(spec_d)
+    t = Tuner(spec, make_backend(), tmp_path / "tune",
+              spec_text=yaml.safe_dump(spec_d), no_prompt=True,
+              log=lambda s: None)
+    t.manifest["incumbent"] = {"advance_level": 18}
+    t.manifest["trials"] = [
+        _ledger_entry(0, "advance", "trial", {"advance_level": 18}, 3.0),
+        # 26's median is 2.8 (repeats 3.1, 2.8, 2.5) despite a bad first
+        # sample below 22's single sample of 2.6.
+        _ledger_entry(1, "advance", "trial", {"advance_level": 26}, 3.1),
+        _ledger_entry(2, "advance", "trial", {"advance_level": 22}, 2.6),
+        _ledger_entry(3, "advance", "trial", {"advance_level": 26}, 2.8),
+        _ledger_entry(4, "advance", "trial", {"advance_level": 26}, 2.5),
+    ]
+    cands = t._ramp_fallback_candidates()
+    assert cands == [{"advance_level": 26}, {"advance_level": 22}, {}]
+
+
+def test_ramp_fallback_candidates_excludes_value_with_any_disqualified_repeat(
+        tmp_path):
+    """Matching _pick_winner: if ANY repeat of a value was disqualified, the
+    whole value is excluded from consideration, not just that one sample."""
+    import yaml
+    spec_d = _spec_with_advance_and_ramp()
+    spec = tune_spec_from_dict(spec_d)
+    t = Tuner(spec, make_backend(), tmp_path / "tune",
+              spec_text=yaml.safe_dump(spec_d), no_prompt=True,
+              log=lambda s: None)
+    t.manifest["incumbent"] = {"advance_level": 18}
+    t.manifest["trials"] = [
+        _ledger_entry(0, "advance", "trial", {"advance_level": 18}, 3.0),
+        _ledger_entry(1, "advance", "trial", {"advance_level": 26}, 3.1),
+        _ledger_entry(2, "advance", "trial", {"advance_level": 26},
+                      disqualified=["demag events 1 > 0"]),
+    ]
+    cands = t._ramp_fallback_candidates()
+    assert cands == [{}]   # 26 excluded despite one clean, high-scoring rep
+
+
+def test_ramp_fallback_candidates_robust_to_fixed_on_advance_stage(
+        tmp_path):
+    """The advance stage may pin an unrelated setting during its own sweep
+    (the same idiom the shipped pwm stage already uses, fixed={variable_pwm:
+    0}) - matching must key off (stage identity, advance_level value), not
+    exact-equality on the whole recorded overrides dict, or a `fixed` entry
+    on the advance stage would silently zero out every candidate."""
+    import yaml
+    spec_d = small_spec(stages=[
+        {"name": "advance", "sweep": "advance_level",
+         "fixed": {"variable_pwm": 0}},
+        {"name": "ramp", "measure": "ramp_rate"}])
+    spec = tune_spec_from_dict(spec_d)
+    t = Tuner(spec, make_backend(), tmp_path / "tune",
+              spec_text=yaml.safe_dump(spec_d), no_prompt=True,
+              log=lambda s: None)
+    t.manifest["incumbent"] = {"advance_level": 18, "variable_pwm": 0}
+    t.manifest["trials"] = [
+        _ledger_entry(0, "advance", "trial",
+                      {"advance_level": 18, "variable_pwm": 0}, 3.0),
+        _ledger_entry(1, "advance", "trial",
+                      {"advance_level": 26, "variable_pwm": 0}, 2.8),
+    ]
+    cands = t._ramp_fallback_candidates()
+    assert cands == [{"advance_level": 26, "variable_pwm": 0}, {}]
+
+
+def test_measure_stage_falls_back_to_alternative_advance_level(tmp_path):
+    """If NO max_ramp certifies for the coordinate search's efficiency
+    winner, the ramp stage must not just report failure and keep it: it
+    should retry against progressively lower-ranked (but already-scored)
+    advance_level alternatives and adopt the first one that IS ramp-safe."""
+    import yaml
+    spec_d = _spec_with_advance_and_ramp()
+    spec = tune_spec_from_dict(spec_d)
+    t = Tuner(spec, make_backend(), tmp_path / "tune",
+              spec_text=yaml.safe_dump(spec_d), no_prompt=True,
+              log=lambda s: None)
+    # Fabricate coordinate-search history, as if an "advance" stage already
+    # ran and settled on 18 (best score) with 26 as runner-up.
+    t.manifest["incumbent"] = {"advance_level": 18}
+    t.manifest["trials"] = [
+        _ledger_entry(0, "advance", "trial", {"advance_level": 18}, 3.0),
+        _ledger_entry(1, "advance", "trial", {"advance_level": 26}, 2.8),
+    ]
+
+    def fake_trial(plan):
+        idx = len(t.manifest["trials"])
+        ov = plan.overrides
+        dq = None
+        if plan.kind == "measure":
+            dq = ["demag events 1 > 0"]        # unrestricted snap desyncs
+        elif plan.kind == "verify":
+            # advance_level 18 (the efficiency winner) NEVER certifies at
+            # any max_ramp; 26 certifies once max_ramp backs off <= 80.
+            if ov.get("advance_level") == 18:
+                dq = ["demag events 1 > 0"]
+            elif ov.get("advance_level") == 26 and ov["max_ramp"] > 80:
+                dq = ["demag events 1 > 0"]
+        entry = {"index": idx, "stage": plan.stage, "kind": plan.kind,
+                 "overrides": ov, "disqualified": dq, "discarded": False,
+                 "dir": f"trials/T{idx:03d}"}
+        t.manifest["trials"].append(entry)
+        return entry
+
+    t._trial = fake_trial
+    ramp_stage = next(s for s in spec.stages if s.name == "ramp")
+    t._run_measure_stage(ramp_stage)
+
+    st = t.manifest["stages"]["ramp"]
+    assert st["used_fallback_settings"] == {"advance_level": 26}
+    assert st["winner"] == {"advance_level": 26, "max_ramp": 60}
+    assert t.manifest["incumbent"] == {"advance_level": 26, "max_ramp": 60}
+
+
+def test_measure_stage_fallback_verifies_exactly_what_it_adopts(tmp_path):
+    """The settings combo that passes step_profile's snap verification must
+    be EXACTLY the combo adopted as the incumbent (and later shipped) - not
+    a combo where the ramp stage's own `fixed` silently wins in one merge
+    and loses in the other. Give the ramp stage a `fixed` that conflicts
+    with what the fallback candidate would otherwise carry, and confirm the
+    ramp stage's own fixed value is what's both verified and adopted."""
+    import yaml
+    spec_d = _spec_with_advance_and_ramp(fixed={"pwm_frequency": 8})
+    spec = tune_spec_from_dict(spec_d)
+    t = Tuner(spec, make_backend(), tmp_path / "tune",
+              spec_text=yaml.safe_dump(spec_d), no_prompt=True,
+              log=lambda s: None)
+    t.manifest["incumbent"] = {"advance_level": 18, "pwm_frequency": 24}
+    t.manifest["trials"] = [
+        _ledger_entry(0, "advance", "trial", {"advance_level": 18}, 3.0),
+        _ledger_entry(1, "advance", "trial", {"advance_level": 26}, 2.8),
+    ]
+    seen_pwm_frequency_at_certify: list[int] = []
+
+    def fake_trial(plan):
+        idx = len(t.manifest["trials"])
+        ov = plan.overrides
+        dq = ["demag events 1 > 0"] if ov.get("advance_level") == 18 else None
+        if plan.kind == "verify" and dq is None:
+            seen_pwm_frequency_at_certify.append(ov.get("pwm_frequency"))
+        entry = {"index": idx, "stage": plan.stage, "kind": plan.kind,
+                 "overrides": ov, "disqualified": dq, "discarded": False,
+                 "dir": f"trials/T{idx:03d}"}
+        t.manifest["trials"].append(entry)
+        return entry
+
+    t._trial = fake_trial
+    ramp_stage = next(s for s in spec.stages if s.name == "ramp")
+    t._run_measure_stage(ramp_stage)
+
+    # stage.fixed (pwm_frequency=8) must have been the value actually
+    # snap-tested ...
+    assert seen_pwm_frequency_at_certify == [8]
+    # ... and the SAME value the session adopts going forward.
+    assert t.manifest["incumbent"]["pwm_frequency"] == 8
+
+
+def test_measure_stage_resets_incumbent_to_default_when_nothing_certifies(
+        tmp_path):
+    """If the efficiency winner AND every fallback candidate (including
+    pure firmware defaults) fail to certify a safe max_ramp, the session
+    must not silently keep the (proven-unsafe) efficiency winner as the
+    incumbent - finals would then confirm and ship it despite never
+    re-testing the throttle range that broke it. Resetting to {} makes
+    finals compare default-vs-default (unconfirmable), so the session
+    ships untouched firmware defaults instead."""
+    import yaml
+    spec_d = _spec_with_advance_and_ramp()
+    spec = tune_spec_from_dict(spec_d)
+    t = Tuner(spec, make_backend(), tmp_path / "tune",
+              spec_text=yaml.safe_dump(spec_d), no_prompt=True,
+              log=lambda s: None)
+    t.manifest["incumbent"] = {"advance_level": 18}
+    t.manifest["trials"] = [
+        _ledger_entry(0, "advance", "trial", {"advance_level": 18}, 3.0),
+        _ledger_entry(1, "advance", "trial", {"advance_level": 26}, 2.8),
+    ]
+
+    def fake_trial_always_desyncs(plan):
+        idx = len(t.manifest["trials"])
+        entry = {"index": idx, "stage": plan.stage, "kind": plan.kind,
+                 "overrides": plan.overrides,
+                 "disqualified": ["demag events 1 > 0"], "discarded": False,
+                 "dir": f"trials/T{idx:03d}"}
+        t.manifest["trials"].append(entry)
+        return entry
+
+    t._trial = fake_trial_always_desyncs
+    ramp_stage = next(s for s in spec.stages if s.name == "ramp")
+    t._run_measure_stage(ramp_stage)
+
+    st = t.manifest["stages"]["ramp"]
+    assert st["winner"] is None
+    assert st["used_fallback_settings"] is None
+    assert t.manifest["incumbent"] == {}

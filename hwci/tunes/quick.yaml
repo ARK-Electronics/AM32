@@ -34,14 +34,16 @@ probe:
   points: {t30: 0.30, t50: 0.50, t60: 0.60}
   dwell_s: 4.0
   safety:
-    max_current_a: 40.0
+    max_current_a: 70.0
     max_thrust_n: 16.0
     max_rpm: 32000
 
 objective:
   weights: {t30: 1.0, t50: 2.0, t60: 1.0}
   min_power_w: 20.0
-  noise_floor_pct: 3.0
+  # Tightened from 3.0 with the 2026-07-07 noise-floor re-validation - see
+  # ObjectiveSpec.noise_floor_pct in tuner.py for the empirical basis.
+  noise_floor_pct: 2.0
 
 constraints:
   max_demag_events: 0
