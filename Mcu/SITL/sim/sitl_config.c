@@ -18,10 +18,14 @@ sitl_config_t sitl_cfg = {
         .resistance = 0.045f,
         .inductance = 2.1e-5f,
         .mutual_inductance = 0.0f,
-        .inertia = 2.0e-5f, // motor plus a small prop; light rotors accelerate faster than the firmware desync detection allows
+        // defaults model a ~7 inch prop on a 900Kv motor at 4S: about
+        // 19A and 13500 rpm at full throttle. Rotors much lighter than
+        // this accelerate faster than the firmware desync detection
+        // allows
+        .inertia = 3.0e-5f,
         .damping = 1.0e-6f,
         .static_friction = 0.003f,
-        .load_k_omega2 = 2.0e-9f,
+        .load_k_omega2 = 1.0e-7f,
     },
     .battery = {
         .voltage = 16.8f,

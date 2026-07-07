@@ -47,6 +47,15 @@ void read_flash_bin(uint8_t* data, uint32_t add, int out_buff_len)
                 len = out_buff_len;
             }
             memcpy(data, def, len);
+            if (out_buff_len > 27) {
+                // make the seeded settings describe the simulated motor,
+                // as a properly configured ESC would: a mismatched
+                // MOTOR_KV makes low rpm power protection clamp the duty
+                // at the wrong rpm. eeprom offsets 26/27 = motor_kv/poles,
+                // kv is stored as (kv-20)/40
+                data[26] = (uint8_t)((sitl_cfg.motor.kv - 20.0f) / 40.0f + 0.5f);
+                data[27] = (uint8_t)sitl_cfg.motor.poles;
+            }
         }
         return;
     }
