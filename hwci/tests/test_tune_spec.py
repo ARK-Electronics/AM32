@@ -20,7 +20,7 @@ def test_minimal_spec_gets_documented_defaults():
     assert spec.objective.weights == {"t30": 1.0, "t50": 2.0,
                                       "t70": 1.0, "t90": 0.5}
     assert spec.objective.min_power_w == 20.0
-    assert spec.objective.noise_floor_pct == 3.0
+    assert spec.objective.noise_floor_pct == 2.0
     assert spec.anchors_every == 5
     assert spec.constraints.max_demag_events == 0
     assert spec.constraints.jitter_max_regression_pct == 25.0

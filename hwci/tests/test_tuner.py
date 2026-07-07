@@ -5,7 +5,7 @@ import yaml
 
 from hwci.model import RunResult
 from hwci.sim import MotorParams
-from hwci.tuner import (SimTuneBackend, Tuner, TuneSpecError,
+from hwci.tuner import (ObjectiveSpec, SimTuneBackend, Tuner, TuneSpecError,
                         objective_score, startup_stats, startup_profile,
                         tune_spec_from_dict)
 
@@ -137,6 +137,14 @@ def _metrics(points):
     return {"steady_points": [
         {"segment": lbl, "eff_gf_per_w": eff, "elec_power_w": pw}
         for lbl, eff, pw in points]}
+
+
+def test_objective_default_noise_floor_matches_empirical_validation():
+    # Locks in the 2026-07-07 value (tightened from 3.0): real anchor-to-anchor
+    # score CV in completed sessions was 0.50%/0.77%, so 2.0 keeps a deliberate
+    # ~2.6x margin over the worse of the two - see ObjectiveSpec.noise_floor_pct.
+    assert ObjectiveSpec().noise_floor_pct == 2.0
+    assert ObjectiveSpec().min_power_w == 20.0
 
 
 def test_objective_weighted_mean():

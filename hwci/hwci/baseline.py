@@ -36,6 +36,19 @@ class Thresholds:
     #     gated-point (>= 20W) run-to-run spread of 9.8%, so 15% is ~1.5x
     #     the observed worst case. Tighten further only with more repeat
     #     captures demonstrating headroom.
+    #   - RE-VALIDATED 2026-07-07 with a dedicated noise-floor characterization
+    #     (thrust + current/power, sample-to-sample AND run-to-run, ~50-run
+    #     corpus + 3 fresh long-hold captures, 9/9 independent spot-checks):
+    #     same-session THRUST run-to-run CV at gated (>=20W) points ranges
+    #     0.03-8.94% across post-fix sessions, worst at t20-t30 (8.94%,
+    #     ab2-newfw pair) - consistent with the original 9.8% evidence, so
+    #     15% (~1.7x that worst case) still holds with the intended margin.
+    #     IMPORTANT: the "longhold"-family runs (git_sha c827bd7: baseline-
+    #     prop-longhold-{repeatability,v1,v3,v4}, baseline-prop-repeatability)
+    #     straddle the SAME DAY as the prop-wake-impingement fix above and
+    #     read as high as 16.15% CV at t60 - do not use them as evidence for
+    #     future threshold changes without first confirming which side of the
+    #     prop-flip fix they were captured on.
     efficiency_drop_pct: float = 15.0
     # g/W below this magnitude is load-cell noise (no-prop rig): efficiency is
     # not a meaningful signal there and is not gated (the check reports "not
@@ -47,7 +60,23 @@ class Thresholds:
     # two small noisy numbers, not a meaningful efficiency figure. Applies to
     # per-point checks AND to which points count toward "peak efficiency"
     # (excluding them keeps peak from being hijacked by the noisiest point).
+    # Confirmed still well-placed 2026-07-07: the 20% throttle point sits at
+    # ~18.6W (just under the floor) with 30.9% mean thrust CV and 7.3% current
+    # CV, sample-to-sample; 30% throttle (~43W, clearly above the floor) drops
+    # to 20.0%/4.7% - the floor sits right where the noise character changes.
     efficiency_min_power_w: float = 20.0
+    # Current-draw regression, per steady point (percentage INCREASE allowed).
+    # Complements efficiency_drop_pct: current/power has a much tighter
+    # same-session noise floor than the efficiency RATIO (thrust/power), which
+    # inherits thrust's noisier channel - so a pure current/loss regression
+    # (more switching or resistive loss at the same throttle, thrust roughly
+    # unchanged) is caught far more sharply here than by the efficiency gate
+    # alone. Sized 2026-07-07 from the same characterization: worst post-fix
+    # same-session current CV at a gated (>=20W) point was 5.04% (ab2-newfw
+    # pair, 50% throttle); 10% is ~1.7x that, matching this file's usual
+    # margin convention. Uses the same efficiency_min_power_w floor - below
+    # it every channel is measurement noise, current included.
+    current_increase_pct: float = 10.0
     # Zero-cross jitter (zc_jitter_pct per steady point, percentage POINTS of
     # commutation interval). A coarse guardrail, not a precision gate: the
     # 21-24k RPM PWM/commutation beat band swings with battery state on the
@@ -155,6 +184,19 @@ def compare(current: dict, baseline: dict, thr: Thresholds | None = None,
         return _check(name, b, c, _worse_is_lower(b, c, thr.efficiency_drop_pct),
                       f"<= {thr.efficiency_drop_pct}% drop; missing fails")
 
+    def _current_check(name, b, c, power_w=None):
+        """Current-draw regression gate - see Thresholds.current_increase_pct.
+        Shares the efficiency power floor (not the no-prop g/W floor, which
+        is specific to the RATIO reading as noise around zero): current
+        itself is a direct measurement, not a ratio, but it is still
+        dominated by measurement noise below the same power floor."""
+        if power_w is not None and not _missing(power_w) and power_w < thr.efficiency_min_power_w:
+            return _check(name, b, c, True,
+                          f"baseline power {power_w:.1f}W < "
+                          f"{thr.efficiency_min_power_w}W: not gated")
+        return _check(name, b, c, _worse_is_higher(b, c, thr.current_increase_pct),
+                      f"<= +{thr.current_increase_pct}% increase; missing fails")
+
     # per-point efficiency: gate every segment present in either side; a
     # steady segment that vanished from the current run fails closed. Needed
     # here (ahead of the peak check below) because "peak efficiency" for the
@@ -244,6 +286,18 @@ def compare(current: dict, baseline: dict, thr: Thresholds | None = None,
             continue
         checks.append(_eff_check(f"eff@{label}", bp.get("eff_gf_per_w"),
                                  p.get("eff_gf_per_w"), bp.get("elec_power_w")))
+
+    # per-point current draw: same segment coverage rule as efficiency above
+    # (fail closed on a vanished segment) - see Thresholds.current_increase_pct
+    # for why this is a separate, sharper gate than the efficiency ratio.
+    for label, bp in base_pts.items():
+        p = cur_pts.get(label)
+        if p is None:
+            checks.append(_check(f"current@{label}", bp.get("current_a"), None,
+                                 False, "segment missing from current run"))
+            continue
+        checks.append(_current_check(f"current@{label}", bp.get("current_a"),
+                                     p.get("current_a"), bp.get("elec_power_w")))
 
     # per-point zero-cross jitter. Unlike the gates above this must NOT fail
     # closed on a missing BASELINE value: baselines captured before the v2

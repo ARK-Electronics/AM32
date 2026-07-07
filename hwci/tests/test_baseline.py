@@ -105,6 +105,60 @@ def test_low_power_point_not_gated_even_with_prop():
     assert "not gated" in eff_check["note"]
 
 
+def test_current_regression_fails():
+    # 20% draw increase is well past the 10% gate (see
+    # Thresholds.current_increase_pct: sized from a 5.04% worst same-session
+    # spread observed on the bench at a gated (>=20W) point).
+    m = _metrics()
+    base = {"metrics": copy.deepcopy(m)}
+    for p in m["steady_points"]:
+        if p.get("elec_power_w", 0) >= 20.0:
+            p["current_a"] *= 1.20
+    result = bl.compare(m, base)
+    assert not result["passed"]
+    label = next(p["segment"] for p in base["metrics"]["steady_points"]
+                if p.get("elec_power_w", 0) >= 20.0)
+    assert any(c["name"] == f"current@{label}" and not c["pass"]
+               for c in result["checks"])
+
+
+def test_current_within_tolerance_passes():
+    m = _metrics()
+    base = {"metrics": copy.deepcopy(m)}
+    for p in m["steady_points"]:
+        if p.get("elec_power_w", 0) >= 20.0:
+            p["current_a"] *= 1.05  # within the 10% gate
+    assert bl.compare(m, base)["passed"]
+
+
+def test_current_not_gated_below_power_floor():
+    # Same power floor as efficiency: below it, current draw is dominated by
+    # measurement noise (see Thresholds.efficiency_min_power_w).
+    m = _metrics()
+    base = {"metrics": copy.deepcopy(m)}
+    base["metrics"]["steady_points"][0]["elec_power_w"] = 2.3
+    base["metrics"]["steady_points"][0]["current_a"] = 0.15
+    m["steady_points"][0]["elec_power_w"] = 2.3
+    m["steady_points"][0]["current_a"] = 0.30  # +100%, would fail the % gate
+    result = bl.compare(m, base)
+    label = base["metrics"]["steady_points"][0]["segment"]
+    current_check = next(c for c in result["checks"]
+                         if c["name"] == f"current@{label}")
+    assert current_check["pass"]
+    assert "not gated" in current_check["note"]
+
+
+def test_missing_current_point_fails():
+    m = _metrics()
+    base = {"metrics": copy.deepcopy(m)}
+    label = base["metrics"]["steady_points"][-1]["segment"]
+    m["steady_points"] = [p for p in m["steady_points"] if p["segment"] != label]
+    result = bl.compare(m, base)
+    assert not result["passed"]
+    assert any(c["name"] == f"current@{label}" and not c["pass"]
+               for c in result["checks"])
+
+
 def test_peak_efficiency_excludes_low_power_points():
     # "Peak" is a max() over throttle points, which amplifies whichever point
     # is noisiest. If the literal peak sits at a low-power point, the GATE

@@ -1,0 +1,27 @@
+name: noise_floor_probe
+description: >
+  Long fixed-throttle holds (12-20s, well beyond the usual 6s) at a spread of
+  operating points, purpose-built to characterize thrust-stand and
+  current/power measurement noise: sample-to-sample scatter within a steady
+  hold (metrology/vibration noise) at a high sample count per point, plus
+  an idle-armed hold for the absolute sensor floor at ~zero signal. Run this
+  profile 2-3 times back to back (same firmware, same pack) to additionally
+  get run-to-run repeatability at each point. Not a performance gate - no
+  baseline comparison is meaningful for this profile, it exists to size the
+  noise floor that OTHER gates' tolerances should be set against.
+sample_rate_hz: 100
+arm_settle_s: 2.0
+steady_tail_fraction: 0.7
+
+safety:
+  max_current_a: 40.0
+  max_thrust_n: 16.0
+  max_rpm: 32000
+
+segments:
+  - {label: idle,   throttle: 0.00, duration_s: 12.0, steady: true}
+  - {label: t20,    throttle: 0.20, duration_s: 20.0, steady: true}
+  - {label: t50,    throttle: 0.50, duration_s: 20.0, steady: true}
+  - {label: t80,    throttle: 0.80, duration_s: 20.0, steady: true}
+  - {label: t100,   throttle: 1.00, duration_s: 15.0, steady: true}
+  - {label: rampdn, throttle: 0.00, duration_s: 4.0,  ramp: true}

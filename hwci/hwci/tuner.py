@@ -106,6 +106,12 @@ class ThermalSpec:
 @dataclass
 class ProbeSpec:
     points: dict[str, float] | None = None   # label -> throttle, ordered
+    # Left at the efficiency_sweep-standard 6s: the 2026-07-07 noise-floor
+    # characterization's much longer 15-20s holds gave tighter same-session
+    # numbers in isolation, but the tuner's OWN noise floor (see
+    # ObjectiveSpec.noise_floor_pct) is already down at 0.5-0.77% CV at 6s via
+    # anchor-normalization + multi-point weighting - no observed need to pay
+    # for a longer probe.
     dwell_s: float = 6.0
     safety: dict = field(default_factory=dict)
 
@@ -114,8 +120,30 @@ class ProbeSpec:
 class ObjectiveSpec:
     weights: dict[str, float] = field(default_factory=lambda: {
         "t30": 1.0, "t50": 2.0, "t70": 1.0, "t90": 0.5})
+    # Matches Thresholds.efficiency_min_power_w in hwci/baseline.py - the same
+    # noise-floor characterization that sized that value (2026-07-07) confirms
+    # 20W is still where the noise character changes on this bench.
     min_power_w: float = 20.0
-    noise_floor_pct: float = 3.0
+    # Ties within this % of the best weighted score break on lower jitter,
+    # then lower FET temp, then closest-to-default settings (see
+    # _pick_winner) - i.e. this is "how close counts as noise, not signal."
+    # 3.0 was an initial guess sized against the raw per-point efficiency
+    # spread used for Thresholds.efficiency_drop_pct (~9.8% worst same-
+    # session). That number doesn't directly apply here: this score is a
+    # WEIGHTED AVERAGE across 4 throttle points (which itself cancels some
+    # independent per-point noise) AND anchor-normalized against the
+    # incumbent re-measured every anchors_every trials (which cancels smooth
+    # pack drift) - both push the effective noise well below the raw
+    # per-point figure. Empirically confirmed 2026-07-07 from real completed
+    # sessions: anchor-to-anchor score CV (repeat measurements of the SAME
+    # incumbent settings, in this exact weighted-score space, across a real
+    # multi-stage session) was 0.50% (tune-quick-1, n=5 anchors) and 0.77%
+    # (tune-quick-3, n=6 anchors) - 4-6x inside the old 3.0% allowance.
+    # Tightened to 2.0 (still ~2.6x the worst of those two sessions) rather
+    # than tracking that margin exactly, since the evidence base is only 2
+    # sessions - revisit with more completed tune sessions before tightening
+    # further.
+    noise_floor_pct: float = 2.0
 
 
 @dataclass
