@@ -1,0 +1,24 @@
+name: noprop_smoke_3a
+description: >
+  noprop_smoke with the current abort tightened to 2.8 A for a 25.0 V / 3.0 A
+  current-limited bench supply: abort before the supply hits its CC limit and
+  the rail sags. NO propeller. Validates the pipeline (arming, throttle path,
+  perf-over-SWD, loop time / jitter) after the demag-comp rebase + review
+  fixes. Demag stays OFF (firmware built without DEMAG_COMP) - this is the
+  inertness gate. Thrust/efficiency are meaningless with no prop. ~18 s.
+sample_rate_hz: 100
+arm_settle_s: 3.0
+
+safety:
+  max_current_a: 2.8     # trip below the 3.0 A supply limit (host + stand side)
+  max_thrust_n: 2.0      # ~0 expected with no prop; catches a sensor fault
+  max_rpm: 25000         # 1800KV @ 25V free-runs ~45k at 100%; 20% is ~10k
+
+segments:
+  - {label: idle,    throttle: 0.00, duration_s: 2.0}
+  - {label: ramp10,  throttle: 0.10, duration_s: 2.0, ramp: true}
+  - {label: hold10,  throttle: 0.10, duration_s: 4.0, steady: true}
+  - {label: ramp20,  throttle: 0.20, duration_s: 2.0, ramp: true}
+  - {label: hold20,  throttle: 0.20, duration_s: 4.0, steady: true}
+  - {label: rampdn,  throttle: 0.00, duration_s: 2.0, ramp: true}
+  - {label: stop,    throttle: 0.00, duration_s: 2.0}
