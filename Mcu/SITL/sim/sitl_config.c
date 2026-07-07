@@ -43,10 +43,12 @@ sitl_config_t sitl_cfg = {
         .watchdog_enabled = true,
     },
     .speedup = 1.0f,
+    .input_port = 57733,
     .eeprom_path = "am32_eeprom.bin",
     .can_uri = "mcast:0",
     .uid = NULL,
     .node_id = -1,
+    .input_type = -1,
     .verbose = false,
     .nosleep = false,
     .realtime = false,
@@ -185,8 +187,12 @@ static void usage(const char* prog)
            "  --config FILE    JSON config file for motor/battery/esc/sim\n"
            "  --eeprom FILE    eeprom backing file (default am32_eeprom.bin)\n"
            "  --can-uri URI    CAN interface (default mcast:0)\n"
+           "  --input-port N   UDP port for PWM/DShot input, 0 to disable\n"
+           "                   (default 57733)\n"
            "  --speedup X      simulation speed, 0 for free running (default 1.0)\n"
            "  --node-id N      force DroneCAN node ID\n"
+           "  --input-type N   force eeprom INPUT_SIGNAL_TYPE (0=auto 1=dshot\n"
+           "                   2=servo 5=dronecan)\n"
            "  --uid STR        string used to derive the 16 byte unique ID\n"
            "  --verbose        1Hz state output on stderr\n"
            "  --nosleep        busy wait instead of sleeping (uses two full\n"
@@ -203,8 +209,10 @@ void sitl_config_init(int argc, char** argv)
         { "config", required_argument, NULL, 'c' },
         { "eeprom", required_argument, NULL, 'e' },
         { "can-uri", required_argument, NULL, 'u' },
+        { "input-port", required_argument, NULL, 'p' },
         { "speedup", required_argument, NULL, 's' },
         { "node-id", required_argument, NULL, 'n' },
+        { "input-type", required_argument, NULL, 'I' },
         { "uid", required_argument, NULL, 'U' },
         { "verbose", no_argument, NULL, 'v' },
         { "nosleep", no_argument, NULL, 'N' },
@@ -213,7 +221,7 @@ void sitl_config_init(int argc, char** argv)
         { NULL, 0, NULL, 0 },
     };
     int c;
-    while ((c = getopt_long(argc, argv, "c:e:u:s:n:U:vNRh", opts, NULL)) != -1) {
+    while ((c = getopt_long(argc, argv, "c:e:u:p:s:n:I:U:vNRh", opts, NULL)) != -1) {
         switch (c) {
         case 'c':
             load_json(optarg);
@@ -224,11 +232,17 @@ void sitl_config_init(int argc, char** argv)
         case 'u':
             sitl_cfg.can_uri = optarg;
             break;
+        case 'p':
+            sitl_cfg.input_port = atoi(optarg);
+            break;
         case 's':
             sitl_cfg.speedup = strtof(optarg, NULL);
             break;
         case 'n':
             sitl_cfg.node_id = atoi(optarg);
+            break;
+        case 'I':
+            sitl_cfg.input_type = atoi(optarg);
             break;
         case 'U':
             sitl_cfg.uid = optarg;

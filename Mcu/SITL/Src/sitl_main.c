@@ -24,13 +24,21 @@ extern int am32_main(void);
 extern void save_flash_nolib(uint8_t* data, int length, uint32_t add);
 extern void read_flash_bin(uint8_t* data, uint32_t add, int out_buff_len);
 
-// force the DroneCAN node ID in the eeprom backing file
-static void apply_node_id(void)
+// force settings in the eeprom backing file from the command line
+static void apply_eeprom_overrides(void)
 {
     EEprom_t buf;
     read_flash_bin(buf.buffer, EEPROM_START_ADD, sizeof(buf.buffer));
-    if (buf.can.can_node != (uint8_t)sitl_cfg.node_id) {
+    bool changed = false;
+    if (sitl_cfg.node_id >= 0 && buf.can.can_node != (uint8_t)sitl_cfg.node_id) {
         buf.can.can_node = (uint8_t)sitl_cfg.node_id;
+        changed = true;
+    }
+    if (sitl_cfg.input_type >= 0 && buf.input_type != (uint8_t)sitl_cfg.input_type) {
+        buf.input_type = (uint8_t)sitl_cfg.input_type;
+        changed = true;
+    }
+    if (changed) {
         save_flash_nolib(buf.buffer, sizeof(buf.buffer), EEPROM_START_ADD);
     }
 }
@@ -69,13 +77,14 @@ int main(int argc, char** argv)
     sitl_config_init(argc, argv);
     lock_instance();
     motor_init();
-    if (sitl_cfg.node_id >= 0) {
-        apply_node_id();
+    if (sitl_cfg.node_id >= 0 || sitl_cfg.input_type >= 0) {
+        apply_eeprom_overrides();
     }
 
     fprintf(stderr, "AM32 SITL: eeprom=%s can=%s speedup=%.1f\n",
         sitl_cfg.eeprom_path, sitl_cfg.can_uri, (double)sitl_cfg.speedup);
 
+    sitl_input_init();
     sitl_start_sim_thread();
     return am32_main();
 }

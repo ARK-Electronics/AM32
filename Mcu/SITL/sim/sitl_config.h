@@ -39,10 +39,12 @@ typedef struct {
 
     // runtime options
     float speedup; // 0 = free run
+    int input_port; // UDP port for PWM/DShot input, 0 disables
     const char* eeprom_path;
     const char* can_uri;
     const char* uid; // optional fixed unique ID string
     int node_id; // -1 = leave to eeprom/DNA
+    int input_type; // eeprom INPUT_SIGNAL_TYPE override, -1 = leave
     bool verbose;
     bool nosleep; // busy wait instead of sleeping, for timing accuracy
     bool realtime; // SCHED_FIFO for both threads

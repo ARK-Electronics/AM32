@@ -439,6 +439,7 @@ static void* sim_thread_main(void* arg)
         if (now >= next_can_poll_ns) {
             next_can_poll_ns = now + 100000; // 100us
             sitl_can_poll();
+            sitl_input_poll();
         }
         watchdog_check();
         sitl_dispatch();

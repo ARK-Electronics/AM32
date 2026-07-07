@@ -63,6 +63,9 @@ void sitl_irq_handler(int irq)
     case SITL_IRQ_TENKHZ:
         tenKhzRoutine();
         break;
+    case SITL_IRQ_DMA:
+        sitl_input_dma_irq();
+        break;
     case SITL_IRQ_EXTI15:
         processDshot();
         break;

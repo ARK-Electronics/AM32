@@ -23,11 +23,21 @@ enum sitl_irq {
     SITL_IRQ_COMP = 0, // BEMF comparator EXTI
     SITL_IRQ_COM, // commutation timer (TIM16) update
     SITL_IRQ_TENKHZ, // 20kHz loop timer (TIM6)
-    SITL_IRQ_DMA, // input capture DMA (unused, dshot not supported)
-    SITL_IRQ_EXTI15, // software interrupt for dshot (unused)
+    SITL_IRQ_DMA, // input capture DMA (PWM/DShot over UDP)
+    SITL_IRQ_EXTI15, // software interrupt for dshot processing
     SITL_IRQ_CAN, // CAN frame RX poll
     SITL_IRQ_MAX
 };
+
+// PWM/DShot input over UDP (sitl_input.c)
+void sitl_input_init(void);
+void sitl_input_poll(void); // sim thread, every 100us
+void sitl_input_arm(void); // receiveDshotDma()
+void sitl_input_timer_reset(void); // resetInputCaptureTimer()
+void sitl_input_send_reply(void); // sendDshotDma()
+void sitl_input_dma_irq(void); // DMA transfer complete handler
+uint8_t sitl_input_pin_state(void); // getInputPinState()
+void sitl_input_stats(uint32_t out[4]);
 
 // simulated monotonic time since start
 uint64_t sitl_time_ns(void);

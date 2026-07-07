@@ -69,12 +69,14 @@ void enableCorePeripherals(void)
     sitl_nvic_set_priority(SITL_IRQ_COM, 0);
     sitl_nvic_set_priority(SITL_IRQ_TENKHZ, 2);
     sitl_nvic_set_priority(SITL_IRQ_DMA, 1);
-    sitl_nvic_set_priority(SITL_IRQ_EXTI15, 3);
+    sitl_nvic_set_priority(SITL_IRQ_EXTI15, 2);
     sitl_nvic_set_priority(SITL_IRQ_CAN, 4);
 
     sitl_nvic_enable_irq(SITL_IRQ_COMP);
     sitl_nvic_enable_irq(SITL_IRQ_COM);
     sitl_nvic_enable_irq(SITL_IRQ_TENKHZ);
+    sitl_nvic_enable_irq(SITL_IRQ_DMA);
+    sitl_nvic_enable_irq(SITL_IRQ_EXTI15);
     sitl_nvic_enable_irq(SITL_IRQ_CAN);
 
     sitl_tenkhz_enable();
@@ -100,7 +102,10 @@ void generatePwmTimerEvent(void)
     sitl_tim1_force_update();
 }
 
-void resetInputCaptureTimer(void) { }
+void resetInputCaptureTimer(void)
+{
+    sitl_input_timer_reset();
+}
 
 void reloadWatchDogCounter(void)
 {
