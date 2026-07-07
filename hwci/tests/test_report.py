@@ -99,6 +99,33 @@ def test_render_tune_raw_markdown_includes_trial_metrics(tmp_path):
     assert "eff_gf_per_w" in md
 
 
+def test_render_tune_settings_impact_markdown_groups_by_value():
+    manifest = _manifest(trials=[
+        {"index": 0, "stage": "advance", "kind": "anchor",
+         "overrides": {}, "score_raw": 5.0, "score_norm": 5.0,
+         "disqualified": None, "discarded": False},
+        {"index": 1, "stage": "advance", "kind": "trial",
+         "overrides": {"advance_level": 30}, "score_raw": 6.3,
+         "score_norm": 6.3, "disqualified": None, "discarded": False},
+        {"index": 2, "stage": "advance", "kind": "trial",
+         "overrides": {"advance_level": 34}, "score_raw": 6.1,
+         "score_norm": 6.2, "disqualified": None, "discarded": False},
+        {"index": 3, "stage": "advance", "kind": "trial",
+         "overrides": {"advance_level": 10}, "score_raw": None,
+         "score_norm": None, "disqualified": ["demag"],
+         "discarded": False},
+    ])
+    settings_rows = [{"setting": "advance_level", "offset": 23,
+                      "default": 26, "best": 30, "changed": True}]
+
+    md = report.render_tune_settings_impact_markdown(manifest, settings_rows)
+
+    assert "## Settings performance impact" in md
+    assert "advance_level" in md
+    assert "+1.300" in md
+    assert "| advance | `advance_level` | 10 | 1 | 1 | - | - | - | 3 |" in md
+
+
 def test_write_tune_pdf_skips_gracefully_without_matplotlib(tmp_path, monkeypatch):
     # Force `import matplotlib` to fail; the tune must not blow up.
     monkeypatch.setitem(sys.modules, "matplotlib", None)

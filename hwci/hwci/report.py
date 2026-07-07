@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import statistics
 import textwrap
 from pathlib import Path
 
@@ -139,6 +140,7 @@ def write_tune_pdf(out_dir: str | Path, manifest: dict, result: dict,
         with PdfPages(pdf_path) as pdf:
             _pdf_cover_page(plt, pdf, manifest, result, diff_rows or [])
             _pdf_settings_pages(plt, pdf, settings_rows or [])
+            _pdf_settings_impact_pages(plt, pdf, manifest, settings_rows or [])
             _pdf_progress_page(plt, pdf, manifest, result)
             _pdf_tables_pages(plt, pdf, manifest)
             _pdf_raw_data_pages(plt, pdf, out_dir, manifest)
@@ -378,6 +380,31 @@ def _pdf_settings_pages(plt, pdf, settings_rows: list) -> None:
         plt.close(fig)
 
 
+def _pdf_settings_impact_pages(plt, pdf, manifest: dict,
+                               settings_rows: list) -> None:
+    rows = _settings_impact_rows(manifest, settings_rows)
+    if not rows:
+        return
+    table_rows = [[
+        _fmt(r["stage"]), _wrap(r["setting"], 24), _fmt(r["value"]),
+        _fmt(r["runs"]), _fmt(r["disqualified"]),
+        f"{_fmt(r['median_raw'])}/{_fmt(r['median_norm'])}",
+        _fmt_delta(r["delta_norm"]), _wrap(r["trials"], 38),
+    ] for r in rows]
+    for i, chunk in enumerate(_paginate_rows(table_rows, 32)):
+        fig = plt.figure(figsize=_PAGE_LS)
+        title = ("Settings performance impact" if i == 0
+                 else f"Settings performance impact (cont. {i + 1})")
+        fig.text(0.04, 0.94, title, fontsize=18, fontweight="bold", va="top")
+        _place_table(fig.add_axes([0.04, 0.05, 0.92, 0.80]), chunk,
+                     ["stage", "setting", "value", "runs", "DQ",
+                      "median raw/norm", "delta", "trials"],
+                     [0.10, 0.20, 0.09, 0.06, 0.05, 0.16, 0.10, 0.24],
+                     fontsize=7.4, line_h=0.026)
+        pdf.savefig(fig)
+        plt.close(fig)
+
+
 def _fmt_ov(ov) -> str:
     """Compact one-line overrides: {'a': 1, 'b': 2} -> 'a=1, b=2'."""
     if not ov:
@@ -400,6 +427,109 @@ def _fmt_raw(v) -> str:
 
 def _md_cell(v) -> str:
     return _fmt_raw(v).replace("|", "\\|").replace("\n", "<br>")
+
+
+def _fmt_delta(v) -> str:
+    return "-" if v is None else f"{v:+.3f}"
+
+
+def _median(values: list) -> float | None:
+    values = [v for v in values if v is not None]
+    return statistics.median(values) if values else None
+
+
+def _score_norm(e: dict):
+    return (e.get("score_norm") if e.get("score_norm") is not None
+            else e.get("score_raw"))
+
+
+def _settings_impact_rows(manifest: dict, settings_rows: list) -> list[dict]:
+    defaults = {r.get("setting"): r.get("default") for r in settings_rows
+                if r.get("setting") is not None}
+    if not defaults:
+        return []
+    setting_order = {r.get("setting"): i for i, r in enumerate(settings_rows)}
+    trials = [t for t in manifest.get("trials", []) if not t.get("discarded")]
+
+    stage_order: list[str] = []
+    stage_settings: dict[str, set] = {}
+    for e in trials:
+        stage = e.get("stage")
+        if stage is None:
+            continue
+        if stage not in stage_order:
+            stage_order.append(stage)
+        ov = e.get("overrides") if isinstance(e.get("overrides"), dict) else {}
+        kind = str(e.get("kind") or "")
+        if kind == "trial" or kind.startswith("final_"):
+            stage_settings.setdefault(stage, set()).update(ov)
+
+    groups: dict[tuple[str, str, object], list[dict]] = {}
+    for e in trials:
+        stage = e.get("stage")
+        if stage not in stage_settings or e.get("kind") == "final_startup":
+            continue
+        ov = e.get("overrides") if isinstance(e.get("overrides"), dict) else {}
+        for setting in stage_settings[stage]:
+            if setting not in ov and setting not in defaults:
+                continue
+            value = ov.get(setting, defaults.get(setting))
+            groups.setdefault((stage, setting, value), []).append(e)
+
+    out = []
+    for stage in stage_order:
+        settings = sorted(stage_settings.get(stage, set()),
+                          key=lambda s: setting_order.get(s, 9999))
+        for setting in settings:
+            value_entries = {value: entries for (st, name, value), entries
+                             in groups.items()
+                             if st == stage and name == setting}
+            if len(value_entries) < 2:
+                continue
+            default_value = defaults.get(setting)
+            default_norm = _median([_score_norm(e)
+                                    for e in value_entries.get(default_value, [])])
+            values = sorted(value_entries,
+                            key=lambda v: (v != default_value,
+                                           v if isinstance(v, (int, float)) else 0,
+                                           str(v)))
+            for value in values:
+                entries = value_entries[value]
+                median_norm = _median([_score_norm(e) for e in entries])
+                delta = (None if median_norm is None or default_norm is None
+                         else median_norm - default_norm)
+                out.append({
+                    "stage": stage,
+                    "setting": setting,
+                    "value": value,
+                    "runs": len(entries),
+                    "disqualified": sum(1 for e in entries
+                                         if e.get("disqualified")),
+                    "median_raw": _median([e.get("score_raw") for e in entries]),
+                    "median_norm": median_norm,
+                    "delta_norm": delta,
+                    "trials": ",".join(str(e.get("index")) for e in entries),
+                })
+    return out
+
+
+def render_tune_settings_impact_markdown(manifest: dict,
+                                         settings_rows: list) -> str:
+    rows = _settings_impact_rows(manifest, settings_rows)
+    if not rows:
+        return ""
+    out = ["## Settings performance impact\n",
+           "| stage | setting | value | runs | DQ | median raw g/W | "
+           "median norm g/W | delta vs default norm g/W | trials |",
+           "|---|---|---:|---:|---:|---:|---:|---:|---|"]
+    for r in rows:
+        out.append(f"| {_md_cell(r['stage'])} | `{_md_cell(r['setting'])}` | "
+                   f"{_md_cell(r['value'])} | {r['runs']} | "
+                   f"{r['disqualified']} | {_md_cell(r['median_raw'])} | "
+                   f"{_md_cell(r['median_norm'])} | "
+                   f"{_fmt_delta(r['delta_norm'])} | {_md_cell(r['trials'])} |")
+    out.append("")
+    return "\n".join(out)
 
 
 def _load_trial_metrics(out_dir: str | Path,

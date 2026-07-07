@@ -1652,6 +1652,10 @@ class Tuner:
             changed = "yes" if row["changed"] else ""
             out.append(f"| `{row['setting']}` | {row['offset']} | "
                        f"{row['default']} | {row['best']} | {changed} |")
+        impact = reportmod.render_tune_settings_impact_markdown(m, settings_rows)
+        if impact:
+            out.append("")
+            out.append(impact)
         out.append("\n## Stages\n")
         out.append("| stage | winner | score (g/W, normalized) |")
         out.append("|---|---|---|")
