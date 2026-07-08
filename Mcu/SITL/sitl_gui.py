@@ -296,14 +296,50 @@ def main():
             log_action('can_enable %d' % int(can.enabled))
 
         can_enable.setToolTip(
-            'Start/stop the RawCommand + ArmingStatus stream. Cutting it\n'
-            'simulates losing the CAN flight controller: the firmware\n'
-            'zeroes the throttle 250ms after commands stop, then the\n'
-            'signal timeout reboots the ESC.')
+            'Master switch for this GUI\'s CAN traffic: ArmingStatus at the\n'
+            'configured rate plus RawCommand when its box is ticked.\n'
+            'Cutting everything simulates losing the flight controller\n'
+            'entirely: the firmware zeroes throttle 250ms after commands\n'
+            'stop and the CAN signal timeout then reboots the ESC. Use the\n'
+            'RawCommand box instead to cut only the command stream.')
         can_enable.toggled.connect(can_enable_changed)
         g2.addWidget(can_enable, 0, 0)
 
-        g2.addWidget(QLabel('Throttle:'), 1, 0)
+        can_rawcmd = QCheckBox('RawCommand')
+        can_rawcmd.setChecked(True)
+        can_rawcmd.setToolTip(
+            'Send the esc.RawCommand throttle broadcasts. Unchecking\n'
+            'simulates a flight controller that stops commanding while the\n'
+            'rest of its CAN traffic continues (the ArmingStatus stream\n'
+            'keeps flowing) - the firmware is expected to zero the input\n'
+            '250ms after commands stop.')
+
+        def can_rawcmd_changed():
+            can.send_rawcommand = can_rawcmd.isChecked()
+            log_action('can_rawcmd %d' % int(can.send_rawcommand))
+
+        can_rawcmd.toggled.connect(can_rawcmd_changed)
+        g2.addWidget(can_rawcmd, 1, 0)
+
+        can_armed = QCheckBox('Armed')
+        can_armed.setChecked(True)
+        can_armed.setToolTip(
+            'Value carried in the ArmingStatus broadcasts: checked sends\n'
+            'FULLY_ARMED (255), unchecked sends disarmed (0). With the\n'
+            'default REQUIRE_ARM setting the ESC only applies throttle\n'
+            'while armed, so unchecking this while spinning must stop the\n'
+            'motor. The ArmingStatus stream itself follows Enable; note\n'
+            'the ESC ignores NodeStatus, so ArmingStatus is what keeps its\n'
+            'CAN signal timeout fed.')
+
+        def can_armed_changed():
+            can.armed = can_armed.isChecked()
+            log_action('can_armed %d' % int(can.armed))
+
+        can_armed.toggled.connect(can_armed_changed)
+        g2.addWidget(can_armed, 1, 1)
+
+        g2.addWidget(QLabel('Throttle:'), 2, 0)
         # slider in 0..1000 -> throttle 0..1
         can_value = QSlider(Qt.Horizontal)
         can_value.setRange(0, 1000)
@@ -318,11 +354,11 @@ def main():
             'firmware settings also require an ArmingStatus broadcast\n'
             '(sent automatically while enabled) before spinning.')
         can_value.valueChanged.connect(can_value_changed)
-        g2.addWidget(can_value, 1, 1, 1, 2)
+        g2.addWidget(can_value, 2, 1, 1, 2)
         can_value_label = QLabel('0.00')
-        g2.addWidget(can_value_label, 1, 3)
+        g2.addWidget(can_value_label, 2, 3)
 
-        g2.addWidget(QLabel('Rate Hz:'), 2, 0)
+        g2.addWidget(QLabel('Rate Hz:'), 3, 0)
         can_rate = QSpinBox()
         can_rate.setRange(1, 1000)
         can_rate.setValue(50)
@@ -335,12 +371,12 @@ def main():
             'RawCommand broadcast rate. Autopilots typically send ESC\n'
             'commands at 50..400Hz on CAN.')
         can_rate.valueChanged.connect(can_rate_changed)
-        g2.addWidget(can_rate, 2, 1)
+        g2.addWidget(can_rate, 3, 1)
 
         can_zero_btn = QPushButton('Zero throttle')
         can_zero_btn.setToolTip('Set the CAN throttle to zero (keeps streaming commands).')
         can_zero_btn.clicked.connect(lambda: can_value.setValue(0))
-        g2.addWidget(can_zero_btn, 3, 0)
+        g2.addWidget(can_zero_btn, 4, 0)
 
         # parameter panel
         pf = QGroupBox('parameters (set + save + restart)')
@@ -351,7 +387,7 @@ def main():
             'the default 5 (dronecan) disables the PWM/DShot input\n'
             'interrupts entirely, so set 0..2 to test the signal wire.')
         gp = QGridLayout(pf)
-        g2.addWidget(pf, 4, 0, 1, 4)
+        g2.addWidget(pf, 5, 0, 1, 4)
         gp.addWidget(QLabel('INPUT_SIGNAL_TYPE:'), 0, 0)
         ptype_var = QSpinBox()
         ptype_var.setToolTip(
@@ -777,6 +813,10 @@ def main():
             ds_edt.setChecked(False)
         elif cmd == 'can_enable' and can is not None:
             can_enable.setChecked(bool(int(cargs[0])))
+        elif cmd == 'can_rawcmd' and can is not None:
+            can_rawcmd.setChecked(bool(int(cargs[0])))
+        elif cmd == 'can_armed' and can is not None:
+            can_armed.setChecked(bool(int(cargs[0])))
         elif cmd == 'can_value' and can is not None:
             can_value.setValue(int(float(cargs[0]) * 1000))
         elif cmd == 'can_rate' and can is not None:

@@ -161,6 +161,8 @@ class CanPanel(object):
     def __init__(self, uri):
         self.uri = uri
         self.enabled = False
+        self.send_rawcommand = True
+        self.armed = True
         self.throttle = 0.0     # 0..1
         self.rate = 50.0
         self.esc_index = 0
@@ -224,11 +226,13 @@ class CanPanel(object):
             now = time.time()
             if now >= next_send:
                 next_send += 1.0 / max(1.0, self.rate)
-                cmds = [0] * (self.esc_index + 1)
-                cmds[self.esc_index] = int(8191 * self.throttle)
-                node.broadcast(dronecan.uavcan.equipment.safety.ArmingStatus(status=255))
-                node.broadcast(dronecan.uavcan.equipment.esc.RawCommand(cmd=cmds))
-                self.sent.tick()
+                status = 255 if self.armed else 0
+                node.broadcast(dronecan.uavcan.equipment.safety.ArmingStatus(status=status))
+                if self.send_rawcommand:
+                    cmds = [0] * (self.esc_index + 1)
+                    cmds[self.esc_index] = int(8191 * self.throttle)
+                    node.broadcast(dronecan.uavcan.equipment.esc.RawCommand(cmd=cmds))
+                    self.sent.tick()
         # orderly shutdown of the mcast IO child process
         try:
             node.close()
