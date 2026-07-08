@@ -12,6 +12,7 @@
  */
 
 #include "sitl.h"
+#include <stdio.h>
 
 static SITL_TIM_TypeDef tims[SITL_NUM_TIMS];
 
@@ -76,6 +77,37 @@ static uint32_t tim1_cnt(uint64_t now_ns)
 bool sitl_tim1_pwm_out(int chan, uint64_t now_ns)
 {
     return tim1_cnt(now_ns) < tim1.ccr_act[chan];
+}
+
+/*
+  dead time from the DTG field of the emulated TIM1 BDTR, decoded with
+  the STM32 encoding at t_DTS = one 160MHz CPU tick (CKD is never
+  changed by the firmware). The firmware sets this the same way as on
+  hardware: DEAD_TIME at init plus dead_time_override ORed in from
+  loadEEpromSettings
+ */
+uint32_t sitl_tim1_dead_time_ns(void)
+{
+    static uint32_t last_bdtr = 0xffffffff;
+    static uint32_t dead_ns;
+    const uint32_t bdtr = tims[SITL_TIM1_IDX].BDTR;
+    if (bdtr != last_bdtr) {
+        last_bdtr = bdtr;
+        const uint32_t dtg = bdtr & 0xFF;
+        uint32_t ticks;
+        if ((dtg & 0x80) == 0) {
+            ticks = dtg;
+        } else if ((dtg & 0xC0) == 0x80) {
+            ticks = (64 + (dtg & 0x3F)) * 2;
+        } else if ((dtg & 0xE0) == 0xC0) {
+            ticks = (32 + (dtg & 0x1F)) * 8;
+        } else {
+            ticks = (32 + (dtg & 0x1F)) * 16;
+        }
+        dead_ns = (ticks * CPU_TICK_NS_NUM) / CPU_TICK_NS_DEN;
+        fprintf(stderr, "SITL: dead time %uns (BDTR 0x%02x)\n", dead_ns, dtg);
+    }
+    return dead_ns;
 }
 
 void sitl_tim1_set_duty_all(uint16_t duty)

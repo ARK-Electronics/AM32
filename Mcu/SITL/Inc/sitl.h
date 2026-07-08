@@ -118,6 +118,9 @@ void sitl_timers_init(void);
 // side compare is active for the current TIM1 counter phase
 bool sitl_tim1_pwm_out(int chan, uint64_t now_ns);
 
+// dead time in ns decoded from the emulated TIM1 BDTR DTG field
+uint32_t sitl_tim1_dead_time_ns(void);
+
 // EXTI emulation for the comparator lines
 #define SITL_EXTI_LINE_21 (1UL << 21)
 #define SITL_EXTI_LINE_22 (1UL << 22)

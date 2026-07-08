@@ -42,6 +42,10 @@ static struct {
     double ke; // V/(rad/s) mechanical
     double vbus; // battery terminal voltage after sag
     double ibus; // battery current, previous step (breaks the loop)
+    // dead time tracking: per phase last PWM level and the end of the
+    // current both-off window
+    bool pwm_last[3];
+    uint64_t dead_until[3];
     // sensor averaging accumulators
     double acc_v, acc_i;
     uint32_t acc_n;
@@ -138,12 +142,25 @@ void motor_step(uint64_t now_ns, uint32_t dt_ns)
         e[p] = m.ke * m.omega * shape[p];
     }
 
-    // gate states from the phase mode and the emulated PWM timer
+    // gate states from the phase mode and the emulated PWM timer. On a
+    // complementary switched phase both fets are off for the configured
+    // dead time after each PWM edge and the body diode conducts, as on
+    // hardware
+    const uint32_t dead_ns = sitl_tim1_dead_time_ns();
     bool hi[3], lo[3];
     for (int p = 0; p < 3; p++) {
         const bool pwm = sitl_tim1_pwm_out(p, now_ns);
         switch (sitl_phase_mode[p]) {
         case SITL_PHASE_PWM:
+            if (pwm != m.pwm_last[p]) {
+                m.pwm_last[p] = pwm;
+                m.dead_until[p] = now_ns + dead_ns;
+            }
+            if (now_ns < m.dead_until[p]) {
+                hi[p] = false;
+                lo[p] = false;
+                break;
+            }
             hi[p] = pwm;
             lo[p] = !pwm;
             break;
@@ -164,6 +181,10 @@ void motor_step(uint64_t now_ns, uint32_t dt_ns)
             hi[p] = false;
             lo[p] = false;
             break;
+        }
+        if (sitl_phase_mode[p] != SITL_PHASE_PWM) {
+            m.pwm_last[p] = pwm;
+            m.dead_until[p] = 0;
         }
     }
 

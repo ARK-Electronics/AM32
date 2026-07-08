@@ -32,6 +32,9 @@ void MX_TIM1_Init(void)
 {
     sitl_tim1_set_psc(0);
     sitl_tim1_set_arr(TIM1_AUTORELOAD);
+    // dead time as on the g431 target; loadEEpromSettings ORs
+    // dead_time_override into BDTR on top of this
+    sitl_tim_deref(SITL_TIM1_IDX)->BDTR = DEAD_TIME;
     sitl_tim1_force_update();
 }
 
