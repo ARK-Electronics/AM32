@@ -1309,10 +1309,12 @@ void demagEdgeRoutine()
 {
     uint16_t time_since_zc = INTERVAL_TIMER_COUNT;
     uint16_t wait_ticks = demag_wait_ticks; // the delay THIS cycle was scheduled with
-    // Keep demag_restore_pending set while cancelling: if the fallback update
-    // was already pending, PeriodElapsedCallback() must consume it as a stale
-    // restore timer instead of treating it as a commutation timer.
     DISABLE_COM_TIMER_INT();
+#ifdef MCU_F051
+    LL_TIM_ClearFlag_UPDATE(COM_TIMER);
+    NVIC_ClearPendingIRQ(COM_TIMER_IRQ);
+    demag_restore_pending = 0;
+#endif
     demagRestoreNormalPolarity(); // catch the real zero cross after the release edge
     if (time_since_zc <= wait_ticks) {
         // Minimum-time gate, mirroring the normal ZC path's interval gate: a
