@@ -67,6 +67,14 @@ ifneq ($(DEMAG_COMP),)
 CFLAGS_COMMON += -DHWCI_DEMAG_COMP=$(DEMAG_COMP)
 endif
 
+# Observe-only demag (opt-in, bench diagnostics). With `make <TARGET>
+# DEMAG_COMP=<n> DEMAG_OBSERVE=1` the firmware measures blanking_length and
+# counts demag events but takes no action (no duty cut, no proxy commutation).
+# Used to gather stage-ordering evidence safely on the stand.
+ifeq ($(DEMAG_OBSERVE),1)
+CFLAGS_COMMON += -DHWCI_DEMAG_OBSERVE
+endif
+
 # Linker options
 LDFLAGS_COMMON := -specs=nano.specs $(LIBS) -Wl,--gc-sections -Wl,--print-memory-usage
 
@@ -84,7 +92,7 @@ BIN_DIR := $(ROOT)/$(OBJ)
 # Record the flags in a stamp file and make every ELF depend on it: when the
 # flags change, the stamp's contents (and mtime) change and the ELF rebuilds.
 # $(file) is used instead of the shell for portability (no cmd.exe/sh split).
-BUILD_FLAGS := HWCI_PERF=$(HWCI_PERF) DEMAG_COMP=$(DEMAG_COMP)
+BUILD_FLAGS := HWCI_PERF=$(HWCI_PERF) DEMAG_COMP=$(DEMAG_COMP) DEMAG_OBSERVE=$(DEMAG_OBSERVE)
 FLAGS_STAMP := $(OBJ)/.build_flags
 $(shell $(MKDIR) -p $(OBJ))
 PREV_BUILD_FLAGS := $(if $(wildcard $(FLAGS_STAMP)),$(strip $(file < $(FLAGS_STAMP))))
