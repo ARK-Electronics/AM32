@@ -127,6 +127,11 @@ def main():
 
     # ---- PWM/DShot input panel
     f1 = QGroupBox('PWM/DShot input (udp %s:%u)' % (args.host, args.port))
+    f1.setToolTip(
+        'The classic ESC signal wire, emulated over UDP: each packet is one\n'
+        'frame on the wire, either a servo PWM pulse or a complete DShot\n'
+        'frame. The frames are decoded by the unmodified AM32 firmware,\n'
+        'including input auto-detection, CRC checking and arming.')
     g1 = QGridLayout(f1)
     top.addWidget(f1, 0, 0)
 
@@ -136,6 +141,12 @@ def main():
         ds.enabled = ds_enable.isChecked()
         log_action('ds_enable %d' % int(ds.enabled))
 
+    ds_enable.setToolTip(
+        'Start/stop the frame stream. The ESC arms after seeing zero\n'
+        'throttle for about 1.5 seconds, like on the bench. Unchecking\n'
+        'simulates signal loss: the firmware signal timeout zeroes the\n'
+        'motor and reboots the ESC, which is the behaviour exercised in\n'
+        'input failover testing.')
     ds_enable.toggled.connect(ds_enable_changed)
     g1.addWidget(ds_enable, 0, 0)
 
@@ -157,6 +168,15 @@ def main():
         log_action('ds_type %s' % ds_type.currentText())
         value_changed()
 
+    ds_type.setToolTip(
+        'Signal protocol on the wire.\n'
+        'pwm: the classic servo pulse, 1000..2000us pulse width = throttle,\n'
+        '  sent at 50..490Hz.\n'
+        'dshot300/600: digital frames at 300/600 kbit/s. Each frame is 16\n'
+        '  bits: 11 bit throttle (48..2047; 0=stop, 1..47 are commands),\n'
+        '  a telemetry request bit and a 4 bit checksum.\n'
+        'dshot150 exists in the protocol but AM32 input auto-detection has\n'
+        'no timing band for it, so the ESC never recognises it.')
     ds_type.currentTextChanged.connect(type_changed)
     g1.addWidget(ds_type, 1, 1)
 
@@ -166,6 +186,13 @@ def main():
         ds.bidir = ds_bidir.isChecked()
         log_action('ds_bidir %d' % int(ds.bidir))
 
+    ds_bidir.setToolTip(
+        'Bidirectional DShot (BDShot): the signal line idles high and the\n'
+        'frame checksum is inverted. After each received frame the ESC\n'
+        'answers on the same wire with a GCR-encoded reply carrying the\n'
+        'electrical rotation period, which flight controllers use for RPM\n'
+        'notch filtering. The reply also carries extended telemetry frames\n'
+        'when EDT is enabled. Required for the BDShot telemetry line below.')
     ds_bidir.toggled.connect(ds_bidir_changed)
     g1.addWidget(ds_bidir, 1, 2)
 
@@ -184,6 +211,12 @@ def main():
             v = 0
         ds.value = v
 
+    ds_value.setToolTip(
+        'Throttle value sent in every frame. DShot: 48..2047 (0 = motor\n'
+        'stop). Values 1..47 are DShot commands (beacons, direction,\n'
+        'settings save, programming mode) - the slider skips them because\n'
+        'a drag would dwell long enough to execute one. PWM: pulse width\n'
+        'in microseconds, 1000 = stop, 2000 = full throttle.')
     # valueChanged fires for both drags and programmatic setValue()
     ds_value.valueChanged.connect(value_changed)
     g1.addWidget(ds_value, 2, 1, 1, 2)
@@ -199,11 +232,22 @@ def main():
         ds.rate = float(ds_rate.value())
         log_action('ds_rate %d' % ds_rate.value())
 
+    ds_rate.setToolTip(
+        'Frame rate on the wire. Flight controllers send DShot at 1..8kHz\n'
+        'and servo PWM at 50..490Hz. The ESC needs a continuous stream:\n'
+        'arming, the signal-loss timeout and BDShot reply rate all follow\n'
+        'the frame rate. Note the rate is wall clock, so at low simulation\n'
+        'speedups frames arrive faster in simulated time and some are\n'
+        'dropped while the virtual wire is busy, as on real hardware.')
     ds_rate.valueChanged.connect(rate_changed)
     g1.addWidget(ds_rate, 3, 1)
 
     bf = QHBoxLayout()
     zero_btn = QPushButton('Zero throttle')
+    zero_btn.setToolTip(
+        'Set the throttle to the stop value (DShot 0 / PWM 1000us).\n'
+        'Needed for arming and before DShot commands such as the EDT\n'
+        'enable are accepted by the firmware.')
     zero_btn.clicked.connect(
         lambda: ds_value.setValue(1000 if ds.ptype == sd.TYPE_PWM else 0))
     bf.addWidget(zero_btn)
@@ -214,16 +258,33 @@ def main():
         ds.edt_want = ds_edt.isChecked()
         log_action('ds_edt %d' % int(ds.edt_want))
 
+    ds_edt.setToolTip(
+        'Extended DShot Telemetry: temperature, voltage and current frames\n'
+        'interleaved into the BDShot replies (temperature/voltage every\n'
+        '~200 replies, current every ~40). The firmware only accepts the\n'
+        'enable command (DShot command 13) while armed with the motor\n'
+        'stopped, and a reboot clears it, so this checkbox keeps re-sending\n'
+        'the command until the replies show EDT frames. Needs bidir.')
     ds_edt.toggled.connect(ds_edt_changed)
     bf.addWidget(ds_edt)
     bf.addStretch(1)
     g1.addLayout(bf, 4, 0, 1, 4)
 
     ds_status = QLabel('arm: enable + hold zero throttle >1.5s')
+    ds_status.setToolTip(
+        'Guidance from the DShot sender: arming procedure, EDT progress\n'
+        'and protocol notes.')
     g1.addWidget(ds_status, 5, 0, 1, 4)
 
     # ---- DroneCAN input panel
     f2 = QGroupBox('DroneCAN input (%s)' % args.can_uri)
+    f2.setToolTip(
+        'DroneCAN: the CAN bus protocol used on larger vehicles, here\n'
+        'carried over multicast UDP. Throttle goes as esc.RawCommand\n'
+        'broadcasts and the ESC sends esc.Status telemetry back. In the\n'
+        'current firmware, once any RawCommand has been received the CAN\n'
+        'input overrides the PWM/DShot wire until a reboot - the\n'
+        'arbitration behaviour the failover parameter work is about.')
     g2 = QGridLayout(f2)
     top.addWidget(f2, 0, 1)
 
@@ -234,6 +295,11 @@ def main():
             can.enabled = can_enable.isChecked()
             log_action('can_enable %d' % int(can.enabled))
 
+        can_enable.setToolTip(
+            'Start/stop the RawCommand + ArmingStatus stream. Cutting it\n'
+            'simulates losing the CAN flight controller: the firmware\n'
+            'zeroes the throttle 250ms after commands stop, then the\n'
+            'signal timeout reboots the ESC.')
         can_enable.toggled.connect(can_enable_changed)
         g2.addWidget(can_enable, 0, 0)
 
@@ -247,6 +313,10 @@ def main():
             can.throttle = can_value.value() / 1000.0
             log_action('can_value %.4f' % can.throttle)
 
+        can_value.setToolTip(
+            'Throttle 0..1, sent as esc.RawCommand 0..8191. The default\n'
+            'firmware settings also require an ArmingStatus broadcast\n'
+            '(sent automatically while enabled) before spinning.')
         can_value.valueChanged.connect(can_value_changed)
         g2.addWidget(can_value, 1, 1, 1, 2)
         can_value_label = QLabel('0.00')
@@ -261,19 +331,33 @@ def main():
             can.rate = float(can_rate.value())
             log_action('can_rate %d' % can_rate.value())
 
+        can_rate.setToolTip(
+            'RawCommand broadcast rate. Autopilots typically send ESC\n'
+            'commands at 50..400Hz on CAN.')
         can_rate.valueChanged.connect(can_rate_changed)
         g2.addWidget(can_rate, 2, 1)
 
         can_zero_btn = QPushButton('Zero throttle')
+        can_zero_btn.setToolTip('Set the CAN throttle to zero (keeps streaming commands).')
         can_zero_btn.clicked.connect(lambda: can_value.setValue(0))
         g2.addWidget(can_zero_btn, 3, 0)
 
         # parameter panel
         pf = QGroupBox('parameters (set + save + restart)')
+        pf.setToolTip(
+            'Sets an ESC setting over the DroneCAN parameter protocol, saves\n'
+            'to eeprom and reboots the ESC so it takes effect at startup.\n'
+            'INPUT_SIGNAL_TYPE selects which input the firmware listens to:\n'
+            'the default 5 (dronecan) disables the PWM/DShot input\n'
+            'interrupts entirely, so set 0..2 to test the signal wire.')
         gp = QGridLayout(pf)
         g2.addWidget(pf, 4, 0, 1, 4)
         gp.addWidget(QLabel('INPUT_SIGNAL_TYPE:'), 0, 0)
         ptype_var = QSpinBox()
+        ptype_var.setToolTip(
+            'INPUT_SIGNAL_TYPE value: 0 = auto detect the wire protocol,\n'
+            '1 = dshot, 2 = servo PWM, 5 = dronecan only (disables the\n'
+            'PWM/DShot input interrupts at boot).')
         ptype_var.setRange(0, 5)
         ptype_var.setValue(1)
         gp.addWidget(ptype_var, 0, 1)
@@ -286,6 +370,7 @@ def main():
             can.set_param('INPUT_SIGNAL_TYPE', ptype_var.value())
 
         apply_btn = QPushButton('Apply')
+        apply_btn.setToolTip('Set the parameter over CAN, save to eeprom and reboot the ESC.')
         apply_btn.clicked.connect(param_apply)
         gp.addWidget(apply_btn, 0, 3)
     else:
@@ -294,6 +379,10 @@ def main():
     # ---- simulation panel: motor model selection and the optional high
     # rate graph/animation views fed by the SITL state stream
     f4 = QGroupBox('simulation')
+    f4.setToolTip(
+        'Controls for the physics simulation itself (not the ESC firmware):\n'
+        'the motor/battery model, the simulation pace and the high rate\n'
+        'views fed by the simulation state stream.')
     g4 = QGridLayout(f4)
     top.addWidget(f4, 2, 0, 1, 2)
 
@@ -306,6 +395,13 @@ def main():
         name = os.path.splitext(os.path.basename(path))[0]
         model_paths[name] = path
         model_combo.addItem(name)
+    model_combo.setToolTip(
+        'Motor/battery models from Mcu/SITL/models/*.json: winding\n'
+        'resistance and inductance, Kv (rpm per volt), pole count, rotor\n'
+        'inertia and the propeller load (torque proportional to speed\n'
+        'squared), plus battery voltage and internal resistance. These\n'
+        'set how the virtual motor behaves; the ESC settings should\n'
+        'match the motor, as on a real bench.')
     g4.addWidget(model_combo, 0, 1)
 
     def model_load():
@@ -315,6 +411,10 @@ def main():
             sim.load_model(model_paths[name])
 
     load_btn = QPushButton('Load')
+    load_btn.setToolTip(
+        'Apply the selected model to the running simulation. Switching\n'
+        'while spinning is like swapping the motor mid-flight - expect\n'
+        'desyncs; switch at zero throttle for clean results.')
     load_btn.clicked.connect(model_load)
     g4.addWidget(load_btn, 0, 2)
     model_status = QLabel('')
@@ -323,10 +423,31 @@ def main():
     graph_i_check = QCheckBox('Current graph')
     graph_v_check = QCheckBox('Voltage graph')
     motorview_check = QCheckBox('Motor view')
+    graph_i_check.setToolTip(
+        'Open a scope window with the three phase currents and the battery\n'
+        'current, sampled from the physics. In a 6-step drive two phases\n'
+        'conduct at a time, so each phase carries a quasi-trapezoidal\n'
+        'current envelope that steps at every commutation (six steps per\n'
+        'electrical revolution).')
+    graph_v_check.setToolTip(
+        'Open a scope window with the three phase terminal voltages and\n'
+        'the battery voltage. At coarse sample periods it shows the duty\n'
+        'proportional average; at fine periods (with a low speedup) the\n'
+        'raw PWM switching, the back-EMF ramp on the floating phase (what\n'
+        'the comparator senses for zero crossings) and the dead time diode\n'
+        'spikes at each PWM edge become visible.')
+    motorview_check.setToolTip(
+        'Open the animated motor/bridge view. Slow the simulation right\n'
+        'down with the speedup slider to watch individual commutation\n'
+        'steps rotate the stator field ahead of the rotor.')
     g4.addWidget(graph_i_check, 1, 0)
     g4.addWidget(graph_v_check, 1, 1)
     g4.addWidget(motorview_check, 1, 2)
     sim_rate_label = QLabel('')
+    sim_rate_label.setToolTip(
+        'State stream rate actually arriving from the simulation (wall\n'
+        'clock). It is the sample period in simulated time divided by the\n'
+        'speedup, capped at about 200k samples/s.')
     g4.addWidget(sim_rate_label, 1, 3, 1, 2)
 
     # simulation speedup, logarithmic 0.001x .. 2x, for slow motion in
@@ -347,10 +468,18 @@ def main():
         log_action('speedup %.4f' % speedup)
         sim.set_speedup(speedup)
 
+    speed_slider.setToolTip(
+        'Simulation pace relative to wall clock, 0.001x to 2x. Everything\n'
+        'inside the simulation (arming times, timeouts, telemetry rates)\n'
+        'runs in simulated time, so at 0.01x the ESC responds 100x slower\n'
+        'from the outside. Use slow motion to watch the motor view and to\n'
+        'capture fine waveforms; the input frames you send arrive faster\n'
+        'in simulated time, so some are dropped as on a busy wire.')
     speed_slider.valueChanged.connect(speed_changed)
     g4.addWidget(speed_slider, 2, 1, 1, 2)
     g4.addWidget(speed_label, 2, 3)
     speed_1x = QPushButton('1x')
+    speed_1x.setToolTip('Back to real time.')
     speed_1x.clicked.connect(lambda: speed_slider.setValue(150))
     g4.addWidget(speed_1x, 2, 4)
 
@@ -376,11 +505,24 @@ def main():
         sim.period_us = sample_spin.value()
         log_action('sample_us %.1f' % sample_spin.value())
 
+    sample_spin.setToolTip(
+        'Scope sample period in simulated microseconds. At 10us and above\n'
+        'each sample is the average over its period (the honest duty\n'
+        'proportional envelope - point sampling would alias against the\n'
+        'PWM and show false gaps). Below 10us samples are instantaneous\n'
+        'levels, down to the 500ns physics step, showing PWM edges and\n'
+        'dead time. The wall clock rate is capped at ~200k samples/s, so\n'
+        'fine periods only take full effect at low speedups.')
     sample_spin.valueChanged.connect(sample_changed)
 
     def window_changed(*a):
         log_action('window_ms %.2f' % window_spin.value())
 
+    window_spin.setToolTip(
+        'Scope x axis span in simulated milliseconds, newest sample at the\n'
+        'right edge. For commutation-scale viewing use 10..50ms; for PWM\n'
+        'and dead time detail use 0.1..1ms together with a fine sample\n'
+        'period and a low speedup.')
     window_spin.valueChanged.connect(window_changed)
 
     # the scopes: each signal set gets its own top level pyqtgraph
@@ -414,6 +556,28 @@ def main():
 
             w = GraphWindow()
             w.setWindowTitle('AM32 SITL %s' % title)
+            if key == 'i':
+                w.setToolTip(
+                    'Phase currents iu/iv/iw (red/green/blue) and battery\n'
+                    'current ibus (white). Two phases conduct at a time in a\n'
+                    '6-step drive: current flows in one phase, back through\n'
+                    'another, and the third floats near zero. Each commutation\n'
+                    'advances the pattern; torque is proportional to the\n'
+                    'conducted current. ibus is the PWM-chopped share drawn\n'
+                    'from the battery - averaged it equals duty times phase\n'
+                    'current, which is why battery current is far below phase\n'
+                    'current at partial throttle.')
+            else:
+                w.setToolTip(
+                    'Phase terminal voltages vu/vv/vw (red/green/blue) and\n'
+                    'battery voltage vbus (white). At coarse sample periods\n'
+                    'the trace is the duty proportional average. With a fine\n'
+                    'sample period and low speedup the raw switching shows:\n'
+                    'the PWM square wave on the driven phase, the low side\n'
+                    'held near 0V, the floating phase ramping with back-EMF\n'
+                    'through the zero crossing the comparator detects, and\n'
+                    '500ns dead time spikes to -0.7V or vbus+0.7V where the\n'
+                    'body diodes conduct at each PWM edge.')
             w.resize(700, 300)
             w.addLegend(offset=(10, 10))
             w.setLabel('bottom', 'time', 's')
@@ -440,6 +604,19 @@ def main():
         nonlocal view, scene
         scene = QGraphicsScene(0, 0, 420, 220)
         view = QGraphicsView(scene)
+        view.setToolTip(
+            'Live motor and bridge state.\n'
+            'Dial: the orange needle is the mechanical rotor angle, the\n'
+            'cyan needle the electrical angle - with 7 pole pairs the\n'
+            'electrical needle turns 7x faster, one electrical turn per 6\n'
+            'commutation steps.\n'
+            'U/V/W bars: the bridge output for each phase - green = PWM\n'
+            'driven high side, blue = tied low, grey = floating (undriven,\n'
+            'used for back-EMF sensing), orange = brake PWM.\n'
+            'The comparator line shows which floating phase is being\n'
+            'watched for its back-EMF zero crossing, which is how a\n'
+            'sensorless ESC knows the rotor position.\n'
+            'Use the speedup slider for slow motion.')
         view.setRenderHint(QPainter.Antialiasing)
         view.setFixedHeight(240)
         # rotor dial
@@ -520,9 +697,27 @@ def main():
     top.addWidget(f3, 1, 0, 1, 2)
     fixed = QFontDatabase.systemFont(QFontDatabase.FixedFont)
     bds_label = QLabel('BDShot: -')
+    bds_label.setToolTip(
+        'Telemetry decoded from the BDShot replies on the signal wire:\n'
+        'rpm: from the eRPM period in each reply and the pole count.\n'
+        'spinning/stopped: whether the replies report rotation.\n'
+        'EDT on/off: whether extended telemetry frames are arriving.\n'
+        'sent/replies: frame rates on the virtual wire; replies stop when\n'
+        '  the wire is saturated or the ESC is rebooting.\n'
+        'badcrc: replies that failed their checksum.\n'
+        'temp/volt/current: extended telemetry values when EDT is on.')
     bds_label.setFont(fixed)
     g3.addWidget(bds_label, 0, 0)
     can_label = QLabel('DroneCAN: -')
+    can_label.setToolTip(
+        'Telemetry from the DroneCAN esc.Status broadcasts:\n'
+        'rpm/volt/cur/temp: as reported by the firmware (voltage and\n'
+        '  current from the simulated ADC path).\n'
+        'err: desync count - commutation losses detected by the firmware.\n'
+        'esc.Status: telemetry rate (TELEM_RATE parameter, sim time).\n'
+        'cmds: RawCommand rate this GUI is sending.\n'
+        'node: the ESC node id; up: firmware uptime in simulated seconds\n'
+        '  (resets on every reboot, so it exposes signal-timeout reboots).')
     can_label.setFont(fixed)
     g3.addWidget(can_label, 1, 0)
 
