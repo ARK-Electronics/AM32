@@ -5653,12 +5653,19 @@
 // it; with Keil/armclang the scatter file places it and scatter-loading
 // copies it before main. noclone keeps gcc LTO constant-propagation clones
 // from escaping the section and is unknown to armclang, so it is gcc-only.
+//
+// optimize("O3"): firmware is built with global -Os; keep ISR/commutation
+// paths speed-optimized without lifting every translation unit to -O3.
 #ifdef MCU_F051
 #if defined(__GNUC__) && !defined(__clang__)
-#define RAM_FUNC __attribute__((section(".ramfunc"), noclone))
+#define RAM_FUNC __attribute__((section(".ramfunc"), noclone, optimize("O3")))
 #else
-#define RAM_FUNC __attribute__((section(".ramfunc")))
+#define RAM_FUNC __attribute__((section(".ramfunc"), optimize("O3")))
 #endif
 #else
+#if defined(__GNUC__)
+#define RAM_FUNC __attribute__((optimize("O3")))
+#else
 #define RAM_FUNC
+#endif
 #endif

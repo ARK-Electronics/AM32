@@ -8,6 +8,12 @@
 
 #include "targets.h"
 
+/* Phase helpers are called from RAM_FUNC comStep; keep them at -O3 while the
+ * rest of the firmware builds with global -Os (see Makefile / RAM_FUNC). */
+#if defined(__GNUC__)
+#pragma GCC optimize("O3")
+#endif
+
 extern char prop_brake_active;
 
 #ifndef PWM_ENABLE_BRIDGE

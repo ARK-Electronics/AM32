@@ -44,9 +44,13 @@ VERSION_MINOR := $(shell $(FGREP) "define VERSION_MINOR" $(MAIN_INC_DIR)/version
 FIRMWARE_VERSION := $(VERSION_MAJOR).$(VERSION_MINOR)
 
 # Compiler options
+#
+# Global -Os keeps flash/RAM in check on small MCUs (esp. F051). Hot paths
+# (RAM_FUNC / selected phase code) force -O3 via attributes or file pragmas —
+# a trailing -O3 on the single-shot link line would re-optimize *all* TUs.
 
 CFLAGS_BASE := -fsingle-precision-constant -fomit-frame-pointer -ffast-math
-CFLAGS_BASE += -I$(MAIN_INC_DIR) -g3 -O3 -ffunction-sections --specs=nosys.specs
+CFLAGS_BASE += -I$(MAIN_INC_DIR) -g3 -Os -ffunction-sections --specs=nosys.specs
 CFLAGS_BASE += -Wall -Wundef -Wextra -Werror -Wno-unused-parameter -Wno-stringop-truncation
 
 CFLAGS_COMMON := $(CFLAGS_BASE)
