@@ -6,6 +6,7 @@
  */
 
 #include "main.h"
+#include "settings.h"
 
 #ifndef INC_DSHOT_H_
 #define INC_DSHOT_H_
@@ -16,7 +17,6 @@ void make_dshot_package(uint16_t com_time);
 extern void playInputTune(void);
 extern void playInputTune2(void);
 extern void playBeaconTune3(void);
-extern void saveEEpromSettings(void);
 
 extern volatile char dshot_telemetry;
 extern volatile char armed;
