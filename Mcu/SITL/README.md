@@ -140,6 +140,31 @@ stream stops) followed by zero-throttle re-arming. Running both inputs
 at once exercises exactly this behaviour, which is what the input
 priority/failover parameter work is developing against.
 
+## Headless / CI use
+
+Everything runs without a display: the SITL is a plain console binary
+and the GUI works under Qt's offscreen platform
+(`QT_QPA_PLATFORM=offscreen`) driven through `--control-port`, so full
+interactive scenarios can run in CI. On a minimal Debian/Ubuntu the
+requirements are:
+
+```
+apt install gcc make python3 python3-venv \
+    libgl1 libegl1 libfontconfig1 libxkbcommon0
+pip install dronecan        # for the DroneCAN tests
+python3 Mcu/SITL/make_gui_env.py   # for GUI-driven tests
+```
+
+Multicast CAN over loopback works on a stock VM with no route
+configuration (the SITL self-tests its TX at startup). Timing notes for
+slow or virtualised runners: the simulation paces itself and reports
+the achieved ratio in `--verbose` (x1.00 = real time); the python test
+senders keep their average frame rate under coarse sleep granularity by
+sending catch-up bursts, which matters because the firmware's
+bidirectional DShot auto-detect needs more than 100 frames before
+zero-throttle arming completes, putting a floor of roughly 100Hz on the
+usable frame rate.
+
 ## Architecture
 
 The firmware runs unmodified (built as `am32_main()`) in one thread. A

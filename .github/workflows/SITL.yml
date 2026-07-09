@@ -1,0 +1,102 @@
+name: SITL Tests
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+jobs:
+  sitl-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build SITL
+        run: make AM32_SITL_CAN
+
+      - name: Install pydronecan
+        run: python3 -m pip install dronecan
+
+      - name: Run SITL tests
+        run: |
+          mkdir sitl_test_run && cd sitl_test_run
+          python3 ../Mcu/SITL/run_ci_tests.py --sitl ../obj/AM32_AM32_SITL_CAN_2.20.elf
+
+      - name: Upload SITL log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sitl-test-log
+          path: sitl_test_run/sitl_ci.log
+
+  gui-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt system libraries
+        run: sudo apt-get update && sudo apt-get install -y libgl1 libegl1 libfontconfig1 libxkbcommon0
+
+      - name: Build SITL
+        run: make AM32_SITL_CAN
+
+      - name: Create GUI environment
+        run: python3 Mcu/SITL/make_gui_env.py
+
+      - name: Run GUI test (offscreen)
+        run: |
+          mkdir gui_test_run && cd gui_test_run
+          python3 ../Mcu/SITL/gui_ci_test.py \
+            --gui-python ../Mcu/SITL/venv/bin/python3 \
+            --sitl ../obj/AM32_AM32_SITL_CAN_2.20.elf
+
+      - name: Upload SITL log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gui-test-log
+          path: gui_test_run/sitl_ci.log
+
+  windows-build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Cygwin
+        uses: cygwin/cygwin-install-action@v4
+        with:
+          packages: gcc-core make
+
+      - name: Build SITL
+        shell: C:\cygwin\bin\bash.exe --noprofile --norc -o igncr -eo pipefail '{0}'
+        run: |
+          cd $(cygpath -u "$GITHUB_WORKSPACE")
+          make AM32_SITL_CAN
+          ls -la obj/
+
+      - name: Boot smoke test
+        shell: C:\cygwin\bin\bash.exe --noprofile --norc -o igncr -eo pipefail '{0}'
+        run: |
+          cd $(cygpath -u "$GITHUB_WORKSPACE")
+          ./obj/AM32_AM32_SITL_CAN_2.20.elf --can-uri none --input-type 1 >boot.log 2>&1 &
+          sleep 3
+          kill %1 || true
+          cat boot.log
+          grep -q "PWM/DShot input on udp port" boot.log
+          grep -q "state/model port udp" boot.log
+
+      - name: Package binary with cygwin runtime
+        shell: C:\cygwin\bin\bash.exe --noprofile --norc -o igncr -eo pipefail '{0}'
+        run: |
+          cd $(cygpath -u "$GITHUB_WORKSPACE")
+          mkdir -p sitl-windows
+          cp obj/AM32_AM32_SITL_CAN_*.elf sitl-windows/AM32_SITL_CAN.exe
+          cp /bin/cygwin1.dll sitl-windows/
+
+      - name: Upload Windows SITL binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: sitl-windows
+          path: sitl-windows/

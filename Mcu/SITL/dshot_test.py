@@ -71,11 +71,19 @@ def main():
         badcrc = 0
         while time.time() - t0 < duration:
             now = time.time()
-            if now >= next_send:
+            # catch-up burst: coarse sleep granularity (VMs, CI runners)
+            # must not lower the average frame rate - the firmware's
+            # bidirectional auto-detect needs >100 frames before arming
+            # completes
+            burst = 0
+            while now >= next_send and burst < 10:
                 next_send += period
                 corrupt = args.bad_crc > 0 and (nsent % max(1, int(1 / args.bad_crc))) == 0
                 send(value, corrupt=corrupt)
                 nsent += 1
+                burst += 1
+            if now - next_send > 0.25:
+                next_send = now  # fell too far behind, resync
             for r in port.get_replies():
                 kind, val = sd.decode_reply(r[3], edt_expected=args.edt)
                 if kind == 'erpm':

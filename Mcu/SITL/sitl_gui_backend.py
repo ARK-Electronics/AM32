@@ -78,19 +78,28 @@ class DshotPanel(object):
                 continue
             if now < next_send:
                 time.sleep(next_send - now)
-            next_send += 1.0 / max(1.0, self.rate)
-            try:
-                cmd = self.cmd_queue.get_nowait()
-            except queue.Empty:
-                cmd = None
-            if cmd is not None:
-                self.port.send_dshot(cmd, ptype=self.ptype, telem=True, bidir=self.bidir)
-            elif self.ptype == sd.TYPE_PWM:
-                self.port.send_pwm(int(self.value))
-            else:
-                self.port.send_dshot(int(self.value), ptype=self.ptype,
-                                     telem=self.telem_bit, bidir=self.bidir)
-            self.sent.tick()
+                now = time.time()
+            # catch-up burst: keep the average rate under coarse sleep
+            # granularity (VMs, CI runners) - the firmware's bidirectional
+            # auto-detect needs >100 frames before arming completes
+            burst = 0
+            while now >= next_send and burst < 10:
+                next_send += 1.0 / max(1.0, self.rate)
+                try:
+                    cmd = self.cmd_queue.get_nowait()
+                except queue.Empty:
+                    cmd = None
+                if cmd is not None:
+                    self.port.send_dshot(cmd, ptype=self.ptype, telem=True, bidir=self.bidir)
+                elif self.ptype == sd.TYPE_PWM:
+                    self.port.send_pwm(int(self.value))
+                else:
+                    self.port.send_dshot(int(self.value), ptype=self.ptype,
+                                         telem=self.telem_bit, bidir=self.bidir)
+                self.sent.tick()
+                burst += 1
+            if now - next_send > 0.25:
+                next_send = now  # fell too far behind, resync
             self._collect()
             self._edt_maintain(now)
         self.port.close()
