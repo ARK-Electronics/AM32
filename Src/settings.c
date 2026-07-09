@@ -16,13 +16,6 @@
 #include "IO.h"
 #include "version.h"
 
-extern uint8_t temp_advance;
-extern uint16_t motor_kv;
-extern uint8_t dead_time_override;
-extern uint16_t low_cell_volt_cutoff;
-extern uint16_t stall_protect_minimum_duty;
-extern uint16_t throttle_max_at_low_rpm;
-
 void loadEEpromSettings(void)
 {
     read_flash_bin(eepromBuffer.buffer, eeprom_address, sizeof(eepromBuffer.buffer));

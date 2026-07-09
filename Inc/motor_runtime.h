@@ -1,8 +1,8 @@
 /*
  * motor_runtime.h - shared motor-control runtime state
  *
- * Definitions remain in main.c (behavior-neutral split). Modules that need
- * these symbols include this header instead of inventing local externs.
+ * Definitions live in motor_runtime.c. Modules that need these symbols
+ * include this header (or common.h / signal.h for the older shared set).
  */
 #ifndef MOTOR_RUNTIME_H_
 #define MOTOR_RUNTIME_H_
@@ -20,13 +20,14 @@ extern volatile uint8_t zcfound;
 extern volatile uint32_t commutation_interval;
 extern volatile uint16_t commutation_intervals[6];
 extern volatile uint32_t average_interval;
+extern uint32_t last_average_interval;
 extern volatile uint16_t lastzctime;
 extern volatile uint16_t thiszctime;
 extern volatile uint16_t waitTime;
 extern uint16_t advance;
 extern uint8_t temp_advance;
 extern uint8_t auto_advance_level;
-extern char old_routine;
+extern volatile char old_routine;
 extern volatile uint32_t zero_crosses;
 extern volatile uint32_t polling_mode_changeover;
 extern uint8_t filter_level;
@@ -35,6 +36,13 @@ extern uint8_t bad_count_threshold;
 extern uint8_t min_bemf_counts_up;
 extern uint8_t min_bemf_counts_down;
 extern char prop_brake_active;
+extern uint8_t changeover_step;
+extern uint8_t stuckcounter;
+#if defined(DRONECAN_SUPPORT) && DRONECAN_SUPPORT
+extern uint32_t desync_happened;
+#else
+extern uint8_t desync_happened;
+#endif
 
 /* --- duty / throttle --- */
 extern volatile uint16_t duty_cycle;
@@ -44,6 +52,7 @@ extern volatile uint16_t duty_cycle_maximum;
 extern uint16_t minimum_duty_cycle;
 extern uint16_t min_startup_duty;
 extern uint16_t startup_max_duty_cycle;
+extern uint16_t stall_protect_minimum_duty;
 extern uint16_t adjusted_duty_cycle;
 extern volatile uint16_t adjusted_input;
 extern volatile uint16_t input;
@@ -92,11 +101,24 @@ extern int16_t phase_C_position;
 extern int16_t pwmSin[];
 extern uint16_t step_delay;
 extern uint16_t gate_drive_offset;
+extern uint16_t motor_kv;
+extern uint8_t dead_time_override;
+extern uint32_t MCU_Id;
+extern uint32_t REV_Id;
 
 /* --- sensing / telemetry tick --- */
 extern uint16_t ADC_raw_current;
 extern uint16_t ADC_raw_volts;
 extern uint16_t ADC_raw_input;
+#ifdef NXP
+extern uint16_t ADC_raw_temp[];
+#else
+extern uint16_t ADC_raw_temp;
+#endif
+extern uint16_t ADC_raw_ntc;
+extern uint16_t ADC_smoothed_input;
+extern int16_t converted_degrees;
+extern uint8_t temperature_offset;
 extern uint16_t smoothedcurrent;
 extern uint8_t readIndex;
 extern uint32_t total;
@@ -131,6 +153,13 @@ extern uint16_t servo_high_threshold;
 extern uint16_t servo_neutral;
 extern uint8_t servo_dead_band;
 extern volatile uint8_t PROCESS_ADC_FLAG;
-/* degrees_celsius is in signal.h */
+extern int32_t consumed_current;
+extern int32_t smoothed_raw_current;
+extern char send_esc_info_flag;
+extern uint16_t VOLTAGE_DIVIDER;
+extern char LOW_VOLTAGE_CUTOFF;
+extern uint16_t low_cell_volt_cutoff;
+extern uint16_t low_voltage_count;
+/* degrees_celsius, battery_voltage, actual_current: common.h / signal.h */
 
 #endif /* MOTOR_RUNTIME_H_ */

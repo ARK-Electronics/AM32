@@ -37,31 +37,6 @@
 #define ZC_FILTER_FAST 2
 #endif
 
-extern uint32_t last_average_interval;
-#if DRONECAN_SUPPORT
-extern uint32_t desync_happened;
-#else
-extern uint8_t desync_happened;
-#endif
-extern int32_t consumed_current;
-extern char send_esc_info_flag;
-extern int32_t smoothed_raw_current;
-extern int16_t converted_degrees;
-extern uint16_t VOLTAGE_DIVIDER;
-extern char LOW_VOLTAGE_CUTOFF;
-extern uint16_t low_cell_volt_cutoff;
-extern uint16_t low_voltage_count;
-extern uint16_t ADC_smoothed_input;
-extern uint8_t stuckcounter;
-extern uint8_t changeover_step;
-extern uint16_t stall_protect_minimum_duty;
-#ifdef NXP
-extern uint16_t ADC_raw_temp[];
-#else
-extern uint16_t ADC_raw_temp;
-#endif
-extern uint16_t ADC_raw_ntc;
-
 void runtimeUpdateVariablePwm(uint16_t *last_tim1_arr)
 {
     uint16_t next_tim1_arr = tim1_arr; // unchanged unless variable_pwm recomputes it below
