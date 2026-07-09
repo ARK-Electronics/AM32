@@ -140,6 +140,25 @@ stream stops) followed by zero-throttle re-arming. Running both inputs
 at once exercises exactly this behaviour, which is what the input
 priority/failover parameter work is developing against.
 
+## Windows
+
+The SITL builds under Cygwin (packages: gcc-core, make) with the same
+`make AM32_SITL_CAN`, producing a native console executable, and the
+POSIX signal based scheduler runs correctly under the Cygwin runtime.
+The GUI uses a normal Windows python: `py Mcu/SITL/make_gui_env.py`
+creates the environment and prints the interpreter to use; after that
+`sitl_gui.bat` in the repository root launches the GUI (double click or
+from cmd, extra arguments are passed through). Notes:
+
+- to run the binary from outside a Cygwin shell (cmd, double click),
+  copy `C:\cygwin64\bin\cygwin1.dll` next to it - its only Cygwin
+  dependency (the CI artifact ships it bundled).
+- Windows Firewall must allow inbound UDP for the SITL binary (or ports
+  57732-57734) for CAN and the input/state ports to receive.
+- a socket never receives its own multicast on Windows, so the CAN TX
+  self test is skipped there; on a machine with several interfaces pass
+  an explicit one as `--can-uri mcast:0:<ip>`.
+
 ## Headless / CI use
 
 Everything runs without a display: the SITL is a plain console binary

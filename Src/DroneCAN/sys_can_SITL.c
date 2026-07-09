@@ -124,7 +124,14 @@ void sys_can_init(void)
     }
     const int one = 1;
     setsockopt(fd_in, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
-    if (bind(fd_in, (struct sockaddr*)&addr, sizeof(addr)) != 0) {
+    struct sockaddr_in bind_addr = addr;
+#if defined(__CYGWIN__) || defined(_WIN32)
+    // Windows cannot bind to a multicast group address; bind the port
+    // on INADDR_ANY and rely on the group membership plus the packet
+    // magic/CRC for filtering, as pydronecan's mcast driver does
+    bind_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+#endif
+    if (bind(fd_in, (struct sockaddr*)&bind_addr, sizeof(bind_addr)) != 0) {
         perror("SITL: can bind");
         exit(1);
     }
@@ -158,6 +165,14 @@ void sys_can_init(void)
         exit(1);
     }
 
+#if defined(__CYGWIN__) || defined(_WIN32)
+    /*
+      no TX self test on Windows: a socket never receives its own
+      multicast there, so the test always fails, and the 127.0.0.1
+      rebind is wrong (the loopback interface has no multicast). On a
+      multi homed machine pass an explicit interface: mcast:0:<ip>
+     */
+#else
     /*
       self test: verify our transmissions are delivered back to us. With
       a "ip route add 239.65.82.0/24 dev lo" style route the kernel picks
@@ -202,6 +217,7 @@ void sys_can_init(void)
                 address);
         }
     }
+#endif
 
     fprintf(stderr, "SITL: CAN on %s (%s:%d)\n", name, address, MCAST_PORT);
 }

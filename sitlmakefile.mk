@@ -23,6 +23,8 @@ CFLAGS_$(MCU) := \
 	-I$(HAL_FOLDER_$(MCU))/sim
 
 CFLAGS_$(MCU) += -D_GNU_SOURCE
+# newlib based hosts (Cygwin) have no __WORDSIZE for the canard.h default
+CFLAGS_$(MCU) += -DCANARD_64_BIT="(__SIZEOF_POINTER__ == 8)"
 
 # native compiler flags, replacing the ARM specific CFLAGS_COMMON. Inc is
 # searched via -iquote rather than -I so that Inc/signal.h does not shadow

@@ -20,7 +20,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef __linux__
 #include <sys/prctl.h>
+#endif
 #include <time.h>
 #include <unistd.h>
 
@@ -400,8 +402,10 @@ static void* sim_thread_main(void* arg)
 {
     (void)arg;
     set_realtime("sim");
+#ifdef __linux__
     // timer slack defaults to 50us which ruins short pacing sleeps
     prctl(PR_SET_TIMERSLACK, 1UL);
+#endif
     const uint64_t wall0 = wallclock_ns();
     uint64_t next_can_poll_ns = 0;
     uint64_t next_pace_check_ns = 0;
@@ -486,8 +490,10 @@ void sitl_start_sim_thread(void)
 {
     fw_thread_id = pthread_self();
     set_realtime("firmware");
+#ifdef __linux__
     // timer slack is per thread and defaults to 50us
     prctl(PR_SET_TIMERSLACK, 1UL);
+#endif
     sem_init(&park_sem, 0, 0);
     sem_init(&resume_sem, 0, 0);
 
