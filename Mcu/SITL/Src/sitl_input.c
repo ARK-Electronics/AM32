@@ -96,8 +96,8 @@ void sitl_input_init(void)
         perror("SITL: input socket");
         return;
     }
-    const int one = 1;
-    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+    // no SO_REUSEADDR: a second instance on the same port must fail
+    // loudly instead of silently stealing datagrams
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;

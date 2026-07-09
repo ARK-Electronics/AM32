@@ -5,7 +5,10 @@ threads and expose plain attributes/queues, so they can be driven by any
 front end or by headless tests without a display.
 '''
 
+import collections
 import queue
+import socket
+import struct
 import threading
 import time
 
@@ -272,3 +275,110 @@ class CanPanel(object):
 
     def set_param(self, name, value):
         self.param_queue.put((name, value))
+
+
+class SimStream(object):
+    """subscriber for the SITL simulation state stream (--state-port):
+    high rate physics samples for graphs/animation, and runtime motor
+    model loading. Samples are (t_s, omega, theta, theta_e, iu, iv, iw,
+    vu, vv, vw, vbus, ibus, modes, comp_phase, comp_out)"""
+
+    SAMPLE = struct.Struct('<Qfffffffffff3sBB3x')
+    MAGIC_CMD = 0x5353
+    MAGIC_DATA = 0x5354
+    MAGIC_REPLY = 0x5355
+
+    def __init__(self, host='127.0.0.1', port=57734, period_us=50, maxlen=40000):
+        self.addr = (host, port)
+        self.period_us = period_us
+        self.enabled = False
+        self.samples = collections.deque(maxlen=maxlen)
+        self.lock = threading.Lock()  # guards samples against the reader
+        self.rate = RateCounter()
+        self.model_status = ''
+        self.running = True
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.sock.bind(('127.0.0.1', 0))
+        self.sock.settimeout(0.2)
+        threading.Thread(target=self._reader, daemon=True).start()
+        threading.Thread(target=self._subscriber, daemon=True).start()
+
+    def _subscriber(self):
+        while self.running:
+            if self.enabled:
+                # averaged sampling at coarse periods, so a slow scope
+                # shows the mean over each period instead of aliased
+                # point samples of the PWM
+                flags = 1 if self.period_us >= 10 else 0
+                pkt = struct.pack('<HBBI', self.MAGIC_CMD, 0, flags,
+                                  int(round(self.period_us * 1000)))
+                try:
+                    self.sock.sendto(pkt, self.addr)
+                except OSError:
+                    pass
+            time.sleep(1.0)
+
+    def _reader(self):
+        while self.running:
+            try:
+                d = self.sock.recv(4096)
+            except socket.timeout:
+                continue
+            except OSError:
+                return
+            if len(d) < 4:
+                continue
+            magic, b2, b3 = struct.unpack('<HBB', d[:4])
+            if magic == self.MAGIC_REPLY:
+                self.model_status = d[4:].split(b'\0')[0].decode(errors='replace')
+                continue
+            if magic != self.MAGIC_DATA or b2 != 2:
+                continue
+            count = b3
+            batch = []
+            for k in range(count):
+                off = 4 + k * self.SAMPLE.size
+                if off + self.SAMPLE.size > len(d):
+                    break
+                smp = self.SAMPLE.unpack_from(d, off)
+                batch.append((smp[0] * 1e-9,) + smp[1:])
+            with self.lock:
+                self.samples.extend(batch)
+            self.rate.tick(len(batch))
+
+    def latest(self):
+        with self.lock:
+            return self.samples[-1] if self.samples else None
+
+    def window(self, seconds):
+        """most recent samples spanning the given time window"""
+        out = []
+        with self.lock:
+            if not self.samples:
+                return out
+            t_end = self.samples[-1][0]
+            for smp in reversed(self.samples):
+                if t_end - smp[0] > seconds:
+                    break
+                out.append(smp)
+        out.reverse()
+        return out
+
+    def set_speedup(self, speedup):
+        pkt = struct.pack('<HBBf', self.MAGIC_CMD, 2, 0, speedup)
+        try:
+            self.sock.sendto(pkt, self.addr)
+        except OSError:
+            pass
+
+    def load_model(self, path):
+        self.model_status = 'loading %s ...' % path
+        pkt = struct.pack('<HBB', self.MAGIC_CMD, 1, 0) + path.encode()
+        try:
+            self.sock.sendto(pkt, self.addr)
+        except OSError as ex:
+            self.model_status = str(ex)
+
+    def close(self):
+        self.running = False
+        self.sock.close()

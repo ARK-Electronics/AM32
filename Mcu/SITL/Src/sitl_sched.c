@@ -313,6 +313,7 @@ static void sim_step_once(void)
     motor_step(sim_time_ns_v, dt);
     sim_time_ns_v += dt;
     sitl_timers_step(sim_time_ns_v);
+    sitl_state_step(sim_time_ns_v);
 
     // dispatch block tracer: classify this step if a priority 0 interrupt
     // has been pending for a while
@@ -406,6 +407,9 @@ static void* sim_thread_main(void* arg)
     uint64_t next_pace_check_ns = 0;
     uint64_t verbose_last_ns = 0;
     uint64_t verbose_last_wall = wall0;
+    uint64_t pace_wall_ref = wall0;
+    uint64_t pace_sim_ref = 0;
+    float pace_speedup = sitl_cfg.speedup;
 
     uint32_t grant_accum_ns = 0;
     for (;;) {
@@ -440,15 +444,23 @@ static void* sim_thread_main(void* arg)
             next_can_poll_ns = now + 100000; // 100us
             sitl_can_poll();
             sitl_input_poll();
+            sitl_state_poll();
         }
         watchdog_check();
         sitl_dispatch();
 
         // pace simulated time against the wall clock, sleeping to an
-        // absolute deadline so overshoot does not accumulate
-        if (sitl_cfg.speedup > 0 && now >= next_pace_check_ns) {
+        // absolute deadline so overshoot does not accumulate. The
+        // references rebase when the speedup changes at runtime (GUI
+        // slow motion control) so the mapping stays continuous
+        if (sitl_cfg.speedup != pace_speedup) {
+            pace_speedup = sitl_cfg.speedup;
+            pace_wall_ref = wallclock_ns();
+            pace_sim_ref = now;
+        }
+        if (pace_speedup > 0 && now >= next_pace_check_ns) {
             next_pace_check_ns = now + 50000; // check every 50us of sim time
-            const uint64_t target_wall = wall0 + (uint64_t)((double)now / sitl_cfg.speedup);
+            const uint64_t target_wall = pace_wall_ref + (uint64_t)((double)(now - pace_sim_ref) / pace_speedup);
             const uint64_t wall = wallclock_ns();
             if (sitl_cfg.nosleep) {
                 while (wallclock_ns() < target_wall) {

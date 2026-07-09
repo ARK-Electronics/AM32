@@ -39,6 +39,11 @@ void sitl_input_dma_irq(void); // DMA transfer complete handler
 uint8_t sitl_input_pin_state(void); // getInputPinState()
 void sitl_input_stats(uint32_t out[4]);
 
+// simulation state streaming + runtime model control (sitl_state.c)
+void sitl_state_init(void);
+void sitl_state_poll(void); // sim thread, every 100us
+void sitl_state_step(uint64_t now_ns); // sim thread, every physics step
+
 // simulated monotonic time since start
 uint64_t sitl_time_ns(void);
 

@@ -48,6 +48,7 @@ sitl_config_t sitl_cfg = {
     },
     .speedup = 1.0f,
     .input_port = 57733,
+    .state_port = 57734,
     .eeprom_path = "am32_eeprom.bin",
     .can_uri = "mcast:0",
     .uid = NULL,
@@ -91,7 +92,7 @@ static const struct cfg_entry cfg_table[] = {
     { "sim", "watchdog_enabled", CFG_BOOL, &sitl_cfg.sim.watchdog_enabled },
 };
 
-static void set_value(const char* section, const char* js, const jsmntok_t* key, const jsmntok_t* val, const char* path)
+static bool set_value(const char* section, const char* js, const jsmntok_t* key, const jsmntok_t* val, const char* path)
 {
     char keystr[64], valstr[64];
     snprintf(keystr, sizeof(keystr), "%.*s", key->end - key->start, js + key->start);
@@ -115,10 +116,10 @@ static void set_value(const char* section, const char* js, const jsmntok_t* key,
             *(bool*)e->ptr = (strcmp(valstr, "true") == 0 || strcmp(valstr, "1") == 0);
             break;
         }
-        return;
+        return true;
     }
     fprintf(stderr, "SITL: %s: unknown config key %s.%s\n", path, section, keystr);
-    exit(1);
+    return false;
 }
 
 // count the tokens making up one JSON value, for skipping
@@ -144,12 +145,17 @@ static int value_size(const jsmntok_t* t)
     return count;
 }
 
-static void load_json(const char* path)
+/*
+  load a JSON config file. When runtime is true only the motor, battery
+  and esc sections are applied (the sim section cannot change while
+  running) and errors are reported instead of exiting
+ */
+static bool load_json_ex(const char* path, bool runtime)
 {
     FILE* f = fopen(path, "r");
     if (!f) {
         fprintf(stderr, "SITL: failed to open config %s\n", path);
-        exit(1);
+        return false;
     }
     static char js[16384];
     const size_t n = fread(js, 1, sizeof(js) - 1, f);
@@ -162,9 +168,10 @@ static void load_json(const char* path)
     const int ntok = jsmn_parse(&parser, js, n, tokens, 512);
     if (ntok < 1 || tokens[0].type != JSMN_OBJECT) {
         fprintf(stderr, "SITL: invalid JSON in %s (err %d)\n", path, ntok);
-        exit(1);
+        return false;
     }
 
+    bool ok = true;
     const jsmntok_t* t = &tokens[1];
     for (int i = 0; i < tokens[0].size; i++) {
         const jsmntok_t* section = t;
@@ -173,16 +180,33 @@ static void load_json(const char* path)
         snprintf(secstr, sizeof(secstr), "%.*s", section->end - section->start, js + section->start);
         if (sec_obj->type != JSMN_OBJECT) {
             fprintf(stderr, "SITL: %s: section %s is not an object\n", path, secstr);
-            exit(1);
+            return false;
         }
+        const bool skip = runtime && strcmp(secstr, "motor") != 0 &&
+            strcmp(secstr, "battery") != 0 && strcmp(secstr, "esc") != 0;
         const jsmntok_t* kt = sec_obj + 1;
         for (int k = 0; k < sec_obj->size; k++) {
             const jsmntok_t* val = kt + 1;
-            set_value(secstr, js, kt, val, path);
+            if (!skip && !set_value(secstr, js, kt, val, path)) {
+                ok = false;
+            }
             kt += 1 + value_size(val);
         }
         t += 1 + value_size(sec_obj);
     }
+    return ok;
+}
+
+static void load_json(const char* path)
+{
+    if (!load_json_ex(path, false)) {
+        exit(1);
+    }
+}
+
+bool sitl_config_reload(const char* path)
+{
+    return load_json_ex(path, true);
 }
 
 static void usage(const char* prog)
@@ -193,6 +217,9 @@ static void usage(const char* prog)
            "  --can-uri URI    CAN interface (default mcast:0)\n"
            "  --input-port N   UDP port for PWM/DShot input, 0 to disable\n"
            "                   (default 57733)\n"
+           "  --state-port N   UDP port for simulation state streaming and\n"
+           "                   runtime model control, 0 to disable\n"
+           "                   (default 57734)\n"
            "  --speedup X      simulation speed, 0 for free running (default 1.0)\n"
            "  --node-id N      force DroneCAN node ID\n"
            "  --input-type N   force eeprom INPUT_SIGNAL_TYPE (0=auto 1=dshot\n"
@@ -214,6 +241,7 @@ void sitl_config_init(int argc, char** argv)
         { "eeprom", required_argument, NULL, 'e' },
         { "can-uri", required_argument, NULL, 'u' },
         { "input-port", required_argument, NULL, 'p' },
+        { "state-port", required_argument, NULL, 'P' },
         { "speedup", required_argument, NULL, 's' },
         { "node-id", required_argument, NULL, 'n' },
         { "input-type", required_argument, NULL, 'I' },
@@ -225,7 +253,7 @@ void sitl_config_init(int argc, char** argv)
         { NULL, 0, NULL, 0 },
     };
     int c;
-    while ((c = getopt_long(argc, argv, "c:e:u:p:s:n:I:U:vNRh", opts, NULL)) != -1) {
+    while ((c = getopt_long(argc, argv, "c:e:u:p:P:s:n:I:U:vNRh", opts, NULL)) != -1) {
         switch (c) {
         case 'c':
             load_json(optarg);
@@ -238,6 +266,9 @@ void sitl_config_init(int argc, char** argv)
             break;
         case 'p':
             sitl_cfg.input_port = atoi(optarg);
+            break;
+        case 'P':
+            sitl_cfg.state_port = atoi(optarg);
             break;
         case 's':
             sitl_cfg.speedup = strtof(optarg, NULL);

@@ -85,6 +85,7 @@ int main(int argc, char** argv)
         sitl_cfg.eeprom_path, sitl_cfg.can_uri, (double)sitl_cfg.speedup);
 
     sitl_input_init();
+    sitl_state_init();
     sitl_start_sim_thread();
     return am32_main();
 }

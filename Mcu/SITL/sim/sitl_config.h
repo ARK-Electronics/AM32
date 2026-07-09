@@ -40,6 +40,7 @@ typedef struct {
     // runtime options
     float speedup; // 0 = free run
     int input_port; // UDP port for PWM/DShot input, 0 disables
+    int state_port; // UDP port for state streaming/model control, 0 disables
     const char* eeprom_path;
     const char* can_uri;
     const char* uid; // optional fixed unique ID string
@@ -54,3 +55,7 @@ extern sitl_config_t sitl_cfg;
 
 // parse CLI and optional JSON config, exits on error
 void sitl_config_init(int argc, char** argv);
+
+// runtime reload of the motor/battery/esc sections from a JSON file
+// (sim section ignored). Returns false on error, never exits
+bool sitl_config_reload(const char* path);

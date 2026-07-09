@@ -18,6 +18,16 @@ void motor_print_state(uint64_t now_ns, float time_ratio);
 // direct state access for offline tests
 void motor_get_state(double* theta, double* omega, double i[3]);
 
+// snapshot for the state streaming port (sitl_state.c), sim thread only
+void motor_get_live_state(float* omega, float* theta, float* theta_e,
+                          float i[3], float v[3], float* vbus, float* ibus);
+
+// re-derive cached values after a runtime config reload
+void motor_config_changed(void);
+
+// accumulate iu,iv,iw,vu,vv,vw,vbus,ibus for averaged state sampling
+void motor_add_signals(double acc[8]);
+
 // called from the firmware main loop for debug tracing
 void motor_log_mainloop(void);
 

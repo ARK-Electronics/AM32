@@ -33,6 +33,8 @@ Options:
 - `--node-id N` force the DroneCAN node ID, otherwise DNA is used
 - `--input-port N` UDP port for PWM/DShot input (default 57733, 0
   disables)
+- `--state-port N` UDP port for high rate simulation state streaming
+  and runtime motor model loading (default 57734, 0 disables)
 - `--input-type N` force the eeprom INPUT_SIGNAL_TYPE setting (0=auto
   1=dshot 2=servo 5=dronecan)
 - `--speedup X` simulation speed relative to wall clock, 0 = free running
@@ -89,7 +91,21 @@ Tools in `Mcu/SITL/`:
 - `sitl_gui.py` — Qt (PySide6) GUI driving both the PWM/DShot input and
   DroneCAN input with per-input enable switches (for failover testing),
   BDShot/EDT and esc.Status telemetry with rates, and an
-  `INPUT_SIGNAL_TYPE` parameter panel. `--control-port N` accepts UI
+  `INPUT_SIGNAL_TYPE` parameter panel. The simulation panel selects the
+  motor model (the JSON files in `Mcu/SITL/models/`, applied to the
+  running simulation over the state port; switch at zero throttle for
+  clean results) and has optional high rate views, both default off:
+  pyqtgraph scopes of the phase currents and the phase terminal
+  voltages, each in its own window (sample period down to the 500ns
+  physics step and adjustable window; the sample rate is automatically
+  limited to about 200k samples/s of wall clock, so fine periods take
+  effect as the speedup is lowered — the PWM dead time diode conduction
+  is visible on the voltages at fine sample periods), and a motor/bridge
+  animation showing rotor angle, per phase bridge modes and the
+  comparator. A speedup slider (0.01x to 2x)
+  changes the simulation pace at runtime, for watching the animation in
+  slow motion; input frames arriving faster than the slowed simulation
+  consumes them are dropped, as on a real wire. `--control-port N` accepts UI
   commands over a localhost TCP connection for scripted tests (default
   off); `--log FILE` records every UI action with timestamps and
   `--replay FILE` plays a recording back, so a failing interactive

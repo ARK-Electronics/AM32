@@ -37,12 +37,13 @@ import threading
 import time
 
 try:
-    from PySide6.QtCore import Qt, QTimer
-    from PySide6.QtGui import QFontDatabase
+    from PySide6.QtCore import Qt, QTimer, QRectF, QLineF
+    from PySide6.QtGui import QFontDatabase, QPen, QBrush, QColor, QPainter
     from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox,
+                                   QGraphicsScene, QGraphicsView,
                                    QGridLayout, QGroupBox, QHBoxLayout,
-                                   QLabel, QPushButton, QSlider, QSpinBox,
-                                   QWidget)
+                                   QDoubleSpinBox, QLabel, QPushButton,
+                                   QSlider, QSpinBox, QWidget)
 except ImportError:
     _here = os.path.dirname(os.path.abspath(__file__))
     if sys.platform == 'win32':
@@ -68,14 +69,24 @@ except ImportError:
                _run_cmd))
     sys.exit(1)
 
+try:
+    import pyqtgraph as pg
+    HAVE_PYQTGRAPH = True
+except ImportError:
+    HAVE_PYQTGRAPH = False
+
+import glob
+import math
+
 import sitl_dshot as sd
-from sitl_gui_backend import DshotPanel, CanPanel, HAVE_DRONECAN
+from sitl_gui_backend import DshotPanel, CanPanel, SimStream, HAVE_DRONECAN
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--host', default='127.0.0.1')
     ap.add_argument('--port', type=int, default=57733)
+    ap.add_argument('--state-port', type=int, default=57734)
     ap.add_argument('--can-uri', default='mcast:0')
     ap.add_argument('--poles', type=int, default=14)
     ap.add_argument('--control-port', type=int, default=0,
@@ -97,6 +108,7 @@ def main():
 
     ds = DshotPanel(args.host, args.port)
     ds.poles = args.poles
+    sim = SimStream(args.host, args.state_port)
 
     # spawn the DroneCAN node with SIGINT ignored: its multiprocessing IO
     # child inherits the kernel-level SIG_IGN disposition, so a terminal
@@ -279,6 +291,229 @@ def main():
     else:
         g2.addWidget(QLabel('pydronecan not available'), 0, 0)
 
+    # ---- simulation panel: motor model selection and the optional high
+    # rate graph/animation views fed by the SITL state stream
+    f4 = QGroupBox('simulation')
+    g4 = QGridLayout(f4)
+    top.addWidget(f4, 2, 0, 1, 2)
+
+    models_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models')
+
+    g4.addWidget(QLabel('Motor model:'), 0, 0)
+    model_combo = QComboBox()
+    model_paths = {}
+    for path in sorted(glob.glob(os.path.join(models_dir, '*.json'))):
+        name = os.path.splitext(os.path.basename(path))[0]
+        model_paths[name] = path
+        model_combo.addItem(name)
+    g4.addWidget(model_combo, 0, 1)
+
+    def model_load():
+        name = model_combo.currentText()
+        if name in model_paths:
+            log_action('model %s' % name)
+            sim.load_model(model_paths[name])
+
+    load_btn = QPushButton('Load')
+    load_btn.clicked.connect(model_load)
+    g4.addWidget(load_btn, 0, 2)
+    model_status = QLabel('')
+    g4.addWidget(model_status, 0, 3, 1, 2)
+
+    graph_i_check = QCheckBox('Current graph')
+    graph_v_check = QCheckBox('Voltage graph')
+    motorview_check = QCheckBox('Motor view')
+    g4.addWidget(graph_i_check, 1, 0)
+    g4.addWidget(graph_v_check, 1, 1)
+    g4.addWidget(motorview_check, 1, 2)
+    sim_rate_label = QLabel('')
+    g4.addWidget(sim_rate_label, 1, 3, 1, 2)
+
+    # simulation speedup, logarithmic 0.001x .. 2x, for slow motion in
+    # the motor view
+    g4.addWidget(QLabel('Speedup:'), 2, 0)
+    speed_slider = QSlider(Qt.Horizontal)
+    speed_slider.setRange(0, 165)
+    speed_slider.setValue(150)
+    speed_slider.setMinimumWidth(200)
+    speed_label = QLabel('1.000x')
+
+    def slider_to_speedup(v):
+        return 10.0 ** ((v - 150) / 50.0)
+
+    def speed_changed(*a):
+        speedup = slider_to_speedup(speed_slider.value())
+        speed_label.setText('%.3fx' % speedup)
+        log_action('speedup %.4f' % speedup)
+        sim.set_speedup(speedup)
+
+    speed_slider.valueChanged.connect(speed_changed)
+    g4.addWidget(speed_slider, 2, 1, 1, 2)
+    g4.addWidget(speed_label, 2, 3)
+    speed_1x = QPushButton('1x')
+    speed_1x.clicked.connect(lambda: speed_slider.setValue(150))
+    g4.addWidget(speed_1x, 2, 4)
+
+    # scope controls: sample period and window, shared by both graph
+    # windows. Fine sample periods (down to the 500ns physics step,
+    # where the dead time windows are visible on the phase voltages) are
+    # meant to be used together with a low speedup to keep the wall
+    # clock data rate sane
+    sample_spin = QDoubleSpinBox()
+    sample_spin.setRange(0.5, 1000.0)
+    sample_spin.setValue(50.0)
+    sample_spin.setSuffix(' us sample')
+    sample_spin.setDecimals(1)
+    g4.addWidget(sample_spin, 3, 0, 1, 2)
+    window_spin = QDoubleSpinBox()
+    window_spin.setRange(0.05, 2000.0)
+    window_spin.setValue(50.0)
+    window_spin.setSuffix(' ms window')
+    window_spin.setDecimals(2)
+    g4.addWidget(window_spin, 3, 2)
+
+    def sample_changed(*a):
+        sim.period_us = sample_spin.value()
+        log_action('sample_us %.1f' % sample_spin.value())
+
+    sample_spin.valueChanged.connect(sample_changed)
+
+    def window_changed(*a):
+        log_action('window_ms %.2f' % window_spin.value())
+
+    window_spin.valueChanged.connect(window_changed)
+
+    # the scopes: each signal set gets its own top level pyqtgraph
+    # window, created lazily on first enable. Closing a window unchecks
+    # its box
+    SIGNAL_SETS = {
+        # key -> ((label, colour, sample column), ...), y axis label/unit
+        'i': ((('iu', 'r', 4), ('iv', 'g', 5), ('iw', 'b', 6),
+               ('ibus', 'w', 11)), 'current', 'A'),
+        'v': ((('vu', 'r', 7), ('vv', 'g', 8), ('vw', 'b', 9),
+               ('vbus', 'w', 10)), 'voltage', 'V'),
+    }
+    graph_windows = {}
+
+    def update_sim_enable():
+        sim.enabled = (graph_i_check.isChecked() or graph_v_check.isChecked()
+                       or motorview_check.isChecked())
+
+    def graph_toggled(key, check, title):
+        log_action('graph_%s %d' % (key, int(check.isChecked())))
+        if check.isChecked() and key not in graph_windows:
+            if not HAVE_PYQTGRAPH:
+                model_status.setText('pyqtgraph not available')
+                check.setChecked(False)
+                return
+
+            class GraphWindow(pg.PlotWidget):
+                def closeEvent(self, ev):
+                    check.setChecked(False)
+                    ev.accept()
+
+            w = GraphWindow()
+            w.setWindowTitle('AM32 SITL %s' % title)
+            w.resize(700, 300)
+            w.addLegend(offset=(10, 10))
+            w.setLabel('bottom', 'time', 's')
+            defs, label, unit = SIGNAL_SETS[key]
+            w.setLabel('left', label, unit)
+            curves = [(w.plot(pen=pg.mkPen(color, width=1), name=name), col)
+                      for name, color, col in defs]
+            graph_windows[key] = (w, curves)
+        if key in graph_windows:
+            graph_windows[key][0].setVisible(check.isChecked())
+        update_sim_enable()
+
+    graph_i_check.toggled.connect(
+        lambda: graph_toggled('i', graph_i_check, 'phase currents'))
+    graph_v_check.toggled.connect(
+        lambda: graph_toggled('v', graph_v_check, 'phase voltages'))
+
+    # motor/bridge animation, created lazily on first enable
+    view = None
+    scene = None
+    anim = {}
+
+    def make_motor_view():
+        nonlocal view, scene
+        scene = QGraphicsScene(0, 0, 420, 220)
+        view = QGraphicsView(scene)
+        view.setRenderHint(QPainter.Antialiasing)
+        view.setFixedHeight(240)
+        # rotor dial
+        scene.addEllipse(20, 20, 180, 180, QPen(QColor('gray'), 2))
+        anim['needle'] = scene.addLine(QLineF(110, 110, 110, 30), QPen(QColor('orange'), 4))
+        anim['e_needle'] = scene.addLine(QLineF(110, 110, 110, 60), QPen(QColor('cyan'), 2))
+        scene.addSimpleText('rotor').setPos(95, 202)
+        # bridge legs: three vertical phase bars, coloured by mode
+        anim['legs'] = []
+        for p, name in enumerate(('U', 'V', 'W')):
+            x = 240 + p * 55
+            rect = scene.addRect(QRectF(x, 40, 36, 120), QPen(Qt.NoPen), QBrush(QColor('gray')))
+            anim['legs'].append(rect)
+            label = scene.addSimpleText(name)
+            label.setPos(x + 12, 165)
+        anim['comp'] = scene.addSimpleText('')
+        anim['comp'].setPos(240, 190)
+        anim['rpm'] = scene.addSimpleText('')
+        anim['rpm'].setPos(240, 12)
+        top.addWidget(view, 4, 0, 1, 2)
+
+    MODE_COLORS = {
+        0: QColor(90, 90, 90),      # FLOAT
+        1: QColor(60, 100, 220),    # LOW
+        2: QColor(60, 190, 60),     # PWM
+        3: QColor(60, 190, 120),    # PWM_NOCOMP
+        4: QColor(220, 140, 40),    # BRAKE_PWM
+    }
+
+    def motorview_changed():
+        log_action('motorview %d' % int(motorview_check.isChecked()))
+        if motorview_check.isChecked() and view is None:
+            make_motor_view()
+        if view is not None:
+            view.setVisible(motorview_check.isChecked())
+        update_sim_enable()
+        win.adjustSize()
+
+    motorview_check.toggled.connect(motorview_changed)
+
+    def update_sim_views():
+        visible = [gw for gw, _ in graph_windows.values() if gw.isVisible()]
+        if visible:
+            win_s = window_spin.value() * 1e-3
+            w = sim.window(win_s)
+            if w:
+                t0 = w[-1][0] - win_s
+                ts = [smp[0] - t0 for smp in w]
+                for gw, curves in graph_windows.values():
+                    if gw.isVisible():
+                        for curve, col in curves:
+                            curve.setData(ts, [smp[col] for smp in w])
+                        # the x axis is the window control, not auto range
+                        gw.setXRange(0, win_s, padding=0)
+        if motorview_check.isChecked() and view is not None:
+            smp = sim.latest()
+            if smp is not None:
+                t, omega, theta, theta_e = smp[0], smp[1], smp[2], smp[3]
+                modes, comp_ph, comp_out = smp[12], smp[13], smp[14]
+                cx, cy, r = 110, 110, 80
+                anim['needle'].setLine(QLineF(cx, cy, cx + r * math.sin(theta),
+                                              cy - r * math.cos(theta)))
+                re = r * 0.6
+                anim['e_needle'].setLine(QLineF(cx, cy, cx + re * math.sin(theta_e),
+                                                cy - re * math.cos(theta_e)))
+                for p in range(3):
+                    anim['legs'][p].setBrush(QBrush(MODE_COLORS.get(modes[p], QColor('gray'))))
+                anim['comp'].setText('comparator: phase %s out=%d' % ('UVW'[comp_ph], comp_out))
+                anim['rpm'].setText('%.0f rpm' % (omega * 60 / (2 * math.pi)))
+
+    sim_view_timer = QTimer()
+    sim_view_timer.timeout.connect(update_sim_views)
+    sim_view_timer.start(33)
+
     # ---- telemetry panel
     f3 = QGroupBox('telemetry')
     g3 = QGridLayout(f3)
@@ -353,10 +588,40 @@ def main():
             can_rate.setValue(int(cargs[0]))
         elif cmd == 'param' and can is not None:
             can.set_param(cargs[0], int(cargs[1]))
+        elif cmd == 'motorview':
+            motorview_check.setChecked(bool(int(cargs[0])))
+        elif cmd == 'model':
+            if cargs[0] in model_paths:
+                model_combo.setCurrentText(cargs[0])
+                model_load()
+            else:
+                sim.load_model(cargs[0])
+        elif cmd == 'graph_i' or cmd == 'graphs':
+            graph_i_check.setChecked(bool(int(cargs[0])))
+        elif cmd == 'graph_v':
+            graph_v_check.setChecked(bool(int(cargs[0])))
+        elif cmd == 'signals':
+            # compatibility with recordings from the single-graph UI
+            if cargs[0] == 'voltages':
+                graph_v_check.setChecked(True)
+            else:
+                graph_i_check.setChecked(True)
+        elif cmd == 'sample_us':
+            sample_spin.setValue(float(cargs[0]))
+        elif cmd == 'window_ms':
+            window_spin.setValue(float(cargs[0]))
+        elif cmd == 'speedup':
+            x = float(cargs[0])
+            pos = int(round(150 + 50 * math.log10(max(0.001, min(2.0, x)))))
+            if pos == speed_slider.value():
+                speed_changed()
+            else:
+                speed_slider.setValue(pos)
         elif cmd == 'status':
             reply('STATUS %s' % bds_label.text())
             reply('STATUS %s' % can_label.text())
             reply('STATUS ds: %s' % (ds.status or '-'))
+            reply('STATUS sim: %s rate=%.0f/s' % (sim.model_status or '-', sim.rate.hz()))
             return
         elif cmd == 'quit':
             app.quit()
@@ -429,6 +694,11 @@ def main():
                 param_status.setText(can.param_result.get_nowait())
             except queue.Empty:
                 pass
+        model_status.setText(sim.model_status)
+        if sim.enabled:
+            sim_rate_label.setText('%.0f samples/s' % sim.rate.hz())
+        else:
+            sim_rate_label.setText('')
 
     update_timer = QTimer()
     update_timer.timeout.connect(update)
@@ -444,6 +714,7 @@ def main():
         app.exec()
     finally:
         ds.running = False
+        sim.close()
         if can is not None:
             can.running = False
             # let the CAN thread close the node and its IO child

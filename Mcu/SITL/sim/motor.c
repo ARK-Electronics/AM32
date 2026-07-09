@@ -46,6 +46,8 @@ static struct {
     // current both-off window
     bool pwm_last[3];
     uint64_t dead_until[3];
+    // last terminal voltages for the state stream
+    double v_term[3];
     // sensor averaging accumulators
     double acc_v, acc_i;
     uint32_t acc_n;
@@ -55,12 +57,53 @@ static struct {
     sitl_sensors_t sensors;
 } m;
 
+void motor_config_changed(void)
+{
+    // per phase BEMF constant [V s/rad] from Kv [rpm/V]. Kv is defined
+    // line to line and two phases conduct in series, so halve it. All
+    // other motor parameters are read from sitl_cfg on every step
+    m.ke = 0.5 * 60.0 / (TWO_PI * sitl_cfg.motor.kv);
+}
+
+void motor_add_signals(double acc[8])
+{
+    for (int p = 0; p < 3; p++) {
+        acc[p] += m.i[p];
+        acc[3 + p] += m.v_term[p];
+    }
+    acc[6] += m.vbus;
+    acc[7] += m.ibus;
+}
+
+void motor_get_live_state(float* omega, float* theta, float* theta_e,
+                          float i[3], float v[3], float* vbus, float* ibus)
+{
+    for (int p = 0; p < 3; p++) {
+        v[p] = (float)m.v_term[p];
+    }
+    const int pole_pairs = sitl_cfg.motor.poles / 2;
+    *omega = (float)m.omega;
+    double th = fmod(m.theta, TWO_PI);
+    if (th < 0) {
+        th += TWO_PI;
+    }
+    *theta = (float)th;
+    double the = fmod(m.theta * pole_pairs, TWO_PI);
+    if (the < 0) {
+        the += TWO_PI;
+    }
+    *theta_e = (float)the;
+    for (int p = 0; p < 3; p++) {
+        i[p] = (float)m.i[p];
+    }
+    *vbus = (float)m.vbus;
+    *ibus = (float)m.ibus;
+}
+
 void motor_init(void)
 {
     memset(&m, 0, sizeof(m));
-    // per phase BEMF constant [V s/rad] from Kv [rpm/V]. Kv is defined
-    // line to line and two phases conduct in series, so halve it
-    m.ke = 0.5 * 60.0 / (TWO_PI * sitl_cfg.motor.kv);
+    motor_config_changed();
     m.vbus = sitl_cfg.battery.voltage;
     m.rand_seed = 12345;
     m.sensors.bus_voltage = m.vbus;
@@ -241,6 +284,10 @@ void motor_step(uint64_t now_ns, uint32_t dt_ns)
         if (!conducting[p]) {
             v[p] = e[p] + v_star;
         }
+    }
+
+    for (int p = 0; p < 3; p++) {
+        m.v_term[p] = v[p];
     }
 
     // phase current derivatives, semi-implicit euler
