@@ -149,3 +149,10 @@ targets:
 	$(QUIET)echo List of targets. To build a target use 'make TARGETNAME'
 	$(QUIET)echo $(ALL_TARGETS)
 
+# Static analysis (cppcheck) of the ARK F051 control path. Fails on
+# error/warning; style findings are printed but advisory. See
+# scripts/cppcheck-ark.sh and scripts/cppcheck-suppressions.txt.
+.PHONY : cppcheck
+cppcheck:
+	$(QUIET)bash scripts/cppcheck-ark.sh
+

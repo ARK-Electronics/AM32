@@ -1,0 +1,20 @@
+# Suppressions for scripts/cppcheck-ark.sh (ARK F051 control-path scan).
+# Format: errorId:file:line  or  errorId:pattern  or  errorId
+
+# Host/system headers are not on the include path the same way as GCC.
+missingIncludeSystem
+
+# Many entry points are used only from IRQs / other TUs; cppcheck cannot
+# see the full call graph of a multi-file ESC firmware.
+unusedFunction
+
+# Vendor HAL/CMSIS: vector table at address 0 is intentional on Cortex-M.
+nullPointer:*/core_cm*.h
+nullPointer:*/cmsis*.h
+nullPointer:*/stm32*.h
+
+# Entire Mcu/ tree is third-party + board HAL; not gated here.
+*:Mcu/*
+
+# Generated / third-party protocol stack (excluded from file list too).
+*:Src/DroneCAN/*
