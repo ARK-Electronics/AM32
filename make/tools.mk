@@ -6,6 +6,12 @@
 
 
 ifeq ($(OS),Windows_NT)
+# a POSIX environment on Windows (Cygwin/MSYS2) uses the unix tools;
+# uname only exists there, so the plain cmd.exe flow is unaffected
+UNAME_O := $(shell uname -o 2>/dev/null)
+endif
+
+ifeq ($(OS)$(UNAME_O),Windows_NT)
 ARM_SDK_PREFIX:=tools/windows/xpack-arm-none-eabi-gcc-10.3.1-2.3/bin/arm-none-eabi-
 SHELL:=cmd.exe
 CP:=tools\\windows\\make\\bin\\cp
@@ -15,6 +21,18 @@ MKDIR:=tools\\windows\\make\\bin\\mkdir
 RM:=tools\\windows\\make\\bin\\rm
 CUT:=tools\\windows\\make\\bin\\cut
 FGREP:=tools\\windows\\make\\bin\\fgrep
+OSDIR:=windows
+
+else ifeq ($(OS),Windows_NT)
+# Cygwin/MSYS2
+ARM_SDK_PREFIX:=tools/windows/xpack-arm-none-eabi-gcc-10.3.1-2.3/bin/arm-none-eabi-
+CP:=cp
+DSEP:=/
+NUL:=/dev/null
+MKDIR:=mkdir
+RM:=rm
+CUT:=cut
+FGREP:=fgrep
 OSDIR:=windows
 
 else
