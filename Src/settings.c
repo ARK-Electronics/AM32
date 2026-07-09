@@ -15,6 +15,7 @@
 #include "targets.h"
 #include "IO.h"
 #include "version.h"
+#include "pwm_app.h"
 
 void loadEEpromSettings(void)
 {
@@ -115,24 +116,7 @@ void loadEEpromSettings(void)
         minimum_duty_cycle = minimum_duty_cycle + dead_time_override;
         throttle_max_at_low_rpm = throttle_max_at_low_rpm + dead_time_override;
         startup_max_duty_cycle = startup_max_duty_cycle + dead_time_override;
-#ifdef STMICRO
-        TIM1->BDTR |= dead_time_override;
-#endif
-#ifdef ARTERY
-        TMR1->brk |= dead_time_override;
-#endif
-#ifdef GIGADEVICES
-        TIMER_CCHP(TIMER0) |= dead_time_override;
-#endif
-#ifdef NXP
-    	for (int submodule = 0; submodule <= 2; submodule++) {
-    		FLEXPWM0->SM[submodule].DTCNT0 = PWM_DTCNT0_DTCNT0(dead_time_override);	//PWMA deadtime
-    		FLEXPWM0->SM[submodule].DTCNT1 = PWM_DTCNT1_DTCNT1(dead_time_override);	//PWMB deadtime
-    	}
-#endif
-#ifdef WCH
-            TIM1->BDTR |= dead_time_override;
-#endif
+        setPwmDeadTime(dead_time_override);
         }
         if (eepromBuffer.limits.temperature < 70 || eepromBuffer.limits.temperature > 140) {
             eepromBuffer.limits.temperature = 255;

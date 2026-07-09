@@ -62,15 +62,22 @@ endif
 # Linker options
 LDFLAGS_COMMON := -specs=nano.specs $(LIBS) -Wl,--gc-sections -Wl,--print-memory-usage
 
-# Search source files
-SRC_COMMON := $(foreach dir,$(SRC_DIRS_COMMON),$(wildcard $(dir)/*.[cs]))
+# Search source files (top-level Src only — not recursive into DroneCAN/)
+SRC_COMMON_ALL := $(foreach dir,$(SRC_DIRS_COMMON),$(wildcard $(dir)/*.[cs]))
+
+# Optional translation units: only linked when the product needs them.
+# (Empty #ifdef stubs still cost flash/link time on F051.)
+SRC_OPTIONAL_BRUSHED := $(MAIN_SRC_DIR)/brushed.c
+SRC_OPTIONAL_HWCI    := $(MAIN_SRC_DIR)/hwci_perf.c
+SRC_COMMON_BASE := $(filter-out $(SRC_OPTIONAL_BRUSHED) $(SRC_OPTIONAL_HWCI),$(SRC_COMMON_ALL))
 
 # configure some directories that are relative to wherever ROOT_DIR is located
 OBJ := obj
 BIN_DIR := $(ROOT)/$(OBJ)
 
-# Function to check for _CAN suffix
+# Function to check for _CAN / _BRUSHED product suffixes in the target name
 has_can_suffix = $(findstring _CAN,$1)
+has_brushed_suffix = $(findstring BRUSHED,$1)
 
 # find the SVD files
 $(foreach MCU,$(MCU_TYPES),$(eval SVD_$(MCU) := $(wildcard $(HAL_FOLDER_$(MCU))/*.svd)))
@@ -117,6 +124,9 @@ $(eval xLDSCRIPT := $$(if $$(call has_can_suffix,$$(2)),$(LDSCRIPT_CAN_$(1)),$(L
 $(eval xCFLAGS := $$(if $$(call has_can_suffix,$$(2)),$(CFLAGS_CAN_$(1))))
 $(eval xSRC := $$(if $$(call has_can_suffix,$$(2)),$(SRC_CAN_$(1))))
 
+# Per-target app sources: drop brushed/hwci unless the product asks for them
+$(eval SRC_APP_$(2) := $(SRC_COMMON_BASE)$(if $(call has_brushed_suffix,$(2)), $(SRC_OPTIONAL_BRUSHED))$(if $(filter 1,$(HWCI_PERF)), $(SRC_OPTIONAL_HWCI)))
+
 # allow an MCU type to override the common compiler/linker flags (used by SITL
 # for a native build) and to have no linker script
 $(eval xCFLAGS_COMMON := $(if $(CFLAGS_COMMON_$(1)),$(CFLAGS_COMMON_$(1)),$(CFLAGS_COMMON)))
@@ -127,10 +137,10 @@ LDFLAGS_$(2) = $(xLDFLAGS_COMMON) $(LDFLAGS_$(1)) $(if $(xLDSCRIPT),-T$(xLDSCRIP
 
 -include $$($(2)_BASENAME).d
 
-$$($(2)_BASENAME).elf: $(SRC_COMMON) $$(SRC_$(1)) $(xSRC)
+$$($(2)_BASENAME).elf: $$(SRC_APP_$(2)) $$(SRC_$(1)) $(xSRC)
 	@$(ECHO) Compiling $$(notdir $$@)
 	$(QUIET)$(MKDIR) -p $(OBJ)
-	$(QUIET)$(xCC) $$(CFLAGS_$(2)) $$(LDFLAGS_$(2)) -MMD -MP -MF $$(@:.elf=.d) -o $$(@) $(SRC_COMMON) $$(SRC_$(1)) $(xSRC) $(LDLIBS_$(1))
+	$(QUIET)$(xCC) $$(CFLAGS_$(2)) $$(LDFLAGS_$(2)) -MMD -MP -MF $$(@:.elf=.d) -o $$(@) $$(SRC_APP_$(2)) $$(SRC_$(1)) $(xSRC) $(LDLIBS_$(1))
 # we copy debug.elf to give us a constant debug target for vscode
 # this means the debug button will always debug the last target built
 	$(if $(SVD_$(1)),$(QUIET)$(CP) -f $$(SVD_$(1)) $(OBJ)/debug.svd)
@@ -155,4 +165,11 @@ targets:
 .PHONY : cppcheck
 cppcheck:
 	$(QUIET)bash scripts/cppcheck-ark.sh
+
+# Build ARK F051 with HWCI_PERF and enforce flash/RAM headroom (F051 is tight).
+# -B forces a rebuild so a prior non-HWCI image is not size-checked by mistake.
+.PHONY : size-check-ark
+size-check-ark:
+	$(QUIET)$(MAKE) -B ARK_4IN1_F051 HWCI_PERF=1
+	$(QUIET)bash scripts/check-size-ark.sh
 

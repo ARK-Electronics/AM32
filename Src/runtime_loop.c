@@ -20,6 +20,7 @@
 #include "dshot.h"
 #include "targets.h"
 #include "ADC.h"
+#include "adc_app.h"
 #include "kiss_telemetry.h"
 #include "IO.h"
 
@@ -140,58 +141,7 @@ void runtimeSendTelemetryIfNeeded(void)
 void runtimeProcessAdcAndProtections(void)
 {
 if (PROCESS_ADC_FLAG == 1) { // for adc and telemetry set adc counter at 1khz loop rate
-#if defined(STMICRO)
-    ADC_DMA_Callback();
-    LL_ADC_REG_StartConversion(ADC1);
-#ifdef USE_ADC_1_2
-  LL_ADC_REG_StartConversion(ADC2);
-#endif          
-    converted_degrees = __LL_ADC_CALC_TEMPERATURE(3300, ADC_raw_temp, LL_ADC_RESOLUTION_12B);
-#endif
-#ifdef MCU_GDE23
-    ADC_DMA_Callback();
-    // converted_degrees = (1.43 - ADC_raw_temp * 3.3 / 4096) * 1000 / 4.3 + 25;
-    converted_degrees = ((int32_t)(357.5581395348837f * (1 << 16)) - ADC_raw_temp * (int32_t)(0.18736373546511628f * (1 << 16))) >> 16;
-    adc_software_trigger_enable(ADC_REGULAR_CHANNEL);
-#endif
-#ifdef ARTERY
-    ADC_DMA_Callback();
-    adc_ordinary_software_trigger_enable(ADC1, TRUE);
-    #ifdef USE_NTC
-    converted_degrees = getNTCDegrees(ADC_raw_ntc);
-    #else     
-    converted_degrees = getConvertedDegrees(ADC_raw_temp);
-    #endif
-#endif
-#ifdef NXP
-    //Call ADC_DMA callback to get raw data
-    ADC_DMA_Callback();
-
-    //Convert temperature data to actual temperature in degrees Celsius
-    converted_degrees = computeTemperature(ADC_raw_temp[0], ADC_raw_temp[1]);
-
-    //Start ADC conversion
-    startADCConversion();
-#endif
-#ifdef WCH
-    startADCConversion( );
-    converted_degrees = getConvertedDegrees(ADC_raw_temp);
-#endif
-    degrees_celsius = converted_degrees;
-#ifdef NXP
-    //MCXA has 16-bit ADC data
-    battery_voltage = ((7 * battery_voltage) + ((ADC_raw_volts * 3300 / 65535 * VOLTAGE_DIVIDER) / 100)) / 8;
-    smoothed_raw_current = getSmoothedCurrent();
-    //Actual current is in 10mA, so 1 = 10mA
-    actual_current = (((smoothed_raw_current * 3300 / 65535) - CURRENT_OFFSET) * 100) / (MILLIVOLT_PER_AMP);
-#else
-    battery_voltage = ((7 * battery_voltage) + ((ADC_raw_volts * 3300 / 4095 * VOLTAGE_DIVIDER) / 100)) >> 3;
-    smoothed_raw_current = getSmoothedCurrent();
-    actual_current = ((smoothed_raw_current * 3300 / 41) - (CURRENT_OFFSET * 100)) / (MILLIVOLT_PER_AMP);
-#endif
-    if (actual_current < 0) {
-        actual_current = 0;
-    }             
+    adcAppServiceConversion();
     if (eepromBuffer.low_voltage_cut_off == 1) {  
         if (battery_voltage < (cell_count * low_cell_volt_cutoff)) {
           low_voltage_count++;

@@ -30,3 +30,28 @@ jobs:
           path: obj/cppcheck-ark.txt
           if-no-files-found: ignore
           retention-days: 14
+
+  size-ark:
+    name: size gate (ARK F051 + HWCI_PERF)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Arm toolchain
+        run: make arm_sdk_install
+
+      - name: Build ARK + size check
+        run: make size-check-ark -j$(nproc)
+
+      - name: Upload ARK binary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ark-f051-hwci-perf
+          path: |
+            obj/AM32_ARK_4IN1_F051_*.elf
+            obj/AM32_ARK_4IN1_F051_*.bin
+          if-no-files-found: ignore
+          retention-days: 14
