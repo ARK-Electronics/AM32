@@ -117,7 +117,7 @@ void sys_can_init(void)
     addr.sin_port = htons(MCAST_PORT);
     inet_pton(AF_INET, address, &addr.sin_addr);
 
-    fd_in = socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+    fd_in = sitl_udp_socket();
     if (fd_in < 0) {
         perror("SITL: can socket");
         exit(1);
@@ -144,7 +144,7 @@ void sys_can_init(void)
         exit(1);
     }
 
-    fd_out = socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+    fd_out = sitl_udp_socket();
     if (fd_out < 0) {
         perror("SITL: can tx socket");
         exit(1);
@@ -200,7 +200,7 @@ void sys_can_init(void)
         if (attempt == 0) {
             // retry with the sender bound to loopback
             close(fd_out);
-            fd_out = socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+            fd_out = sitl_udp_socket();
             struct sockaddr_in lo_addr;
             memset(&lo_addr, 0, sizeof(lo_addr));
             lo_addr.sin_family = AF_INET;

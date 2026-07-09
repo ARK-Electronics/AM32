@@ -59,6 +59,29 @@ jobs:
           name: gui-test-log
           path: gui_test_run/sitl_ci.log
 
+  macos-tests:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build SITL
+        run: make AM32_SITL_CAN
+
+      - name: Install pydronecan
+        run: python3 -m pip install --break-system-packages dronecan
+
+      - name: Run SITL tests
+        run: |
+          mkdir sitl_test_run && cd sitl_test_run
+          python3 ../Mcu/SITL/run_ci_tests.py --sitl ../obj/AM32_AM32_SITL_CAN_2.20.elf
+
+      - name: Upload SITL log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sitl-test-log-macos
+          path: sitl_test_run/sitl_ci.log
+
   windows-build:
     runs-on: windows-latest
     steps:

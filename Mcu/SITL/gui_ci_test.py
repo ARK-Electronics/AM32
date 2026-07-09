@@ -40,10 +40,25 @@ def main():
              '--port', str(INPUT_PORT), '--state-port', str(STATE_PORT),
              '--can-uri', 'mcast:7'],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env)
-        time.sleep(6.0)
 
+        # first launch can be slow (Qt font cache); retry the connection
         responses = []
-        s = socket.create_connection(('127.0.0.1', CONTROL_PORT), timeout=10)
+        s = None
+        deadline = time.time() + 45
+        while time.time() < deadline:
+            try:
+                s = socket.create_connection(('127.0.0.1', CONTROL_PORT), timeout=5)
+                break
+            except OSError:
+                if gui.poll() is not None:
+                    print(gui.stdout.read() if gui.stdout else '')
+                    print('gui exited before control port came up')
+                    sys.exit(1)
+                time.sleep(1.0)
+        if s is None:
+            gui.kill()
+            print('control port never came up')
+            sys.exit(1)
         f = s.makefile('r')
 
         def reader():

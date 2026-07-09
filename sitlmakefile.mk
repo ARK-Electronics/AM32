@@ -29,8 +29,16 @@ CFLAGS_$(MCU) += -DCANARD_64_BIT="(__SIZEOF_POINTER__ == 8)"
 # native compiler flags, replacing the ARM specific CFLAGS_COMMON. Inc is
 # searched via -iquote rather than -I so that Inc/signal.h does not shadow
 # the system <signal.h>
-CFLAGS_COMMON_$(MCU) := -fsingle-precision-constant -iquote $(MAIN_INC_DIR) -g3 -O2 \
-	-Wall -Wundef -Wextra -Werror -Wno-unused-parameter -Wno-stringop-truncation \
+ifeq ($(UNAME_S),Darwin)
+# clang: no -fsingle-precision-constant, and ignore the gcc-only
+# -Wno- options inherited from the common CFLAGS
+SITL_GCC_FLAGS := -Wno-unknown-warning-option
+else
+SITL_GCC_FLAGS := -fsingle-precision-constant -Wno-stringop-truncation
+endif
+# -funsigned-char matches the ARM targets, where char is unsigned
+CFLAGS_COMMON_$(MCU) := $(SITL_GCC_FLAGS) -funsigned-char -iquote $(MAIN_INC_DIR) -g3 -O2 \
+	-Wall -Wundef -Wextra -Werror -Wno-unused-parameter \
 	-fno-strict-aliasing -pthread
 
 LDFLAGS_COMMON_$(MCU) := -pthread

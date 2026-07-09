@@ -44,7 +44,49 @@ static volatile uint32_t irq_enabled;
 static volatile uint8_t irq_prio[SITL_IRQ_MAX];
 
 
-static sem_t park_sem, resume_sem;
+/*
+  park/resume semaphores. macOS has no unnamed POSIX semaphores or
+  sem_timedwait, so it uses GCD semaphores instead
+ */
+#ifdef __APPLE__
+#include <dispatch/dispatch.h>
+typedef dispatch_semaphore_t sitl_sem_t;
+static void sitl_sem_init(sitl_sem_t* s) { *s = dispatch_semaphore_create(0); }
+static void sitl_sem_post(sitl_sem_t* s) { dispatch_semaphore_signal(*s); }
+static void sitl_sem_wait(sitl_sem_t* s)
+{
+    dispatch_semaphore_wait(*s, DISPATCH_TIME_FOREVER);
+}
+static bool sitl_sem_wait_2s(sitl_sem_t* s)
+{
+    return dispatch_semaphore_wait(*s, dispatch_time(DISPATCH_TIME_NOW, 2LL * NSEC_PER_SEC)) == 0;
+}
+#else
+typedef sem_t sitl_sem_t;
+static void sitl_sem_init(sitl_sem_t* s) { sem_init(s, 0, 0); }
+static void sitl_sem_post(sitl_sem_t* s) { sem_post(s); }
+static void sitl_sem_wait(sitl_sem_t* s)
+{
+    while (sem_wait(s) == -1 && errno == EINTR) {
+    }
+}
+static bool sitl_sem_wait_2s(sitl_sem_t* s)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    ts.tv_sec += 2;
+    for (;;) {
+        if (sem_timedwait(s, &ts) == 0) {
+            return true;
+        }
+        if (errno != EINTR) {
+            return false;
+        }
+    }
+}
+#endif
+
+static sitl_sem_t park_sem, resume_sem;
 
 static volatile uint64_t watchdog_last_reload_ns;
 static volatile bool watchdog_running;
@@ -142,9 +184,8 @@ static void sigusr1_handler(int sig)
 {
     (void)sig;
     const int saved_errno = errno;
-    sem_post(&park_sem);
-    while (sem_wait(&resume_sem) == -1 && errno == EINTR) {
-    }
+    sitl_sem_post(&park_sem);
+    sitl_sem_wait(&resume_sem);
     errno = saved_errno;
 }
 
@@ -153,23 +194,12 @@ static bool suspend_firmware(void)
     pthread_kill(fw_thread_id, SIGUSR1);
     // a timed wait so a firmware thread that is exiting or execing
     // (NVIC_SystemReset) cannot deadlock the simulation
-    struct timespec ts;
-    clock_gettime(CLOCK_REALTIME, &ts);
-    ts.tv_sec += 2;
-    for (;;) {
-        if (sem_timedwait(&park_sem, &ts) == 0) {
-            return true;
-        }
-        if (errno == EINTR) {
-            continue;
-        }
-        return false;
-    }
+    return sitl_sem_wait_2s(&park_sem);
 }
 
 static void resume_firmware(void)
 {
-    sem_post(&resume_sem);
+    sitl_sem_post(&resume_sem);
 }
 
 // priority of the currently executing handler, NVIC style (lower value
@@ -299,7 +329,11 @@ void sitl_system_reset(void)
     sigaddset(&set, SIGUSR1);
     pthread_sigmask(SIG_BLOCK, &set, NULL);
     fprintf(stderr, "SITL: reset at t=%.3fs\n", sim_time_ns_v * 1.0e-9);
+#ifdef __APPLE__
+    execv(sitl_saved_argv[0], sitl_saved_argv);
+#else
     execv("/proc/self/exe", sitl_saved_argv);
+#endif
     fprintf(stderr, "SITL: execv failed: %s\n", strerror(errno));
     _exit(1);
 }
@@ -470,8 +504,16 @@ static void* sim_thread_main(void* arg)
                 while (wallclock_ns() < target_wall) {
                 }
             } else if (target_wall > wall + 100000) {
+#ifdef __APPLE__
+                // no clock_nanosleep on macOS: relative sleep. Drift free
+                // because the absolute target is recomputed each pass
+                const uint64_t delta = target_wall - wall;
+                struct timespec ts = { delta / 1000000000ULL, delta % 1000000000ULL };
+                nanosleep(&ts, NULL);
+#else
                 struct timespec ts = { target_wall / 1000000000ULL, target_wall % 1000000000ULL };
                 clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &ts, NULL);
+#endif
             }
         }
 
@@ -494,8 +536,8 @@ void sitl_start_sim_thread(void)
     // timer slack is per thread and defaults to 50us
     prctl(PR_SET_TIMERSLACK, 1UL);
 #endif
-    sem_init(&park_sem, 0, 0);
-    sem_init(&resume_sem, 0, 0);
+    sitl_sem_init(&park_sem);
+    sitl_sem_init(&resume_sem);
 
     // sitl_system_reset blocks SIGUSR1 on the way into execv; both the
     // mask and a possibly pending SIGUSR1 survive exec. Discard any

@@ -47,6 +47,9 @@ void sitl_state_step(uint64_t now_ns); // sim thread, every physics step
 // simulated monotonic time since start
 uint64_t sitl_time_ns(void);
 
+// a non blocking close-on-exec UDP socket (sitl_compat.c)
+int sitl_udp_socket(void);
+
 // true when called from the sim thread (i.e. from interrupt context)
 bool sitl_in_sim_thread(void);
 

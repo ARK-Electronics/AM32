@@ -140,6 +140,13 @@ stream stops) followed by zero-throttle re-arming. Running both inputs
 at once exercises exactly this behaviour, which is what the input
 priority/failover parameter work is developing against.
 
+## macOS
+
+Builds and runs natively (Apple Silicon or Intel) with the stock Xcode
+command line tools: `make AM32_SITL_CAN`. The GUI bootstrap is the same
+`python3 Mcu/SITL/make_gui_env.py`. Multicast CAN over loopback works
+without configuration.
+
 ## Windows
 
 The SITL builds under Cygwin (packages: gcc-core, make) with the same

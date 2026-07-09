@@ -91,7 +91,7 @@ void sitl_input_init(void)
     if (sitl_cfg.input_port <= 0) {
         return;
     }
-    fd = socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+    fd = sitl_udp_socket();
     if (fd < 0) {
         perror("SITL: input socket");
         return;
