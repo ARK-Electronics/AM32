@@ -33,6 +33,7 @@ jobs:
       - name: Build CI
         shell: bash
         run: |
+          # Installs the xPack GCC pin from make/tools.mk (currently 15.2.1-1.1).
           if [ "$RUNNER_OS" == "Linux" ]; then
             make arm_sdk_install
             make -j8
