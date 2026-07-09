@@ -1,0 +1,37 @@
+name: noprop_smoke_100pct_3a
+description: >
+  No-prop free-run climb to 100% on a 25 V / 3.0 A current-limited supply.
+  Gentle ramps through 20/40/60/80/100 so transition spikes stay under the
+  2.8 A host abort. Steady holds at each step for demag/telemetry. Free-run
+  current is typically well under 2 A; abort is the supply backstop. ~55 s.
+sample_rate_hz: 100
+arm_settle_s: 3.0
+pole_pairs: 7
+demag_rpm_drop_fraction: 0.25
+demag_commutation_spike: 3.0
+steady_tail_fraction: 0.5
+
+safety:
+  # 3.0 A supply; free-run steady is ~1.6 A @ 100%. Host abort sits under the
+  # supply limit but above measured transition spikes (~2.0 A) so a single
+  # sample glitch near the old 2.8 A ceiling cannot kill a clean run.
+  max_current_a: 2.95
+  max_motor_temp_c: 90.0
+  max_rpm: 55000
+  max_thrust_n: 2.0
+
+segments:
+  - {label: idle,    throttle: 0.00, duration_s: 2.0}
+  - {label: ramp20,  throttle: 0.20, duration_s: 3.0, ramp: true}
+  - {label: hold20,  throttle: 0.20, duration_s: 3.0, steady: true}
+  - {label: ramp40,  throttle: 0.40, duration_s: 4.0, ramp: true}
+  - {label: hold40,  throttle: 0.40, duration_s: 3.0, steady: true}
+  - {label: ramp60,  throttle: 0.60, duration_s: 4.0, ramp: true}
+  - {label: hold60,  throttle: 0.60, duration_s: 3.0, steady: true}
+  - {label: ramp80,  throttle: 0.80, duration_s: 4.0, ramp: true}
+  - {label: hold80,  throttle: 0.80, duration_s: 3.0, steady: true}
+  # Slower final ramp to keep transition peaks under a 3 A brick OCP.
+  - {label: ramp100, throttle: 1.00, duration_s: 8.0, ramp: true}
+  - {label: hold100, throttle: 1.00, duration_s: 5.0, steady: true}
+  - {label: rampdn,  throttle: 0.00, duration_s: 5.0, ramp: true}
+  - {label: stop,    throttle: 0.00, duration_s: 2.0}

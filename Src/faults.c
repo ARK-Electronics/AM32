@@ -15,12 +15,12 @@
 #include "signal.h"
 #include "commutation.h"
 #include "targets.h"
+#include "esc_state.h"
 
 #ifdef USE_RGB_LED
 extern void setIndividualRGBLed(uint8_t, uint8_t, uint8_t);
 #endif
 
-extern volatile char inputSet;
 extern volatile uint16_t zero_input_count;
 extern volatile uint32_t dma_buffer[64];
 extern void resetInputCaptureTimer(void);
@@ -32,8 +32,7 @@ uint8_t faultHandleStuckRotorIfNeeded(void)
     if ((bemf_timeout_happened > bemf_timeout) && eepromBuffer.stuck_rotor_protection) {
         allOff();
         maskPhaseInterrupts();
-        input = 0;
-        bemf_timeout_happened = 102;
+        escToFaultStuck();
 #ifdef USE_RGB_LED
         setIndividualRGBLed(1, 0, 0);
 #endif
@@ -64,9 +63,7 @@ void faultPollSignalTimeout(void)
     if (signaltimeout > (LOOP_FREQUENCY_HZ >> 1)) { // half second timeout when armed;
         if (armed) {
             allOff();
-            armed = 0;
-            input = 0;
-            inputSet = 0;
+            escToFaultSignal();
             zero_input_count = 0;
             SET_DUTY_CYCLE_ALL(0);
             resetInputCaptureTimer();
@@ -77,9 +74,7 @@ void faultPollSignalTimeout(void)
         }
         if (signaltimeout > LOOP_FREQUENCY_HZ << 1) { // 2 second when not armed
             allOff();
-            armed = 0;
-            input = 0;
-            inputSet = 0;
+            escToFaultSignal();
             zero_input_count = 0;
             SET_DUTY_CYCLE_ALL(0);
             resetInputCaptureTimer();
@@ -124,11 +119,7 @@ void faultHandleBemfIntervalStall(void)
         bemf_timeout_happened++;
 
         maskPhaseInterrupts();
-        old_routine = 1;
-        if (input < 48) {
-            running = 0;
-            commutation_interval = 5000;
-        }
+        escNoteStallOrDesync(1);
         zero_crosses = 0;
         zcfoundroutine();
     }

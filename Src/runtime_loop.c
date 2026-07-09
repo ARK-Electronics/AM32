@@ -8,6 +8,7 @@
 #include "common.h"
 #include "motor_runtime.h"
 #include "faults.h"
+#include "esc_state.h"
 #include "control_loop.h"
 #include "commutation.h"
 #include "functions.h"
@@ -78,7 +79,8 @@ void runtimeProcessDesyncCheck(void)
             if ((!eepromBuffer.bi_direction && (input > 47)) || commutation_interval > 1000) {
                 running = 0;
             }
-            old_routine = 1;
+            /* Always fall back to poll-ZC path after a desync event. */
+            escNoteStallOrDesync(0);
             if (zero_crosses > 100) {
                 average_interval = 5000;
             }
@@ -209,13 +211,10 @@ if (PROCESS_ADC_FLAG == 1) { // for adc and telemetry set adc counter at 1khz lo
         }
     }
     if (low_voltage_count > (10000 - (stepper_sine * 9900))) {      // 10 second wait before cut-off for low voltage
-      LOW_VOLTAGE_CUTOFF = 1;
-      input = 0;
       allOff();
       maskPhaseInterrupts();
-      running = 0;
       zero_input_count = 0;
-      armed = 0;
+      escToFaultLvc();
      }
    
     PROCESS_ADC_FLAG = 0;
@@ -239,6 +238,8 @@ if (newinput > 2000) {
 
 void runtimeMotorModeTick(void)
 {
+/* ISR / flag side-effects (old_routine, running) → named mode. */
+escReconcileFromFlags();
 stuckcounter = 0;
 if (stepper_sine == 0) {
 
@@ -347,15 +348,12 @@ if (stepper_sine == 0) {
 
             delayMicros(step_delay);
             if (phase_A_position == 0) {
-                stepper_sine = 0;
-                running = 1;
-                old_routine = 1;
+                escSineHandoffToOpenLoop();
                 commutation_interval = 9000;
                 average_interval = 9000;
                 last_average_interval = average_interval;
                 SET_INTERVAL_TIMER_COUNT(9000);
                 zero_crosses = 20;
-                prop_brake_active = 0;
                 step = changeover_step;
                 // comStep(step);// rising bemf on a same as position 0.
                 if (eepromBuffer.stall_protection) {

@@ -5,6 +5,7 @@
 #include "control_loop.h"
 #include "motor_runtime.h"
 #include "faults.h"
+#include "esc_state.h"
 #include "commutation.h"
 #include "bemf_zc.h"
 #include "main.h"
@@ -294,7 +295,7 @@ if (!stepper_sine && armed) {
                 if (!old_routine) {
                     startMotor();
                 }
-                running = 1;
+                escEnterRunningOpenLoop();
                 last_duty_cycle = min_startup_duty;
             }
 
@@ -409,7 +410,7 @@ if (!stepper_sine && armed) {
                 }
 
                 if (eepromBuffer.use_sine_start == 1) {
-                    stepper_sine = 1;
+                    escToSineStart();
                 }
                 duty_cycle_setpoint = 0;
             }
@@ -458,7 +459,7 @@ RAM_FUNC void tenKhzRoutine()
                     armed_timeout_count++;
                     if (armed_timeout_count > LOOP_FREQUENCY_HZ) { // one second
                         if (zero_input_count > 30) {
-                            armed = 1;
+                            escToArmedIdle();
 #ifdef USE_LED_STRIP
                             //	send_LED_RGB(0,0,0);
                             delayMicros(1000);
@@ -487,6 +488,7 @@ RAM_FUNC void tenKhzRoutine()
                         } else {
                             inputSet = 0;
                             armed_timeout_count = 0;
+                            escToDisarmed();
                         }
                     }
                 } else {

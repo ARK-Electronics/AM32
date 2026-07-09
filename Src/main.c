@@ -236,8 +236,9 @@ an settings option)
 #include "brushed.h"
 #include "runtime_loop.h"
 #include "motor_runtime.h"
+#include "esc_state.h"
 
-/* Control path modules + motor_runtime.c for shared state definitions. */
+/* Control path modules + motor_runtime state + esc_state machine. */
 #include "signal.h"
 #include "sounds.h"
 #include "targets.h"
@@ -361,7 +362,7 @@ int main(void)
     MX_IWDG_Init();
     RELOAD_WATCHDOG_COUNTER();
     inputSet = 1;
-    armed = 1;
+    escToArmedIdle();
     adjusted_input = 48;
     newinput = 48;
 		comStep(2);
@@ -438,6 +439,8 @@ int main(void)
     // cycle slopes so setInput multiplies instead of calling map()
     throttle_duty_slope_q16 = (((uint32_t)(2000 - minimum_duty_cycle)) << 16) / (2047 - 47);
     sine_throttle_duty_slope_q16 = (((uint32_t)(2000 - (minimum_duty_cycle + 40))) << 16) / (2047 - 137);
+
+    escReconcileFromFlags();
 
     while (1) {
         HWCI_PERF_MAIN_LOOP();
