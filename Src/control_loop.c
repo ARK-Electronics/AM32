@@ -4,6 +4,7 @@
 
 #include "control_loop.h"
 #include "motor_runtime.h"
+#include "faults.h"
 #include "commutation.h"
 #include "bemf_zc.h"
 #include "main.h"
@@ -232,14 +233,8 @@ void setInput()
         adjusted_input = newinput;
     }
 #ifndef BRUSHED_MODE
-    if ((bemf_timeout_happened > bemf_timeout) && eepromBuffer.stuck_rotor_protection) {
-        allOff();
-        maskPhaseInterrupts();
-        input = 0;
-        bemf_timeout_happened = 102;
-#ifdef USE_RGB_LED
-        setIndividualRGBLed(1, 0, 0);
-#endif
+    if (faultHandleStuckRotorIfNeeded()) {
+        /* drive cut and latched; skip normal throttle map */
     } else {
 #ifdef FIXED_DUTY_MODE
         input = FIXED_DUTY_MODE_POWER * 20 + 47;
@@ -631,19 +626,7 @@ RAM_FUNC void tenKhzRoutine()
         SET_DUTY_CYCLE_ALL(adjusted_duty_cycle);
     }
 #endif // ndef brushed_mode
-#if defined(FIXED_DUTY_MODE) || defined(FIXED_SPEED_MODE)
-    if (getInputPinState()) {
-        signaltimeout++;
-        if (signaltimeout > LOOP_FREQUENCY_HZ) {
-            NVIC_SystemReset();
-        }
-    } else {
-        signaltimeout = 0;
-    }
-#else
-    signaltimeout++;
-
-#endif
+    faultSignalTimeoutTick();
     HWCI_PERF_CTRL_EXIT();
 }
 

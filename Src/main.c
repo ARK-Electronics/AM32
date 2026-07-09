@@ -231,6 +231,7 @@ an settings option)
 #include "commutation.h"
 #include "bemf_zc.h"
 #include "control_loop.h"
+#include "faults.h"
 
 /* Control path: commutation.c, bemf_zc.c, control_loop.c (split from main). */
 #include "signal.h"
@@ -1172,34 +1173,7 @@ if(zero_crosses < 5){
             pwm_to_arr_scale_q16 = next_scale;
             __enable_irq();
         }
-        if (signaltimeout > (LOOP_FREQUENCY_HZ >> 1)) { // half second timeout when armed;
-            if (armed) {
-                allOff();
-                armed = 0;
-                input = 0;
-                inputSet = 0;
-                zero_input_count = 0;
-                SET_DUTY_CYCLE_ALL(0);
-                resetInputCaptureTimer();
-                for (int i = 0; i < 64; i++) {
-                    dma_buffer[i] = 0;
-                }
-                NVIC_SystemReset();
-            }
-            if (signaltimeout > LOOP_FREQUENCY_HZ << 1) { // 2 second when not armed
-                allOff();
-                armed = 0;
-                input = 0;
-                inputSet = 0;
-                zero_input_count = 0;
-                SET_DUTY_CYCLE_ALL(0);
-                resetInputCaptureTimer();
-                for (int i = 0; i < 64; i++) {
-                    dma_buffer[i] = 0;
-                }
-                NVIC_SystemReset();
-            }
-        }
+        faultPollSignalTimeout();
 #ifdef USE_CUSTOM_LED
         if ((input >= 47) && (input < 1947)) {
             if (ledcounter > (2000 >> forward)) {
@@ -1224,30 +1198,7 @@ if(zero_crosses < 5){
             tenkhzcounter = 0;
         }
 
-#ifndef BRUSHED_MODE
-
-        if ((zero_crosses > 1000) || (adjusted_input == 0)) {
-            bemf_timeout_happened = 0;
-        }
-        if (zero_crosses > 100 && adjusted_input < 200) {
-            bemf_timeout_happened = 0;
-        }
-        if (eepromBuffer.use_sine_start && adjusted_input < 160) {
-            bemf_timeout_happened = 0;
-        }
-
-        if (crawler_mode) {
-            if (adjusted_input < 400) {
-                bemf_timeout_happened = 0;
-            }
-        } else {
-            if (adjusted_input < 150) { // startup duty cycle should be low enough to not burn motor
-                bemf_timeout = 100;
-            } else {
-                bemf_timeout = 10;
-            }
-        }
-#endif
+        faultUpdateBemfTimeoutPolicy();
         average_interval = e_com_time / 3;
         if (desync_check && zero_crosses > 10) {
             if ((getAbsDif(last_average_interval, average_interval) > average_interval >> 1) && (average_interval < 2000)) { // throttle resitricted before zc 20.
@@ -1457,18 +1408,7 @@ if(zero_crosses < 5){
                 }
             }
 #endif
-            if (INTERVAL_TIMER_COUNT > 45000 && running == 1) {
-                bemf_timeout_happened++;
-
-                maskPhaseInterrupts();
-                old_routine = 1;
-                if (input < 48) {
-                    running = 0;
-                    commutation_interval = 5000;
-                }
-                zero_crosses = 0;
-                zcfoundroutine();
-            }
+            faultHandleBemfIntervalStall();
         } else { // stepper sine
 
 #ifdef GIMBAL_MODE
