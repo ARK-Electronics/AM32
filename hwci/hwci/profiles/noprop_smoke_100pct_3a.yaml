@@ -20,6 +20,21 @@ safety:
   max_rpm: 55000
   max_thrust_n: 2.0
 
+# Absolute health gates (independent of baseline). Catch stuck-rotor latch /
+# never-spun runs that still exit host-side "aborted: null".
+smoke_gates:
+  enabled: true
+  min_throttle: 0.55          # hold60 / hold80 / hold100
+  min_running_fraction: 0.90
+  max_bemf_latch_samples: 0   # stuck-rotor latch value 102
+  require_esc_drive_states: true
+  min_esc_drive_fraction: 0.90
+  max_illegal_edges: 0
+  min_rpm:
+    0.6: 15000
+    0.8: 25000
+    1.0: 30000
+
 segments:
   - {label: idle,    throttle: 0.00, duration_s: 2.0}
   - {label: ramp20,  throttle: 0.20, duration_s: 3.0, ramp: true}

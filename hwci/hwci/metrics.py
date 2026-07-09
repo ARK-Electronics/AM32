@@ -294,6 +294,8 @@ def compute(run: RunResult, profile: Profile) -> dict:
 
     demag = detect_demag(run, profile)
     starts = startup_stats(run, profile)
+    smoke = evaluate_smoke_gates(run, profile, demag=demag,
+                                 steady_points=steady_points)
 
     summary = {
         "max_thrust_gf": _safe_max(thrust_gf),
@@ -340,8 +342,12 @@ def compute(run: RunResult, profile: Profile) -> dict:
         "stand_sample_count": int(np.count_nonzero(~np.isnan(thrust_gf))),
         "telem_sample_count": int(np.count_nonzero(~np.isnan(esc_erpm))),
     }
-    return {"summary": summary, "steady_points": steady_points, "demag": demag,
-            "startup": starts}
+    out = {"summary": summary, "steady_points": steady_points, "demag": demag,
+           "startup": starts}
+    if smoke is not None:
+        out["smoke_gates"] = smoke
+        summary["smoke_gates_passed"] = smoke["passed"]
+    return out
 
 
 def startup_stats(run: RunResult, profile: Profile) -> dict:
@@ -388,6 +394,152 @@ def startup_stats(run: RunResult, profile: Profile) -> dict:
         "time_to_run_ms_mean": round(sum(times) / len(times), 1) if times else None,
         "per_attempt": attempts,
     }
+
+
+# Stuck-rotor latch value written by faultHandleStuckRotor / escToFaultStuck.
+BEMF_STUCK_LATCH = 102
+# esc_state_t OPEN_LOOP / CLOSED_LOOP
+ESC_OPEN_LOOP = 4
+ESC_CLOSED_LOOP = 5
+
+
+def evaluate_smoke_gates(run: RunResult, profile: Profile, *,
+                         demag: dict | None = None,
+                         steady_points: list[dict] | None = None) -> dict | None:
+    """Absolute smoke/health gates (independent of baseline regression).
+
+    Returns None when the profile has no enabled ``smoke_gates`` section.
+    Otherwise ``{"passed": bool, "checks": [{name, pass, detail, ...}, ...]}``.
+    """
+    gates = profile.smoke_gates
+    if gates is None or not gates.enabled:
+        return None
+
+    rows = run.rows
+    checks: list[dict] = []
+    seg = np.array([r.get("segment") for r in rows], dtype=object)
+    throttle = _col(rows, "throttle_cmd")
+    running = _col(rows, "perf_running")
+    bemf = _col(rows, "perf_bemf_timeout")
+    esc_state = _col(rows, "perf_esc_state")
+    illegal = _col(rows, "perf_esc_illegal_edge_count")
+    stand_rpm = _col(rows, "stand_rpm")
+
+    # Steady segment labels at/above min_throttle
+    drive_labels = [s.label for s in profile.segments
+                    if s.steady and s.throttle + 1e-9 >= gates.min_throttle]
+    drive_mask = np.zeros(len(rows), dtype=bool)
+    for lab in drive_labels:
+        drive_mask |= (seg == lab)
+
+    # --- running fraction ---
+    if drive_mask.any() and not np.all(np.isnan(running)):
+        n = int(drive_mask.sum())
+        n_run = int(np.count_nonzero(drive_mask & (running == 1)))
+        frac = n_run / n if n else 0.0
+        ok = frac + 1e-12 >= gates.min_running_fraction
+        checks.append({
+            "name": "running_fraction",
+            "pass": ok,
+            "current": round(frac, 4),
+            "limit": gates.min_running_fraction,
+            "detail": (f"perf_running==1 on {n_run}/{n} samples in steady "
+                       f"segments throttle>={gates.min_throttle}"),
+        })
+    elif drive_labels:
+        checks.append({
+            "name": "running_fraction",
+            "pass": False,
+            "current": None,
+            "limit": gates.min_running_fraction,
+            "detail": "no samples in high-throttle steady segments "
+                      "(or missing perf_running)",
+        })
+
+    # --- stuck-rotor latch ---
+    if not np.all(np.isnan(bemf)):
+        n_latch = int(np.count_nonzero(bemf >= BEMF_STUCK_LATCH))
+        ok = n_latch <= gates.max_bemf_latch_samples
+        checks.append({
+            "name": "bemf_stuck_latch",
+            "pass": ok,
+            "current": n_latch,
+            "limit": gates.max_bemf_latch_samples,
+            "detail": f"samples with perf_bemf_timeout>={BEMF_STUCK_LATCH}",
+        })
+
+    # --- esc_state drive modes ---
+    if gates.require_esc_drive_states:
+        if drive_mask.any() and not np.all(np.isnan(esc_state)):
+            n = int(drive_mask.sum())
+            n_drive = int(np.count_nonzero(
+                drive_mask & ((esc_state == ESC_OPEN_LOOP)
+                              | (esc_state == ESC_CLOSED_LOOP))))
+            frac = n_drive / n if n else 0.0
+            ok = frac + 1e-12 >= gates.min_esc_drive_fraction
+            checks.append({
+                "name": "esc_drive_states",
+                "pass": ok,
+                "current": round(frac, 4),
+                "limit": gates.min_esc_drive_fraction,
+                "detail": (f"OPEN_LOOP(4)/CLOSED_LOOP(5) on {n_drive}/{n} "
+                           f"high-throttle steady samples"),
+            })
+        # Missing column (pre-v5 firmware): skip, do not fail
+
+    # --- illegal edge counter ---
+    if gates.max_illegal_edges is not None and not np.all(np.isnan(illegal)):
+        peak = int(np.nanmax(illegal))
+        ok = peak <= gates.max_illegal_edges
+        checks.append({
+            "name": "esc_illegal_edges",
+            "pass": ok,
+            "current": peak,
+            "limit": gates.max_illegal_edges,
+            "detail": "max perf_esc_illegal_edge_count over the run",
+        })
+
+    # --- min RPM at configured throttle levels ---
+    pts = {p["throttle"]: p for p in (steady_points or [])}
+    for thr_key, rpm_min in sorted(gates.min_rpm.items()):
+        # Prefer exact steady point; else highest steady point at/above key
+        cand = None
+        if thr_key in pts:
+            cand = pts[thr_key]
+        else:
+            above = [p for p in (steady_points or [])
+                     if p["throttle"] + 1e-9 >= thr_key]
+            if above:
+                cand = max(above, key=lambda p: p["throttle"])
+        if cand is None:
+            checks.append({
+                "name": f"min_rpm@{thr_key:g}",
+                "pass": False,
+                "current": None,
+                "limit": rpm_min,
+                "detail": f"no steady point at/above throttle {thr_key:g}",
+            })
+            continue
+        rpm = cand.get("rpm")
+        ok = rpm is not None and rpm == rpm and rpm >= rpm_min
+        checks.append({
+            "name": f"min_rpm@{thr_key:g}",
+            "pass": bool(ok),
+            "current": rpm,
+            "limit": rpm_min,
+            "detail": (f"steady {cand['segment']} throttle={cand['throttle']} "
+                       f"rpm={rpm}"),
+        })
+
+    # Optional: surface demag event count as informational check if present
+    # (not a hard fail by default - free-run rampdn can false-positive).
+
+    if not checks:
+        return {"passed": True, "checks": [],
+                "detail": "smoke_gates enabled but nothing applicable"}
+
+    passed = all(c["pass"] for c in checks)
+    return {"passed": passed, "checks": checks}
 
 
 def detect_demag(run: RunResult, profile: Profile) -> dict:
