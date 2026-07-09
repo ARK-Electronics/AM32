@@ -36,6 +36,7 @@
 #endif
 
 #include <stdint.h>
+#include "esc_state.h" /* esc_state, esc_illegal_edge_count for snapshot */
 
 /* ASCII "HWC1" in little-endian memory order - lets the host locate/validate
  * the struct either by ELF symbol or by scanning RAM for the magic. */
@@ -43,8 +44,9 @@
 /* v2: appended the zero-cross jitter block (zc_*) after host_cmd.
  * v3: appended zc_confirm_reject after the v2 jitter block (host_cmd stays
  *     frozen at offset 60).
- * v4: appended the 32-bin PWM-phase histogram of accepted zero-crossings. */
-#define HWCI_PERF_VERSION 4u
+ * v4: appended the 32-bin PWM-phase histogram of accepted zero-crossings.
+ * v5: appended esc_state + illegal edge counter (drive state machine). */
+#define HWCI_PERF_VERSION 5u
 
 /* PWM-phase histogram bins (power of two: the binning multiply-shift and the
  * host's modular math both assume it). */
@@ -130,7 +132,12 @@ typedef struct hwci_perf_s {
      * discriminator for the beat-band jitter hump investigation (PR #23
      * found 3.3x edge-window enrichment at t30). */
     uint16_t zc_phase_hist[HWCI_ZC_PHASE_BINS]; /* off 84..147              */
-} hwci_perf_t;                         /* total size: 148 bytes             */
+
+    /* --- v5: top-level ESC drive state machine snapshot --- */
+    uint8_t  esc_state;                /* off 148: esc_state_t enum value  */
+    uint8_t  _pad_esc;                 /* off 149: alignment               */
+    uint16_t esc_illegal_edge_count;   /* off 150: named-transition faults */
+} hwci_perf_t;                         /* total size: 152 bytes             */
 
 extern volatile hwci_perf_t hwci_perf;
 
@@ -305,6 +312,8 @@ void hwci_perf_reset_stats(void);
             hwci_perf.bemf_timeout_state = (uint8_t)bemf_timeout_happened;     \
             hwci_perf.armed = _armed;                                          \
             hwci_perf.running = (uint8_t)running;                              \
+            hwci_perf.esc_state = (uint8_t)esc_state;                          \
+            hwci_perf.esc_illegal_edge_count = esc_illegal_edge_count;         \
             hwci_perf.zero_cross_count = zero_crosses;                         \
             hwci_perf.commutation_interval = _ci;                              \
             if (_ci > hwci_perf.commutation_interval_max)                      \

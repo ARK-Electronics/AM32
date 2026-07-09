@@ -41,6 +41,8 @@ COLUMNS = [
     "perf_bemf_timeout", "perf_e_rpm",
     # ESC input/arming state (proves the ESC decoded the throttle protocol)
     "perf_input", "perf_armed", "perf_running",
+    # top-level drive state machine (struct v5+)
+    "perf_esc_state", "perf_esc_illegal_edge_count",
 ]
 
 
@@ -107,6 +109,11 @@ def make_row(t: float, segment: str, throttle_cmd: float,
             # one CSV cell, not 32 columns; _coerce leaves it a string on load
             row["perf_zc_phase_hist"] = ";".join(
                 str(v) for v in r["zc_phase_hist"])
+        if "esc_state" in r:  # struct v5+
+            row.update(
+                perf_esc_state=r["esc_state"],
+                perf_esc_illegal_edge_count=r["esc_illegal_edge_count"],
+            )
     return row
 
 

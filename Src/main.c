@@ -237,6 +237,7 @@ an settings option)
 #include "runtime_loop.h"
 #include "motor_runtime.h"
 #include "esc_state.h"
+/* esc_state is also snapshotted by HWCI_PERF_MAIN_LOOP (needs esc_state.h). */
 
 /* Control path modules + motor_runtime state + esc_state machine. */
 #include "signal.h"

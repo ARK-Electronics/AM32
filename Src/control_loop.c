@@ -288,7 +288,7 @@ void setInput()
     }
 #endif
 #ifndef BRUSHED_MODE
-if (!stepper_sine && armed) {
+if (escMaySixStepThrottle()) {
         if (input >= 47 + (80 * eepromBuffer.use_sine_start)) {
             if (running == 0) {
                 allOff();
@@ -447,6 +447,8 @@ if (!stepper_sine && armed) {
 RAM_FUNC void tenKhzRoutine()
 { // 20khz as of 2.00 to be renamed
     HWCI_PERF_CTRL_ENTER();
+    /* Align esc_state with ISR flag updates before policy predicates. */
+    escReconcileFromFlags();
     duty_cycle = duty_cycle_setpoint;
     tenkhzcounter++;
     ledcounter++;
@@ -511,9 +513,9 @@ RAM_FUNC void tenKhzRoutine()
 
 #ifndef BRUSHED_MODE
 
-    if (!stepper_sine) {
+    if (!escInSineStart()) {
 #ifndef CUSTOM_RAMP
-        if (old_routine && running) {
+        if (escInPollZcDrive()) {
 	//				send_LED_RGB(255, 0, 0);
             maskPhaseInterrupts();
             getBemfState();

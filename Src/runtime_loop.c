@@ -241,7 +241,7 @@ void runtimeMotorModeTick(void)
 /* ISR / flag side-effects (old_routine, running) → named mode. */
 escReconcileFromFlags();
 stuckcounter = 0;
-if (stepper_sine == 0) {
+if (!escInSineStart()) {
 
     e_rpm = running * (600000 / e_com_time); // in tens of rpm
     k_erpm = e_rpm / 10; // ecom time is time for one electrical revolution in microseconds

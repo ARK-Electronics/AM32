@@ -25,25 +25,42 @@ typedef enum {
     ESC_FAULT_STUCK,    /* stuck-rotor latch */
     ESC_FAULT_SIGNAL,   /* signal-loss path (typically then reset) */
     ESC_FAULT_LVC,      /* low-voltage cutoff latched */
+    ESC_STATE_COUNT
 } esc_state_t;
 
 extern volatile esc_state_t esc_state;
+/* Saturating count of named transitions that violated the edge table. */
+extern volatile uint16_t esc_illegal_edge_count;
 
 const char *escStateName(esc_state_t s);
 esc_state_t escGetState(void);
 
-/* True for stuck / signal / LVC latches. */
+/* --- predicates (prefer these over raw flag checks in policy code) --- */
+
 uint8_t escIsFault(void);
-/* Sine, open-loop, or closed-loop drive. */
+/* ARMED_IDLE .. BRAKE (not arming/disarmed/fault). */
+uint8_t escIsArmed(void);
+/* SINE_START, OPEN_LOOP, or CLOSED_LOOP. */
 uint8_t escIsDriving(void);
+uint8_t escInSineStart(void);
+uint8_t escInOpenLoop(void);
+uint8_t escInClosedLoop(void);
+uint8_t escInBrake(void);
+/* Armed and not in sine stepper path (six-step throttle map). */
+uint8_t escMaySixStepThrottle(void);
+/* Six-step drive with poll-ZC (old_routine path). */
+uint8_t escInPollZcDrive(void);
+
+/* 1 if from->to is a legal named transition (self always legal). */
+uint8_t escTransitionAllowed(esc_state_t from, esc_state_t to);
 
 /*
- * Rebuild esc_state from legacy flags. Call after ISR-side flag changes
- * (old_routine, running) or once per main-loop tick.
+ * Rebuild esc_state from legacy flags (force; bypasses edge table).
+ * Call after ISR-side flag changes or once per main-loop tick.
  */
 void escReconcileFromFlags(void);
 
-/* --- named transitions (set state + flags) --- */
+/* --- named transitions (set flags + commit state via edge table) --- */
 
 void escToDisarmed(void);
 void escToArming(void);
@@ -57,7 +74,7 @@ void escToFaultStuck(void);
 void escToFaultSignal(void);
 void escToFaultLvc(void);
 
-/* Convenience: armed + running with old_routine poll path (startup). */
+/* Convenience: armed + running with current old_routine path. */
 void escEnterRunningOpenLoop(void);
 /* Sine handoff to six-step (old_routine poll, running). */
 void escSineHandoffToOpenLoop(void);

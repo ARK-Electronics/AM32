@@ -349,6 +349,9 @@ class RigSimulator:
             "bemf_timeout_state": 1 if self.desync_remaining > 0 else 0,
             "armed": 1,
             "running": 1 if self.rpm > 100 else 0,
+            # esc_state: CLOSED_LOOP(5) when spinning, ARMED_IDLE(2) otherwise
+            "esc_state": 5 if self.rpm > 100 else 2,
+            "esc_illegal_edge_count": 0,
             "loop_iters": self.loop_iters & 0xFFFFFFFF,
             # firmware clamps zero_crosses at 10000 (and resets it on
             # desync/stop) - mirror the saturation so host logic tested
