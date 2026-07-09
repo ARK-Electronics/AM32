@@ -60,7 +60,7 @@ const struct {
     uint32_t crc2; // crc32 from end of app_signature to end of fw
     char mcu[16];
     uint32_t unused[2];
-} app_signature __attribute__((section(".app_signature"))) = {
+} app_signature AM32_FLASH_SECTION(".app_signature") = {
         .magic1 = APP_SIGNATURE_MAGIC1,
         .magic2 = APP_SIGNATURE_MAGIC2,
         .fwlen = 0,

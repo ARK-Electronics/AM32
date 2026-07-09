@@ -1,5 +1,16 @@
 
 
+/*
+  ELF section placement for the flash layout tooling (app signature,
+  file name). Not meaningful for the SITL build and mach-o (macOS) has
+  a different section syntax, so it becomes a no-op there
+ */
+#ifdef __APPLE__
+#define AM32_FLASH_SECTION(name)
+#else
+#define AM32_FLASH_SECTION(name) __attribute__((section(name)))
+#endif
+
 #ifndef USE_MAKE
 // #define F031_DEV
 // #define FD6288_F051
