@@ -21,3 +21,4 @@ Keil_Projects/Listings
 /Debug/
 windows-tools.zip
 .settings/
+Mcu/SITL/venv/

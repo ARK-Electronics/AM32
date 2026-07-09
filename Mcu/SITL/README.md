@@ -27,8 +27,14 @@ Options:
 - `--eeprom FILE` eeprom backing file (default `am32_eeprom.bin`). A
   missing file is seeded with the AM32 configurator default settings
 - `--can-uri URI` CAN interface, default `mcast:0` (group 239.65.82.N
-  port 57732, wire compatible with libcanard and ArduPilot SITL)
+  port 57732, wire compatible with libcanard and ArduPilot SITL). An
+  optional interface may be given (`mcast:0:lo`). `none` disables CAN,
+  for pure PWM/DShot testing
 - `--node-id N` force the DroneCAN node ID, otherwise DNA is used
+- `--input-port N` UDP port for PWM/DShot input (default 57733, 0
+  disables)
+- `--input-type N` force the eeprom INPUT_SIGNAL_TYPE setting (0=auto
+  1=dshot 2=servo 5=dronecan)
 - `--speedup X` simulation speed relative to wall clock, 0 = free running
 - `--uid STR` string used to derive the 16 byte unique ID
 - `--verbose` 1Hz state line on stderr
@@ -54,6 +60,69 @@ Each instance holds a lock on its eeprom file: two instances sharing an
 eeprom (and therefore a node ID) would interleave their DroneCAN
 transfers on the bus, which shows up as erratic telemetry. To run
 multiple ESCs give each its own `--eeprom` and `--node-id`.
+
+## PWM/DShot input over UDP
+
+The SITL listens on a UDP port (default 57733) for PWM or DShot input
+frames. Each packet is one frame on the virtual signal wire, synthesized
+into input-capture edge timestamps and decoded by the firmware's
+unmodified `Src/signal.c`/`Src/dshot.c` logic, including input type
+auto-detection, CRC checking, zero-throttle arming, DShot commands and
+bidirectional DShot auto-detect (idle high line).
+
+packet format (little endian):
+
+| field | size | meaning |
+|-------|------|---------|
+| magic | u16  | 0x4453 |
+| type  | u8   | 0=PWM 1=DSHOT150 2=DSHOT300 3=DSHOT600 |
+| len   | u8   | payload bytes after the header (4) |
+| flags | u16  | bit0: line idle level (1 = idle high, bidir DShot) |
+| data  | u16  | PWM pulse width in us, or the full 16 bit DShot frame |
+
+Bidirectional DShot replies (eRPM plus extended telemetry frames) are
+sent back to the most recent sender in the same format, with `data`
+carrying the 16 bit GCR-decoded reply frame.
+
+Tools in `Mcu/SITL/`:
+
+- `sitl_gui.py` — Qt (PySide6) GUI driving both the PWM/DShot input and
+  DroneCAN input with per-input enable switches (for failover testing),
+  BDShot/EDT and esc.Status telemetry with rates, and an
+  `INPUT_SIGNAL_TYPE` parameter panel. `--control-port N` accepts UI
+  commands over a localhost TCP connection for scripted tests (default
+  off); `--log FILE` records every UI action with timestamps and
+  `--replay FILE` plays a recording back, so a failing interactive
+  session can be reproduced exactly. Install the
+  dependencies (PySide6, pyqtgraph, dronecan; Linux/Windows/macOS) into
+  a self-contained environment with
+
+```
+python3 Mcu/SITL/make_gui_env.py
+```
+
+  which creates `Mcu/SITL/venv` and prints the interpreter to run the
+  GUI with. A system python with the packages from
+  `Mcu/SITL/requirements-gui.txt` installed works too. The UI backends
+  live in `sitl_gui_backend.py`, UI-independent for headless tests
+- `dshot_test.py` — headless scripted test (arming, throttle, EDT,
+  bad-CRC injection), e.g.:
+
+```
+obj/AM32_AM32_SITL_CAN_*.elf --can-uri none --input-type 1
+python3 Mcu/SITL/dshot_test.py --type dshot600 --bidir --edt --throttle 800
+```
+
+Note that the eeprom default `INPUT_SIGNAL_TYPE` is DRONECAN_IN, which
+disables the PWM/DShot input interrupts at startup — set it to 0/1/2
+first (via `--input-type`, the GUI parameter panel, or
+`dshot_test.py --input-type`). Also be aware of the current firmware
+input arbitration: once any `esc.RawCommand` has been received, the 1kHz
+DroneCAN input keep-alive overrides the `dshot`/`inputSet` flags and
+PWM/DShot input is dead until a reboot (signal timeout after the CAN
+stream stops) followed by zero-throttle re-arming. Running both inputs
+at once exercises exactly this behaviour, which is what the input
+priority/failover parameter work is developing against.
 
 ## Architecture
 
