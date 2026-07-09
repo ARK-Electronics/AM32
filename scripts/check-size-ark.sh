@@ -16,10 +16,10 @@ cd "$ROOT"
 # arm-none-eabi-size "text" spans those RX regions; do not compare to 27424 alone.
 FLASH_CAPACITY="${FLASH_CAPACITY:-27648}"
 RAM_CAPACITY="${RAM_CAPACITY:-8000}"
-# HWCI_PERF builds sit near the ceiling on F051; keep a thin free margin
-# (raise only with intentional product growth, not silently).
+# After const pwmSin + no-heap + inlined esc predicates, HWCI sits ~98% flash /
+# ~82% RAM. Keep a small free margin for accidental growth.
 FLASH_MAX_PCT="${FLASH_MAX_PCT:-99}"
-RAM_MAX_PCT="${RAM_MAX_PCT:-98}"
+RAM_MAX_PCT="${RAM_MAX_PCT:-90}"
 
 ELF=$(ls -1 obj/AM32_ARK_4IN1_F051_*.elf 2>/dev/null | head -1 || true)
 if [ -z "$ELF" ] || [ ! -f "$ELF" ]; then

@@ -8,11 +8,15 @@
  *
  * Not used for per-commutation micro-steps (those stay in bemf_zc /
  * commutation).
+ *
+ * Predicates are static inline so RAM-resident callers (tenKhzRoutine)
+ * do not pay long-call veneers into flash (F051 size/RAM win).
  */
 #ifndef ESC_STATE_H_
 #define ESC_STATE_H_
 
 #include <stdint.h>
+#include "motor_runtime.h"
 
 typedef enum {
     ESC_DISARMED = 0,   /* waiting for protocol / arm sequence */
@@ -35,21 +39,52 @@ extern volatile uint16_t esc_illegal_edge_count;
 const char *escStateName(esc_state_t s);
 esc_state_t escGetState(void);
 
-/* --- predicates (prefer these over raw flag checks in policy code) --- */
+/* --- predicates (flag-backed; ISR may update flags before reconcile) --- */
 
-uint8_t escIsFault(void);
-/* ARMED_IDLE .. BRAKE (not arming/disarmed/fault). */
-uint8_t escIsArmed(void);
-/* SINE_START, OPEN_LOOP, or CLOSED_LOOP. */
-uint8_t escIsDriving(void);
-uint8_t escInSineStart(void);
-uint8_t escInOpenLoop(void);
-uint8_t escInClosedLoop(void);
-uint8_t escInBrake(void);
-/* Armed and not in sine stepper path (six-step throttle map). */
-uint8_t escMaySixStepThrottle(void);
-/* Six-step drive with poll-ZC (old_routine path). */
-uint8_t escInPollZcDrive(void);
+static inline uint8_t escIsFault(void)
+{
+    return (uint8_t)(esc_state >= ESC_FAULT_STUCK && esc_state < ESC_STATE_COUNT);
+}
+
+static inline uint8_t escIsArmed(void)
+{
+    return (uint8_t)(armed != 0);
+}
+
+static inline uint8_t escIsDriving(void)
+{
+    return (uint8_t)(running != 0 || stepper_sine != 0);
+}
+
+static inline uint8_t escInSineStart(void)
+{
+    return (uint8_t)(stepper_sine != 0);
+}
+
+static inline uint8_t escInOpenLoop(void)
+{
+    return (uint8_t)(running != 0 && old_routine != 0);
+}
+
+static inline uint8_t escInClosedLoop(void)
+{
+    return (uint8_t)(running != 0 && old_routine == 0 && !stepper_sine);
+}
+
+static inline uint8_t escInBrake(void)
+{
+    return (uint8_t)(prop_brake_active != 0 && running == 0);
+}
+
+static inline uint8_t escMaySixStepThrottle(void)
+{
+    return (uint8_t)(armed != 0 && stepper_sine == 0);
+}
+
+static inline uint8_t escInPollZcDrive(void)
+{
+    return (uint8_t)(old_routine != 0 && running != 0);
+}
 
 /* 1 if from->to is a legal named transition (self always legal). */
 uint8_t escTransitionAllowed(esc_state_t from, esc_state_t to);

@@ -98,7 +98,7 @@ extern uint16_t desired_angle;
 extern int16_t phase_A_position;
 extern int16_t phase_B_position;
 extern int16_t phase_C_position;
-extern int16_t pwmSin[];
+extern const int16_t pwmSin[];
 extern uint16_t step_delay;
 extern uint16_t gate_drive_offset;
 extern uint16_t motor_kv;

@@ -121,58 +121,6 @@ static void escForceState(esc_state_t next)
     esc_state = next;
 }
 
-uint8_t escIsFault(void)
-{
-    return (uint8_t)(esc_state >= ESC_FAULT_STUCK && esc_state < ESC_STATE_COUNT);
-}
-
-/*
- * Policy predicates used from the 20 kHz path must follow the legacy flags
- * (ISR may flip old_routine/running before the next reconcile). Named
- * transitions and escReconcileFromFlags() keep esc_state aligned for host
- * logs and main-loop policy.
- */
-uint8_t escIsArmed(void)
-{
-    return (uint8_t)(armed != 0);
-}
-
-uint8_t escIsDriving(void)
-{
-    return (uint8_t)(running != 0 || stepper_sine != 0);
-}
-
-uint8_t escInSineStart(void)
-{
-    return (uint8_t)(stepper_sine != 0);
-}
-
-uint8_t escInOpenLoop(void)
-{
-    return (uint8_t)(running != 0 && old_routine != 0);
-}
-
-uint8_t escInClosedLoop(void)
-{
-    return (uint8_t)(running != 0 && old_routine == 0 && !stepper_sine);
-}
-
-uint8_t escInBrake(void)
-{
-    return (uint8_t)(prop_brake_active != 0 && running == 0);
-}
-
-uint8_t escMaySixStepThrottle(void)
-{
-    return (uint8_t)(armed != 0 && stepper_sine == 0);
-}
-
-uint8_t escInPollZcDrive(void)
-{
-    /* Exact legacy condition: old_routine && running */
-    return (uint8_t)(old_routine != 0 && running != 0);
-}
-
 void escReconcileFromFlags(void)
 {
     /* Latched faults win over drive mode. */
