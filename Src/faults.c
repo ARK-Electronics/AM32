@@ -61,7 +61,7 @@ void faultSignalTimeoutTick(void)
 void faultPollSignalTimeout(void)
 {
     if (signaltimeout > (LOOP_FREQUENCY_HZ >> 1)) { // half second timeout when armed;
-        if (armed) {
+        if (escIsArmed()) {
             allOff();
             escToFaultSignal();
             zero_input_count = 0;
@@ -115,7 +115,9 @@ void faultUpdateBemfTimeoutPolicy(void)
 
 void faultHandleBemfIntervalStall(void)
 {
-    if (INTERVAL_TIMER_COUNT > 45000 && running == 1) {
+    /* Six-step only (not sine soft-start). */
+    if (INTERVAL_TIMER_COUNT > 45000
+        && (escInOpenLoop() || escInClosedLoop())) {
         bemf_timeout_happened++;
 
         maskPhaseInterrupts();

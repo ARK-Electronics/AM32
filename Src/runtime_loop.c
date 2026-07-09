@@ -160,7 +160,7 @@ if (PROCESS_ADC_FLAG == 1) { // for adc and telemetry set adc counter at 1khz lo
           }
         }
     }
-    if (low_voltage_count > (10000 - (stepper_sine * 9900))) {      // 10 second wait before cut-off for low voltage
+    if (low_voltage_count > (10000 - (escInSineStart() * 9900))) {      // 10 second wait before cut-off for low voltage
       allOff();
       maskPhaseInterrupts();
       zero_input_count = 0;
@@ -227,7 +227,7 @@ if (!escInSineStart()) {
 
     /**************** old routine*********************/
 #ifdef CUSTOM_RAMP
-    if (old_routine && running) {
+    if (escInPollZcDrive()) {
         maskPhaseInterrupts();
         getBemfState();
         if (!zcfound) {
@@ -271,7 +271,7 @@ if (!escInSineStart()) {
     }
 #else
 
-    if (input > 48 && armed) {
+    if (input > 48 && escIsArmed()) {
 
         if (input > 48 && input < 137) { // sine wave stepper
 

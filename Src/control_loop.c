@@ -122,7 +122,7 @@ void setInput()
             } else {
                 if (newinput > (1000 + (servo_dead_band << 1))) {
                     if (forward == eepromBuffer.dir_reversed) {
-                        if (((commutation_interval > reverse_speed_threshold) && (duty_cycle < 200)) || stepper_sine) {
+                        if (((commutation_interval > reverse_speed_threshold) && (duty_cycle < 200)) || escInSineStart()) {
                             forward = 1 - eepromBuffer.dir_reversed;
                             zero_crosses = 0;
                             old_routine = 1;
@@ -136,7 +136,7 @@ void setInput()
                 }
                 if (newinput < (1000 - (servo_dead_band << 1))) {
                     if (forward == (1 - eepromBuffer.dir_reversed)) {
-                        if (((commutation_interval > reverse_speed_threshold) && (duty_cycle < 200)) || stepper_sine) {
+                        if (((commutation_interval > reverse_speed_threshold) && (duty_cycle < 200)) || escInSineStart()) {
                             zero_crosses = 0;
                             old_routine = 1;
                             forward = eepromBuffer.dir_reversed;
@@ -198,7 +198,7 @@ void setInput()
             if (newinput > 1047) {
 
                 if (forward == eepromBuffer.dir_reversed) {
-                    if (((commutation_interval > reverse_speed_threshold) && (duty_cycle < 200)) || stepper_sine) {
+                    if (((commutation_interval > reverse_speed_threshold) && (duty_cycle < 200)) || escInSineStart()) {
                         forward = 1 - eepromBuffer.dir_reversed;
                         zero_crosses = 0;
                         old_routine = 1;
@@ -212,7 +212,7 @@ void setInput()
             }
             if (newinput <= 1047 && newinput > 47) {
                 if (forward == (1 - eepromBuffer.dir_reversed)) {
-                    if (((commutation_interval > reverse_speed_threshold) && (duty_cycle < 200)) || stepper_sine) {
+                    if (((commutation_interval > reverse_speed_threshold) && (duty_cycle < 200)) || escInSineStart()) {
                         zero_crosses = 0;
                         old_routine = 1;
                         forward = eepromBuffer.dir_reversed;
@@ -290,7 +290,7 @@ void setInput()
 #ifndef BRUSHED_MODE
 if (escMaySixStepThrottle()) {
         if (input >= 47 + (80 * eepromBuffer.use_sine_start)) {
-            if (running == 0) {
+            if (!escIsDriving()) {
                 allOff();
                 if (!old_routine) {
                     startMotor();
@@ -341,7 +341,7 @@ if (escMaySixStepThrottle()) {
 
             if (!eepromBuffer.comp_pwm) {
                 duty_cycle_setpoint = 0;
-                if (!running) {
+                if (!escIsDriving()) {
                     old_routine = 1;
                     zero_crosses = 0;
                     if (eepromBuffer.brake_on_stop) {
@@ -369,7 +369,7 @@ if (escMaySixStepThrottle()) {
 #endif
                 }
             } else {
-                if (!running) {
+                if (!escIsDriving()) {
 
                     old_routine = 1;
                     zero_crosses = 0;
@@ -454,7 +454,7 @@ RAM_FUNC void tenKhzRoutine()
     ledcounter++;
     ramp_count++;
     one_khz_loop_counter++;
-    if (!armed) {
+    if (!escIsArmed()) {
         if (cell_count == 0) {
             if (inputSet) {
                 if (adjusted_input == 0) {
@@ -537,7 +537,7 @@ RAM_FUNC void tenKhzRoutine()
         if (one_khz_loop_counter > PID_LOOP_DIVIDER) { // 1khz PID loop
             PROCESS_ADC_FLAG = 1; // set flag to do new adc read at lower priority
             one_khz_loop_counter = 0;
-            if (use_current_limit && running) {
+            if (use_current_limit && escIsDriving()) {
                 use_current_limit_adjust -= (int16_t)(doPidCalculations(&currentPid, actual_current,
                                                           eepromBuffer.limits.current * 2 * 100)
                     / 10000);
@@ -548,7 +548,7 @@ RAM_FUNC void tenKhzRoutine()
                     use_current_limit_adjust = 2000;
                 }
             }
-            if (eepromBuffer.stall_protection && running) { // this boosts throttle as the rpm gets lower, for crawlers
+            if (eepromBuffer.stall_protection && escIsDriving()) { // this boosts throttle as the rpm gets lower, for crawlers
                                                // and rc cars only, do not use for multirotors.
                 stall_protection_adjust += (doPidCalculations(&stallPid, commutation_interval,
                                                stall_protect_target_interval));
@@ -559,7 +559,7 @@ RAM_FUNC void tenKhzRoutine()
                     stall_protection_adjust = 0;
                 }
             }
-            if (use_speed_control_loop && running) {
+            if (use_speed_control_loop && escIsDriving()) {
                 input_override += doPidCalculations(&speedPid, e_com_time, target_e_com_time);
                 if (input_override > 2047 * 10000) {
                     input_override = 2047 * 10000;
@@ -607,17 +607,18 @@ RAM_FUNC void tenKhzRoutine()
              duty_cycle = last_duty_cycle;
             }
 
-        if ((armed && running) && input > 47) {
+        /* Inside !escInSineStart(): escIsDriving() ≡ running. */
+        if (escIsDriving() && input > 47) {
             if (eepromBuffer.variable_pwm) {
             }
             adjusted_duty_cycle = (((uint32_t)duty_cycle * pwm_to_arr_scale_q16) >> 16) + 1;
 
         } else {
 
-            if (prop_brake_active) {
+            if (escInBrake() || prop_brake_active) {
               adjusted_duty_cycle =  tim1_arr - (((uint32_t)prop_brake_duty_cycle * pwm_to_arr_scale_q16) >> 16);
             } else {
-              if((eepromBuffer.brake_on_stop == 2) && armed){  // require arming for active brake
+              if((eepromBuffer.brake_on_stop == 2) && escIsArmed()){  // require arming for active brake
                 comStep(2);
                 adjusted_duty_cycle = DEAD_TIME + (((uint32_t)eepromBuffer.active_brake_power * pwm_to_arr_scale_q16) >> 16)* 10;
             }else{

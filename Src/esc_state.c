@@ -20,7 +20,8 @@ volatile uint16_t esc_illegal_edge_count = 0;
  * Self-transitions are always treated as allowed in escTransitionAllowed().
  * escReconcileFromFlags() forces state and does not consult this table.
  *
- * Keep in sync with hwci/tests/test_esc_state.py (ESC_ALLOWED).
+ * Host tests parse this table from this file (hwci/esc_state_model.py) —
+ * do not duplicate the bitmasks in Python by hand.
  */
 static const uint16_t esc_allowed[ESC_STATE_COUNT] = {
     /* DISARMED */
