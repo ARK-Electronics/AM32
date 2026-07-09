@@ -120,6 +120,16 @@ class RigSimulator:
         # models mild phase locking - 20% of edges pile onto one bin
         self.zc_phase_hist = [0] * 32
         self._phase_rr = 0
+        # demag compensation stats (perf struct v5). The sim maps each injected
+        # desync to one firmware-counted demag event; blanking_len_* stay 0
+        # (the sim has no demag-time model - 0 is what real firmware reports
+        # with demag compensation disabled).
+        self.demag_events = 0
+        self.blanking_len_last = 0
+        self.blanking_len_max = 0
+        # active-demag interlock vetoes (perf struct v6); the sim never
+        # freewheels, so a healthy rig reports 0
+        self.active_demag_interlock_skips = 0
 
     # --- model -------------------------------------------------------
     def set_settings(self, settings: SimSettings | None) -> None:
@@ -193,6 +203,7 @@ class RigSimulator:
                 and provisional_current > p.demag_current_a):
             self.desync_remaining = p.desync_ticks
             self.desync_count += 1
+            self.demag_events = (self.demag_events + 1) & 0xFFFFFFFF
 
         if self.desync_remaining > 0:
             # Loss of sync: rotor falls back, electrical drive flails.
@@ -364,4 +375,8 @@ class RigSimulator:
             "zc_jitter_max": self.zc_jitter_max,
             "zc_confirm_reject": self.zc_confirm_reject,
             "zc_phase_hist": tuple(self.zc_phase_hist),
+            "demag_events": self.demag_events,
+            "blanking_len_last": self.blanking_len_last,
+            "blanking_len_max": self.blanking_len_max,
+            "active_demag_interlock_skips": self.active_demag_interlock_skips,
         })

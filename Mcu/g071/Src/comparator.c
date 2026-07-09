@@ -28,7 +28,20 @@ void maskPhaseInterrupts()
 #endif
 }
 
-void enableCompInterrupts() { EXTI->IMR1 |= current_EXTI_LINE; }
+void enableCompInterrupts()
+{
+    // discard any edge latched while masked so the first edge after unmask is
+    // genuine (the demag release edge branch in the ISR has no interval/confirm
+    // gate); clear both comparator lines so a stale flag on the non-current
+    // line cannot be consumed by the two-line ISR dispatch
+    EXTI->RPR1 = EXTI_LINE;
+    EXTI->FPR1 = EXTI_LINE;
+#ifdef N_VARIANT
+    LL_EXTI_ClearRisingFlag_0_31(LL_EXTI_LINE_17);
+    LL_EXTI_ClearFallingFlag_0_31(LL_EXTI_LINE_17);
+#endif
+    EXTI->IMR1 |= current_EXTI_LINE;
+}
 
 void changeCompInput()
 {
@@ -63,6 +76,17 @@ medium_speed_set = 1;
 #endif
         LL_COMP_ConfigInputs(active_COMP, PHASE_B_COMP, LL_COMP_INPUT_PLUS_IO3);
     }
+    if (auto_blanking) { // look for the demag release edge first, reversed polarity
+        if (rising) {
+            LL_EXTI_DisableFallingTrig_0_31(LL_EXTI_LINE_18);
+            LL_EXTI_DisableFallingTrig_0_31(LL_EXTI_LINE_17);
+            LL_EXTI_EnableRisingTrig_0_31(current_EXTI_LINE);
+        } else {
+            LL_EXTI_EnableFallingTrig_0_31(current_EXTI_LINE);
+            LL_EXTI_DisableRisingTrig_0_31(LL_EXTI_LINE_17);
+            LL_EXTI_DisableRisingTrig_0_31(LL_EXTI_LINE_18);
+        }
+    } else {
     if (rising) {
         LL_EXTI_DisableRisingTrig_0_31(LL_EXTI_LINE_18);
         LL_EXTI_DisableRisingTrig_0_31(LL_EXTI_LINE_17);
@@ -71,6 +95,7 @@ medium_speed_set = 1;
         LL_EXTI_EnableRisingTrig_0_31(current_EXTI_LINE);
         LL_EXTI_DisableFallingTrig_0_31(LL_EXTI_LINE_17);
         LL_EXTI_DisableFallingTrig_0_31(LL_EXTI_LINE_18);
+    }
     }
 }
 

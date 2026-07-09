@@ -77,6 +77,7 @@
 extern void transfercomplete();
 extern void PeriodElapsedCallback();
 extern void interruptRoutine();
+extern void demagEdgeRoutine();
 extern void tenKhzRoutine();
 extern void processDshot();
 
@@ -236,6 +237,38 @@ void DMA1_Channel2_3_IRQHandler(void)
  */
 void ADC1_COMP_IRQHandler(void)
 {
+  if (auto_blanking) { // reversed polarity: demag release (or post-comm noise)
+    // Min-time gate: discard edges before demag can start (no flash call).
+    const uint8_t demag_ok = (INTERVAL_TIMER->CNT) > demag_wait_ticks;
+    if (LL_EXTI_IsActiveFallingFlag_0_31(LL_EXTI_LINE_18)) {
+      LL_EXTI_ClearFallingFlag_0_31(LL_EXTI_LINE_18);
+      if (demag_ok) {
+          demagEdgeRoutine();
+      }
+      return;
+    }
+    if (LL_EXTI_IsActiveRisingFlag_0_31(LL_EXTI_LINE_18)) {
+      LL_EXTI_ClearRisingFlag_0_31(LL_EXTI_LINE_18);
+      if (demag_ok) {
+          demagEdgeRoutine();
+      }
+      return;
+    }
+    if (LL_EXTI_IsActiveFallingFlag_0_31(LL_EXTI_LINE_17)) {
+      LL_EXTI_ClearFallingFlag_0_31(LL_EXTI_LINE_17);
+      if (demag_ok) {
+          demagEdgeRoutine();
+      }
+      return;
+    }
+    if (LL_EXTI_IsActiveRisingFlag_0_31(LL_EXTI_LINE_17)) {
+      LL_EXTI_ClearRisingFlag_0_31(LL_EXTI_LINE_17);
+      if (demag_ok) {
+          demagEdgeRoutine();
+      }
+      return;
+    }
+  }
   if (LL_EXTI_IsActiveFallingFlag_0_31(LL_EXTI_LINE_18)) {
     if((INTERVAL_TIMER->CNT) > (average_interval >> 1)){
       LL_EXTI_ClearFallingFlag_0_31(LL_EXTI_LINE_18);

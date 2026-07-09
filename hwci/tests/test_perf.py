@@ -10,7 +10,9 @@ def test_layout_sizes():
     assert perf.SIZE_BY_VERSION[1] == 64
     assert perf.SIZE_BY_VERSION[2] == 80
     assert perf.SIZE_BY_VERSION[3] == 84
-    assert perf.SIZE == perf.SIZE_BY_VERSION[4] == 148
+    assert perf.SIZE_BY_VERSION[4] == 148
+    assert perf.SIZE_BY_VERSION[5] == 156
+    assert perf.SIZE == perf.SIZE_BY_VERSION[6] == 160
 
 
 def test_host_cmd_offset_matches_layout():
@@ -131,7 +133,61 @@ def test_v2_roundtrip_has_no_reject_key():
 
 def test_v4_roundtrip_phase_histogram():
     hist = tuple((i * 7) % 65536 for i in range(32))
-    blob = perf.encode({"zc_phase_hist": hist})
+    blob = perf.encode({"zc_phase_hist": hist}, version=4)
     assert len(blob) == 148
     s = perf.decode(blob)
     assert s.raw["zc_phase_hist"] == hist
+    assert "demag_events" not in s.raw
+
+
+def test_roundtrip_demag_fields():
+    blob = perf.encode({
+        "demag_events": 4000000001,   # near the u32 wrap
+        "blanking_len_last": 512,
+        "blanking_len_max": 4100,
+    }, version=5)
+    r = perf.decode(blob).raw
+    assert r["demag_events"] == 4000000001
+    assert r["blanking_len_last"] == 512
+    assert r["blanking_len_max"] == 4100
+    assert "active_demag_interlock_skips" not in r
+
+
+def test_roundtrip_interlock_skips():
+    blob = perf.encode({
+        "demag_events": 10,
+        "blanking_len_last": 100,
+        "blanking_len_max": 200,
+        "active_demag_interlock_skips": 42,
+    })
+    r = perf.decode(blob).raw
+    assert r["active_demag_interlock_skips"] == 42
+    assert r["demag_events"] == 10
+
+
+def test_v5_roundtrip_has_no_interlock_key():
+    blob = perf.encode({"demag_events": 3}, version=5)
+    assert len(blob) == perf.SIZE_BY_VERSION[5]
+    s = perf.decode(blob)
+    assert s.raw["demag_events"] == 3
+    assert "active_demag_interlock_skips" not in s.raw
+
+
+def test_v2_roundtrip_has_no_demag_keys():
+    # v2 firmware (pre demag block) must decode cleanly and simply not carry
+    # the demag fields - mirrors the v1/zc backward-compat guarantee.
+    blob = perf.encode({"zc_count": 7, "loop_iters": 42}, version=2)
+    assert len(blob) == perf.SIZE_BY_VERSION[2]
+    s = perf.decode(blob)
+    assert s.raw["zc_count"] == 7
+    assert s.loop_iters == 42
+    assert "demag_events" not in s.raw
+    assert "blanking_len_last" not in s.raw
+
+
+def test_v2_decodes_from_oversized_read():
+    # an oversized buffer holding a v2 struct (plus junk) must decode as v2
+    blob = perf.encode({"zc_count": 9}, version=2) + b"\xa5" * 8
+    s = perf.decode(blob)
+    assert s.raw["zc_count"] == 9
+    assert "demag_events" not in s.raw

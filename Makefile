@@ -59,6 +59,31 @@ ifeq ($(HWCI_PERF),1)
 CFLAGS_COMMON += -DHWCI_PERF
 endif
 
+# Bench enablement for demag compensation (opt-in, off by default).
+# `make <TARGET> DEMAG_COMP=<1|2|3>` forces demag_comp_level at boot regardless
+# of the eeprom (byte 184 stays untouched, so a config-tool flash is not
+# needed between A/B runs). Production/release builds leave it unset.
+ifneq ($(DEMAG_COMP),)
+CFLAGS_COMMON += -DHWCI_DEMAG_COMP=$(DEMAG_COMP)
+endif
+
+# Observe-only demag (opt-in, bench diagnostics). With `make <TARGET>
+# DEMAG_COMP=<n> DEMAG_OBSERVE=1` the firmware measures blanking_length and
+# counts demag events but takes no action (no duty cut, no proxy commutation).
+# Used to gather stage-ordering evidence safely on the stand.
+ifeq ($(DEMAG_OBSERVE),1)
+CFLAGS_COMMON += -DHWCI_DEMAG_OBSERVE
+endif
+
+# Active demag freewheel (opt-in, off by default). With
+# `make <TARGET> ACTIVE_DEMAG=1` (optionally with DEMAG_COMP for the
+# compensator) forces active_demag at boot without touching eeprom byte 185.
+# Measurement is auto-armed when active_demag is on; DEMAG_COMP is not
+# required for the efficiency path.
+ifeq ($(ACTIVE_DEMAG),1)
+CFLAGS_COMMON += -DHWCI_ACTIVE_DEMAG=1
+endif
+
 # Linker options
 LDFLAGS_COMMON := -specs=nano.specs $(LIBS) -Wl,--gc-sections -Wl,--print-memory-usage
 
@@ -68,6 +93,21 @@ SRC_COMMON := $(foreach dir,$(SRC_DIRS_COMMON),$(wildcard $(dir)/*.[cs]))
 # configure some directories that are relative to wherever ROOT_DIR is located
 OBJ := obj
 BIN_DIR := $(ROOT)/$(OBJ)
+
+# Feature flags passed on the command line (HWCI_PERF, DEMAG_COMP) become -D
+# defines but are NOT part of any object's path, so a rebuild with a changed
+# flag would silently reuse stale objects - e.g. an A/B bench run flashing
+# firmware built at the wrong DEMAG_COMP level, or without the perf struct.
+# Record the flags in a stamp file and make every ELF depend on it: when the
+# flags change, the stamp's contents (and mtime) change and the ELF rebuilds.
+# $(file) is used instead of the shell for portability (no cmd.exe/sh split).
+BUILD_FLAGS := HWCI_PERF=$(HWCI_PERF) DEMAG_COMP=$(DEMAG_COMP) DEMAG_OBSERVE=$(DEMAG_OBSERVE) ACTIVE_DEMAG=$(ACTIVE_DEMAG)
+FLAGS_STAMP := $(OBJ)/.build_flags
+$(shell $(MKDIR) -p $(OBJ))
+PREV_BUILD_FLAGS := $(if $(wildcard $(FLAGS_STAMP)),$(strip $(file < $(FLAGS_STAMP))))
+ifneq ($(PREV_BUILD_FLAGS),$(BUILD_FLAGS))
+$(file > $(FLAGS_STAMP),$(BUILD_FLAGS))
+endif
 
 # Function to check for _CAN suffix
 has_can_suffix = $(findstring _CAN,$1)
@@ -119,7 +159,7 @@ LDFLAGS_$(2) = $(LDFLAGS_COMMON) $(LDFLAGS_$(1)) -T$(xLDSCRIPT)
 
 -include $$($(2)_BASENAME).d
 
-$$($(2)_BASENAME).elf: $(SRC_COMMON) $$(SRC_$(1)) $(xSRC)
+$$($(2)_BASENAME).elf: $(SRC_COMMON) $$(SRC_$(1)) $(xSRC) $(FLAGS_STAMP)
 	@$(ECHO) Compiling $$(notdir $$@)
 	$(QUIET)$(MKDIR) -p $(OBJ)
 	$(QUIET)$(xCC) $$(CFLAGS_$(2)) $$(LDFLAGS_$(2)) -MMD -MP -MF $$(@:.elf=.d) -o $$(@) $(SRC_COMMON) $$(SRC_$(1)) $(xSRC)

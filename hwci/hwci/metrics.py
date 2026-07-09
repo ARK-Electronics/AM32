@@ -229,6 +229,22 @@ def zc_phase_window(rows: list[dict], idx: np.ndarray) -> dict | None:
             "peak_ratio": round(hist[peak_bin] / uniform, 2)}
 
 
+def fw_counter_delta(counter: np.ndarray, idx: np.ndarray) -> int | None:
+    """Delta of a monotonic firmware u32 counter over the sample window ``idx``.
+
+    Differencing the first and last valid snapshot counts every increment
+    regardless of the host sampling rate (wrap-safe like the zc_* sums).
+    Returns ``None`` when the firmware predates the counter (all blank) or the
+    window has fewer than two valid samples.
+    """
+    if idx.size == 0:
+        return None
+    valid = idx[~np.isnan(counter[idx])]
+    if valid.size < 2:
+        return None
+    return _wrap32(counter[valid[0]], counter[valid[-1]])
+
+
 def compute(run: RunResult, profile: Profile) -> dict:
     rows = run.rows
     seg = np.array([r.get("segment") for r in rows], dtype=object)
@@ -253,6 +269,8 @@ def compute(run: RunResult, profile: Profile) -> dict:
     zc_isum = _col(rows, "perf_zc_interval_sum")
     zc_jmax = _col(rows, "perf_zc_jitter_max")
     zc_reject = _col(rows, "perf_zc_confirm_reject")
+    fw_demag = _col(rows, "perf_demag_events")
+    fw_interlock = _col(rows, "perf_interlock_skips")
 
     steady_points = []
     for s in profile.segments:
@@ -283,6 +301,10 @@ def compute(run: RunResult, profile: Profile) -> dict:
             "zc_jitter_max_pct": jitter["max_pct"],
             # rejected edges per accepted zero-cross (report-only, v3+)
             "confirm_rejects_per_zc": counter_per_zc(zc_reject, zc_count, tail),
+            # firmware-counted demag events in this steady tail (struct v5+,
+            # monotonic demag_happened mirror). A NEW key alongside the
+            # host-derived detection so old baselines stay comparable.
+            "fw_demag_events": fw_counter_delta(fw_demag, tail),
         })
         # PWM-phase distribution of accepted ZC edges (report-only, v4+)
         phase = zc_phase_window(rows, tail)
@@ -325,6 +347,17 @@ def compute(run: RunResult, profile: Profile) -> dict:
             (p["zc_jitter_max_pct"] for p in steady_points
              if p.get("zc_jitter_max_pct") is not None), default=None),
         "demag_events": demag["event_count"],
+        # Firmware's own demag counter over the whole run (struct v3+, None on
+        # older firmware). Reported ALONGSIDE the host-derived demag_events
+        # above - it does not replace the host detection, so runs against old
+        # baselines stay comparable.
+        "fw_demag_events": fw_counter_delta(
+            fw_demag, np.arange(len(rows))),
+        # Active-demag interlock vetoes over the whole run (struct v6+, None
+        # on older firmware). ~0 healthy; ~= total commutations means the
+        # step/rising -> FET mapping is wrong - abort active-demag benching.
+        "fw_interlock_skips": fw_counter_delta(
+            fw_interlock, np.arange(len(rows))),
         "bemf_timeout_samples": demag["bemf_timeout_samples"],
         # start-attempt outcomes; None/0 unless the profile has start* segments
         "start_attempts": starts["attempts"] or None,

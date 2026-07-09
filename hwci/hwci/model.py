@@ -38,6 +38,11 @@ COLUMNS = [
     "perf_zc_confirm_reject",
     # 32-bin PWM-phase histogram, semicolon-joined (struct v4+)
     "perf_zc_phase_hist",
+    # demag compensation stats (struct v5+; blank when the flashed firmware
+    # predates them - metrics treat blank as "metric unavailable")
+    "perf_demag_events", "perf_blanking_len_last", "perf_blanking_len_max",
+    # active-demag interlock vetoes (struct v6+; blank on older firmware)
+    "perf_interlock_skips",
     "perf_bemf_timeout", "perf_e_rpm",
     # ESC input/arming state (proves the ESC decoded the throttle protocol)
     "perf_input", "perf_armed", "perf_running",
@@ -107,6 +112,14 @@ def make_row(t: float, segment: str, throttle_cmd: float,
             # one CSV cell, not 32 columns; _coerce leaves it a string on load
             row["perf_zc_phase_hist"] = ";".join(
                 str(v) for v in r["zc_phase_hist"])
+        if "demag_events" in r:  # struct v5+
+            row.update(
+                perf_demag_events=r["demag_events"],
+                perf_blanking_len_last=r["blanking_len_last"],
+                perf_blanking_len_max=r["blanking_len_max"],
+            )
+        if "active_demag_interlock_skips" in r:  # struct v6+
+            row.update(perf_interlock_skips=r["active_demag_interlock_skips"])
     return row
 
 

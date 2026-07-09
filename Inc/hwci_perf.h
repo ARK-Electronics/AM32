@@ -43,8 +43,10 @@
 /* v2: appended the zero-cross jitter block (zc_*) after host_cmd.
  * v3: appended zc_confirm_reject after the v2 jitter block (host_cmd stays
  *     frozen at offset 60).
- * v4: appended the 32-bin PWM-phase histogram of accepted zero-crossings. */
-#define HWCI_PERF_VERSION 4u
+ * v4: appended the 32-bin PWM-phase histogram of accepted zero-crossings.
+ * v5: appended the demag compensation block (demag_events, blanking_len_*).
+ * v6: appended active_demag_interlock_skips (mapping-fault detector). */
+#define HWCI_PERF_VERSION 6u
 
 /* PWM-phase histogram bins (power of two: the binning multiply-shift and the
  * host's modular math both assume it). */
@@ -130,7 +132,22 @@ typedef struct hwci_perf_s {
      * discriminator for the beat-band jitter hump investigation (PR #23
      * found 3.3x edge-window enrichment at t30). */
     uint16_t zc_phase_hist[HWCI_ZC_PHASE_BINS]; /* off 84..147              */
-} hwci_perf_t;                         /* total size: 148 bytes             */
+
+    /* --- v5: demag compensation stats (fed from the main-loop snapshot
+     * path, zero ISR cost). demag_events mirrors main.c's monotonic
+     * demag_happened counter; blanking_len_* mirror the measured demag time
+     * (INTERVAL_TIMER ticks) from demagEdgeRoutine(). Appended after the v4
+     * histogram so host_cmd stays frozen at offset 60. */
+    uint32_t demag_events;             /* off 148: demag_happened mirror    */
+    uint16_t blanking_len_last;        /* off 152: last measured demag time */
+    uint16_t blanking_len_max;         /* off 154: worst measured demag time*/
+
+    /* --- v6: active-demag comparator interlock (monotonic; freewheel
+     * turn-ons skipped because the floating phase did not read as
+     * diode-clamped). ~0 healthy; ~= one per commutation means the
+     * step/rising -> FET mapping is wrong for this hardware/direction. */
+    uint32_t active_demag_interlock_skips; /* off 156: interlock vetoes   */
+} hwci_perf_t;                         /* total size: 160 bytes             */
 
 extern volatile hwci_perf_t hwci_perf;
 
@@ -307,6 +324,15 @@ void hwci_perf_reset_stats(void);
             hwci_perf.running = (uint8_t)running;                              \
             hwci_perf.zero_cross_count = zero_crosses;                         \
             hwci_perf.commutation_interval = _ci;                              \
+            {                                                                  \
+                uint16_t _bl = blanking_length; /* cache the ISR-written u16 */\
+                hwci_perf.demag_events = demag_happened;                       \
+                hwci_perf.blanking_len_last = _bl;                             \
+                if (_bl > hwci_perf.blanking_len_max)                          \
+                    hwci_perf.blanking_len_max = _bl;                          \
+                /* active_demag_interlock_skips is incremented in-place from  \
+                 * demagAfterCommutate when HWCI_PERF is on */                \
+            }                                                                  \
             if (_ci > hwci_perf.commutation_interval_max)                      \
                 hwci_perf.commutation_interval_max = _ci;                      \
             if (_armed && !_hwci_prev_armed)                                   \
