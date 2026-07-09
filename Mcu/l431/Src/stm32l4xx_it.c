@@ -278,9 +278,12 @@ void COMP_IRQHandler(void)
 {
 
     if (LL_EXTI_IsActiveFlag_0_31(EXTI_LINE) != RESET) {
-      if (auto_blanking) { // reversed polarity, this is the demag release edge
+      if (auto_blanking) { // reversed polarity: demag release (or post-comm noise)
           LL_EXTI_ClearFlag_0_31(EXTI_LINE);
-          demagEdgeRoutine();
+          // Min-time gate: discard edges before demag can start (no flash call).
+          if ((INTERVAL_TIMER->CNT) > demag_wait_ticks) {
+              demagEdgeRoutine();
+          }
           return;
       }
       if((INTERVAL_TIMER->CNT) > ((average_interval>>1))){

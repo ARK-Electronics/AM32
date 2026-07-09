@@ -44,8 +44,9 @@
  * v3: appended zc_confirm_reject after the v2 jitter block (host_cmd stays
  *     frozen at offset 60).
  * v4: appended the 32-bin PWM-phase histogram of accepted zero-crossings.
- * v5: appended the demag compensation block (demag_events, blanking_len_*). */
-#define HWCI_PERF_VERSION 5u
+ * v5: appended the demag compensation block (demag_events, blanking_len_*).
+ * v6: appended active_demag_interlock_skips (mapping-fault detector). */
+#define HWCI_PERF_VERSION 6u
 
 /* PWM-phase histogram bins (power of two: the binning multiply-shift and the
  * host's modular math both assume it). */
@@ -140,7 +141,13 @@ typedef struct hwci_perf_s {
     uint32_t demag_events;             /* off 148: demag_happened mirror    */
     uint16_t blanking_len_last;        /* off 152: last measured demag time */
     uint16_t blanking_len_max;         /* off 154: worst measured demag time*/
-} hwci_perf_t;                         /* total size: 156 bytes             */
+
+    /* --- v6: active-demag comparator interlock (monotonic; freewheel
+     * turn-ons skipped because the floating phase did not read as
+     * diode-clamped). ~0 healthy; ~= one per commutation means the
+     * step/rising -> FET mapping is wrong for this hardware/direction. */
+    uint32_t active_demag_interlock_skips; /* off 156: interlock vetoes   */
+} hwci_perf_t;                         /* total size: 160 bytes             */
 
 extern volatile hwci_perf_t hwci_perf;
 
@@ -323,6 +330,8 @@ void hwci_perf_reset_stats(void);
                 hwci_perf.blanking_len_last = _bl;                             \
                 if (_bl > hwci_perf.blanking_len_max)                          \
                     hwci_perf.blanking_len_max = _bl;                          \
+                /* active_demag_interlock_skips is incremented in-place from  \
+                 * demagAfterCommutate when HWCI_PERF is on */                \
             }                                                                  \
             if (_ci > hwci_perf.commutation_interval_max)                      \
                 hwci_perf.commutation_interval_max = _ci;                      \

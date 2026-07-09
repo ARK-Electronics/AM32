@@ -237,25 +237,35 @@ void DMA1_Channel2_3_IRQHandler(void)
  */
 void ADC1_COMP_IRQHandler(void)
 {
-  if (auto_blanking) { // reversed polarity, this is the demag release edge
+  if (auto_blanking) { // reversed polarity: demag release (or post-comm noise)
+    // Min-time gate: discard edges before demag can start (no flash call).
+    const uint8_t demag_ok = (INTERVAL_TIMER->CNT) > demag_wait_ticks;
     if (LL_EXTI_IsActiveFallingFlag_0_31(LL_EXTI_LINE_18)) {
       LL_EXTI_ClearFallingFlag_0_31(LL_EXTI_LINE_18);
-      demagEdgeRoutine();
+      if (demag_ok) {
+          demagEdgeRoutine();
+      }
       return;
     }
     if (LL_EXTI_IsActiveRisingFlag_0_31(LL_EXTI_LINE_18)) {
       LL_EXTI_ClearRisingFlag_0_31(LL_EXTI_LINE_18);
-      demagEdgeRoutine();
+      if (demag_ok) {
+          demagEdgeRoutine();
+      }
       return;
     }
     if (LL_EXTI_IsActiveFallingFlag_0_31(LL_EXTI_LINE_17)) {
       LL_EXTI_ClearFallingFlag_0_31(LL_EXTI_LINE_17);
-      demagEdgeRoutine();
+      if (demag_ok) {
+          demagEdgeRoutine();
+      }
       return;
     }
     if (LL_EXTI_IsActiveRisingFlag_0_31(LL_EXTI_LINE_17)) {
       LL_EXTI_ClearRisingFlag_0_31(LL_EXTI_LINE_17);
-      demagEdgeRoutine();
+      if (demag_ok) {
+          demagEdgeRoutine();
+      }
       return;
     }
   }

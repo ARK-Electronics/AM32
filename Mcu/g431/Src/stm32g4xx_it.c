@@ -13,6 +13,7 @@ extern void demagEdgeRoutine();
 extern void tenKhzRoutine();
 extern void processDshot();
 extern volatile uint8_t auto_blanking;
+extern volatile uint16_t demag_wait_ticks;
 
 extern volatile char send_telemetry;
 uint16_t interrupt_time = 0;
@@ -99,15 +100,20 @@ void DMA1_Channel1_IRQHandler(void)
 
 void COMP1_2_3_IRQHandler(void)
 {
-	if (auto_blanking) { // reversed polarity, this is the demag release edge
+	if (auto_blanking) { // reversed polarity: demag release (or post-comm noise)
+		const uint8_t demag_ok = (INTERVAL_TIMER->CNT) > demag_wait_ticks;
 		if (LL_EXTI_IsActiveFlag_0_31(LL_EXTI_LINE_22)) {
 			LL_EXTI_ClearFlag_0_31(LL_EXTI_LINE_22);
-			demagEdgeRoutine();
+			if (demag_ok) {
+				demagEdgeRoutine();
+			}
 			return;
 		}
 		if (LL_EXTI_IsActiveFlag_0_31(LL_EXTI_LINE_21)) {
 			LL_EXTI_ClearFlag_0_31(LL_EXTI_LINE_21);
-			demagEdgeRoutine();
+			if (demag_ok) {
+				demagEdgeRoutine();
+			}
 			return;
 		}
 	}

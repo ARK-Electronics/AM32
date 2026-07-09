@@ -75,6 +75,15 @@ ifeq ($(DEMAG_OBSERVE),1)
 CFLAGS_COMMON += -DHWCI_DEMAG_OBSERVE
 endif
 
+# Active demag freewheel (opt-in, off by default). With
+# `make <TARGET> ACTIVE_DEMAG=1` (optionally with DEMAG_COMP for the
+# compensator) forces active_demag at boot without touching eeprom byte 185.
+# Measurement is auto-armed when active_demag is on; DEMAG_COMP is not
+# required for the efficiency path.
+ifeq ($(ACTIVE_DEMAG),1)
+CFLAGS_COMMON += -DHWCI_ACTIVE_DEMAG=1
+endif
+
 # Linker options
 LDFLAGS_COMMON := -specs=nano.specs $(LIBS) -Wl,--gc-sections -Wl,--print-memory-usage
 
@@ -92,7 +101,7 @@ BIN_DIR := $(ROOT)/$(OBJ)
 # Record the flags in a stamp file and make every ELF depend on it: when the
 # flags change, the stamp's contents (and mtime) change and the ELF rebuilds.
 # $(file) is used instead of the shell for portability (no cmd.exe/sh split).
-BUILD_FLAGS := HWCI_PERF=$(HWCI_PERF) DEMAG_COMP=$(DEMAG_COMP) DEMAG_OBSERVE=$(DEMAG_OBSERVE)
+BUILD_FLAGS := HWCI_PERF=$(HWCI_PERF) DEMAG_COMP=$(DEMAG_COMP) DEMAG_OBSERVE=$(DEMAG_OBSERVE) ACTIVE_DEMAG=$(ACTIVE_DEMAG)
 FLAGS_STAMP := $(OBJ)/.build_flags
 $(shell $(MKDIR) -p $(OBJ))
 PREV_BUILD_FLAGS := $(if $(wildcard $(FLAGS_STAMP)),$(strip $(file < $(FLAGS_STAMP))))

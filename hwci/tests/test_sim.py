@@ -110,13 +110,14 @@ def test_perf_channel_carries_phase_histogram():
 
 
 def test_perf_channel_carries_demag_fields():
-    # v5 struct: demag fields present, zero on a clean (non-demag-prone) run.
+    # v5/v6 struct: demag + interlock fields present, zero on a clean run.
     rig = RigSimulator(noise=0.0)
     _settle(rig, 0.7)
     r = perf.decode(rig.perf_bytes()).raw
     assert r["demag_events"] == 0
     assert r["blanking_len_last"] == 0
     assert r["blanking_len_max"] == 0
+    assert r["active_demag_interlock_skips"] == 0
 
 
 def test_demag_events_count_injected_desyncs():

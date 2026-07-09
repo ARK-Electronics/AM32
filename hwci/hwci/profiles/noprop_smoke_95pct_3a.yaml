@@ -1,0 +1,31 @@
+name: noprop_smoke_95pct_3a
+description: >
+  No-prop free-run climb to 95% hold on a 25 V / 3.0 A current-limited supply.
+  90% held clean for 6 s; prior 100% climb dropped the app near ~95.3%. This
+  profile holds 95% to bracket the dropout. Gentle ramps; host abort 2.8 A. ~55 s.
+sample_rate_hz: 100
+arm_settle_s: 3.0
+steady_tail_fraction: 0.5
+
+safety:
+  max_current_a: 2.8
+  max_thrust_n: 2.0
+  max_rpm: 55000
+  max_motor_temp_c: 90.0
+
+segments:
+  - {label: idle,    throttle: 0.00, duration_s: 2.0}
+  - {label: ramp20,  throttle: 0.20, duration_s: 3.0, ramp: true}
+  - {label: hold20,  throttle: 0.20, duration_s: 2.0, steady: true}
+  - {label: ramp40,  throttle: 0.40, duration_s: 4.0, ramp: true}
+  - {label: hold40,  throttle: 0.40, duration_s: 2.0, steady: true}
+  - {label: ramp60,  throttle: 0.60, duration_s: 4.0, ramp: true}
+  - {label: hold60,  throttle: 0.60, duration_s: 2.0, steady: true}
+  - {label: ramp80,  throttle: 0.80, duration_s: 4.0, ramp: true}
+  - {label: hold80,  throttle: 0.80, duration_s: 2.0, steady: true}
+  - {label: ramp90,  throttle: 0.90, duration_s: 3.0, ramp: true}
+  - {label: hold90,  throttle: 0.90, duration_s: 2.0, steady: true}
+  - {label: ramp95,  throttle: 0.95, duration_s: 2.0, ramp: true}
+  - {label: hold95,  throttle: 0.95, duration_s: 6.0, steady: true}
+  - {label: rampdn,  throttle: 0.00, duration_s: 5.0, ramp: true}
+  - {label: stop,    throttle: 0.00, duration_s: 2.0}

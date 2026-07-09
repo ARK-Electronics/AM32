@@ -1,0 +1,29 @@
+name: noprop_smoke_2p5a
+description: >
+  No-prop climb aimed at ~2.5 A on a 25 V / 3.0 A current-limited supply.
+  Free-running no-load current is usually well under 2 A even at high duty;
+  this profile ramps gently through 20/40/60/80 % so transition spikes stay
+  below the 2.8 A host abort (and the supply's 3.0 A CC limit). Use for
+  active-demag plumbing at higher input/blanking without a prop. ~45 s.
+sample_rate_hz: 100
+arm_settle_s: 3.0
+steady_tail_fraction: 0.5
+
+safety:
+  max_current_a: 2.8     # trip below the 3.0 A supply limit
+  max_thrust_n: 2.0      # ~0 expected with no prop; sensor-fault trip
+  max_rpm: 50000         # 1800KV @ 25 V free-run theoretical ~45k
+  max_motor_temp_c: 80.0
+
+segments:
+  - {label: idle,    throttle: 0.00, duration_s: 2.0}
+  - {label: ramp20,  throttle: 0.20, duration_s: 3.0, ramp: true}
+  - {label: hold20,  throttle: 0.20, duration_s: 3.0, steady: true}
+  - {label: ramp40,  throttle: 0.40, duration_s: 4.0, ramp: true}
+  - {label: hold40,  throttle: 0.40, duration_s: 4.0, steady: true}
+  - {label: ramp60,  throttle: 0.60, duration_s: 4.0, ramp: true}
+  - {label: hold60,  throttle: 0.60, duration_s: 4.0, steady: true}
+  - {label: ramp80,  throttle: 0.80, duration_s: 4.0, ramp: true}
+  - {label: hold80,  throttle: 0.80, duration_s: 4.0, steady: true}
+  - {label: rampdn,  throttle: 0.00, duration_s: 4.0, ramp: true}
+  - {label: stop,    throttle: 0.00, duration_s: 2.0}

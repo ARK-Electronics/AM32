@@ -193,9 +193,14 @@ void DMA1_Channel4_5_IRQHandler(void)
 RAM_FUNC void ADC1_COMP_IRQHandler(void)
 {
   if (LL_EXTI_IsActiveFlag_0_31(LL_EXTI_LINE_21) != RESET) {
-      if (auto_blanking) { // reversed polarity, this is the demag release edge
+      if (auto_blanking) { // reversed polarity: demag release (or post-comm noise)
           EXTI->PR = EXTI_LINE;
-          demagEdgeRoutine();
+          // Min-time gate in the RAM ISR: a release edge cannot precede the
+          // commutation that starts demag. Discard commutation ring without a
+          // flash call into demagEdgeRoutine (major free-run CPU win).
+          if ((INTERVAL_TIMER->CNT) > demag_wait_ticks) {
+              demagEdgeRoutine();
+          }
           return;
       }
       if((INTERVAL_TIMER->CNT) > ((average_interval>>1))){

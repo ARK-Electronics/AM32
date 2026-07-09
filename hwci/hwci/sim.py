@@ -127,6 +127,9 @@ class RigSimulator:
         self.demag_events = 0
         self.blanking_len_last = 0
         self.blanking_len_max = 0
+        # active-demag interlock vetoes (perf struct v6); the sim never
+        # freewheels, so a healthy rig reports 0
+        self.active_demag_interlock_skips = 0
 
     # --- model -------------------------------------------------------
     def set_settings(self, settings: SimSettings | None) -> None:
@@ -375,4 +378,5 @@ class RigSimulator:
             "demag_events": self.demag_events,
             "blanking_len_last": self.blanking_len_last,
             "blanking_len_max": self.blanking_len_max,
+            "active_demag_interlock_skips": self.active_demag_interlock_skips,
         })
