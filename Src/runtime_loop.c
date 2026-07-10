@@ -192,7 +192,7 @@ if (newinput > 2000) {
 
 void runtimeMotorModeTick(void)
 {
-/* ISR / flag side-effects (old_routine, running) → named mode. */
+/* Once per main loop: ISR flag side-effects → named esc_state (not in 20 kHz). */
 escReconcileFromFlags();
 stuckcounter = 0;
 if (!escInSineStart()) {

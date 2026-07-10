@@ -447,8 +447,12 @@ if (escMaySixStepThrottle()) {
 RAM_FUNC void tenKhzRoutine()
 { // 20khz as of 2.00 to be renamed
     HWCI_PERF_CTRL_ENTER();
-    /* Align esc_state with ISR flag updates before policy predicates. */
-    escReconcileFromFlags();
+    /*
+     * Do not call escReconcileFromFlags() here: it lives in flash and forces
+     * a long-call veneer into every 20 kHz tick. Policy predicates below are
+     * flag-backed (see esc_state.h); full enum reconcile runs once per main
+     * loop in runtimeMotorModeTick().
+     */
     duty_cycle = duty_cycle_setpoint;
     tenkhzcounter++;
     ledcounter++;

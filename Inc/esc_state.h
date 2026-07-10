@@ -91,7 +91,9 @@ uint8_t escTransitionAllowed(esc_state_t from, esc_state_t to);
 
 /*
  * Rebuild esc_state from legacy flags (force; bypasses edge table).
- * Call after ISR-side flag changes or once per main-loop tick.
+ * Call once per main-loop tick (runtimeMotorModeTick) / after multi-flag
+ * transitions — not from RAM_FUNC 20 kHz path (flash veneer cost on F051).
+ * Hot-path policy must use flag-backed predicates in this header.
  */
 void escReconcileFromFlags(void);
 
