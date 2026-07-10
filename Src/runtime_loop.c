@@ -27,6 +27,10 @@
 #ifdef USE_SERIAL_TELEMETRY
 #include "serial_telemetry.h"
 #endif
+/* SITL always provides send_telem_DMA; non-SITL needs USE_SERIAL_TELEMETRY. */
+#ifdef MCU_SITL
+#include "serial_telemetry.h"
+#endif
 
 /* Zero-cross filter levels (were file-local defines in main.c) */
 #ifdef MCU_F051

@@ -246,8 +246,10 @@ def test_dshot_signal_loss_stops_motor(sitl_factory, state_stream):
         _assert_spinning(sim, 'before signal loss', lo=3000, hi=9000)
 
         tx.stop()  # stop sending entirely
-        # armed timeout is ~0.5s; unarmed reboot ~2s — wait long enough
-        time.sleep(3.0)
+        # armed timeout ~0.5s, then freewheel coast + possible reboot (~2s).
+        # Prop inertia can leave >1–2k rpm after only 3s wall time on a
+        # loaded CI host — wait for a full coast-down before asserting.
+        time.sleep(5.0)
         _assert_stopped(sim, 'after signal loss', window=0.5, limit=800)
     finally:
         try:

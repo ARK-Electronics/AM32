@@ -38,11 +38,8 @@ extern uint8_t min_bemf_counts_down;
 extern char prop_brake_active;
 extern uint8_t changeover_step;
 extern uint8_t stuckcounter;
-#if defined(DRONECAN_SUPPORT) && DRONECAN_SUPPORT
+/* uint32_t always: DroneCAN telemetry and SITL stats both use 32-bit. */
 extern uint32_t desync_happened;
-#else
-extern uint8_t desync_happened;
-#endif
 
 /* --- duty / throttle --- */
 extern volatile uint16_t duty_cycle;

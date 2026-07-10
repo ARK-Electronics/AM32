@@ -88,7 +88,7 @@ uint16_t low_cell_volt_cutoff = 330; // 3.3volts per cell
 
 //=========================== END EEPROM Defaults ===========================
 
-const char filename[30] __attribute__((section(".file_name"))) = FILE_NAME;
+const char filename[30] AM32_FLASH_SECTION(".file_name") = FILE_NAME;
 _Static_assert(sizeof(FIRMWARE_NAME) <=13,"Firmware name too long");   // max 12 character firmware name plus NULL 
 
 // move these to targets folder or peripherals for each mcu
@@ -108,11 +108,7 @@ uint32_t REV_Id = 0;
 
 uint16_t armed_timeout_count;
 uint16_t reverse_speed_threshold = 1500;
-#if defined(DRONECAN_SUPPORT) && DRONECAN_SUPPORT
 uint32_t desync_happened = 0;
-#else
-uint8_t desync_happened = 0;
-#endif
 char maximum_throttle_change_ramp = 1;
 
 char crawler_mode = 0; // no longer used //
