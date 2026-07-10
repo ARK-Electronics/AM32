@@ -1,0 +1,47 @@
+# =============================================================================
+# SETUP A — Flight Stand throttle (NO PX4 / NO BDShot on the signal wire)
+# =============================================================================
+# Who drives ESC signal:  Flight Stand ESC output (unidirectional DShot/PWM)
+# Who measures physics:   Flight Stand gRPC (thrust, RPM, V, I, …)
+# Who reads MCU perf:     ST-Link + OpenOCD (hwci_perf)
+#
+# Do NOT connect ARK FPV motor outputs to the ESC signal pin while using this
+# file. For BDShot / PX4, use config/rig.px4_bdshot.yaml instead.
+# See docs/BENCH_SETUPS.md.
+#
+# Active bench copy is often ../rig.yaml (same content). Prefer an explicit
+# --config path when switching setups.
+# =============================================================================
+
+target: ARK_4IN1_F051
+
+debugger_backend: openocd
+openocd_bin: openocd
+
+telem_backend: none
+# telem_port: /dev/esc-telem
+# telem_baud: 115200
+
+throttle_backend: flightstand
+
+stand_backend: grpc
+stand_host: 192.168.7.20
+stand_port: 50051
+stand_signals:
+  thrust: 11
+  torque: 14
+  rpm: 15
+  voltage: 6
+  current: 8
+  esc_output: 0
+  esc_zero: 0.0
+  esc_min: 48.0
+  esc_max: 2047.0
+  thrust_is_grams: false
+  rpm_is_rad_per_s: true
+  motor_temp: "/boards/COM3/inputs/29"
+  fet_temp: "/boards/COM3/inputs/31"
+
+motor_name: "JS Technology 2306 1800KV"
+pole_pairs: 7
+prop: "HQProp 5136 R36-GR-PC"

@@ -25,7 +25,9 @@ DEFAULT_TARGET = "ARK_4IN1_F051"
 BACKEND_CHOICES: dict[str, set[str]] = {
     "debugger_backend": {"openocd", "sim", "none"},
     "telem_backend": {"serial", "sim", "none"},
-    "throttle_backend": {"flightstand", "external", "sim"},
+    # "none" = ESC signal driven outside the harness (e.g. ARK FPV BDShot);
+    # use only with setup B — see docs/BENCH_SETUPS.md.
+    "throttle_backend": {"flightstand", "external", "none", "sim"},
     "stand_backend": {"grpc", "sim", "none"},
 }
 _SIM_ONLY = {"sim"}
@@ -141,7 +143,8 @@ class RigConfig:
     telem_port: str = "/dev/ttyUSB0"
     telem_baud: int = 115200
 
-    throttle_backend: str = "sim"           # "flightstand" | "external" (| "sim")
+    # flightstand = SETUP A; external = serial bridge; none = SETUP B (PX4/BDShot owns pin)
+    throttle_backend: str = "sim"
     throttle_port: str = "/dev/ttyACM0"
     throttle_baud: int = 115200
 

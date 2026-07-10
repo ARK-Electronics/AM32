@@ -465,10 +465,15 @@ def build_live_sources(rig: RigConfig, profile: Profile, *,
                 "throttle_backend 'flightstand' needs stand_backend 'grpc'")
         from .throttle.flightstand_src import FlightStandThrottle
         throttle = FlightStandThrottle(stand, arm_settle_s=profile.arm_settle_s)
+    elif rig.throttle_backend == "none":
+        # SETUP B: ARK FPV (or other host) owns the ESC signal pin. Harness
+        # may still flash + read SWD; do not call set() expecting motion.
+        from .throttle.null import NullThrottle
+        throttle = NullThrottle()
     else:
         raise ValueError(
             f"throttle_backend {rig.throttle_backend!r} is not a live backend "
-            "(expected 'flightstand' or 'external')")
+            "(expected 'flightstand', 'external', or 'none')")
     closers.append(throttle.close)
 
     # --- perf struct via debugger ---

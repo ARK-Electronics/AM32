@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Drive PX4 ACTUATOR_TEST for free-run BDShot testing (PSU-safe).
+"""SETUP B only: drive motor via ARK FPV / PX4 ACTUATOR_TEST (BDShot).
+
+Not for SETUP A (Flight Stand throttle). Disconnect stand ESC output from
+the signal pin before using this script. See docs/BENCH_SETUPS.md.
 
 Important behaviour (ARK FPV + PX4 1.18 + bench supply):
 
