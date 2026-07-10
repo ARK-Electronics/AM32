@@ -26,8 +26,8 @@ uint8_t faultHandleStuckRotorIfNeeded(void);
 
 /*
  * 20 kHz signal-watchdog tick (end of tenKhzRoutine).
- * FIXED_DUTY/FIXED_SPEED: pin-high timeout -> reset.
- * Normal builds: increment signaltimeout (cleared on valid input frames).
+ * Implemented as RAM_FUNC so F051 RAM-resident tenKhzRoutine does not
+ * pay a flash long-call veneer every tick.
  */
 void faultSignalTimeoutTick(void);
 

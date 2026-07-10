@@ -16,6 +16,7 @@
 #include "commutation.h"
 #include "targets.h"
 #include "esc_state.h"
+#include "IO.h"
 
 #ifdef USE_RGB_LED
 extern void setIndividualRGBLed(uint8_t, uint8_t, uint8_t);
@@ -24,7 +25,6 @@ extern void setIndividualRGBLed(uint8_t, uint8_t, uint8_t);
 extern volatile uint16_t zero_input_count;
 extern volatile uint32_t dma_buffer[64];
 extern void resetInputCaptureTimer(void);
-extern char crawler_mode;
 
 uint8_t faultHandleStuckRotorIfNeeded(void)
 {
@@ -42,7 +42,8 @@ uint8_t faultHandleStuckRotorIfNeeded(void)
     return 0;
 }
 
-void faultSignalTimeoutTick(void)
+/* RAM-resident: called from tenKhzRoutine every 50 us on F051. */
+RAM_FUNC void faultSignalTimeoutTick(void)
 {
 #if defined(FIXED_DUTY_MODE) || defined(FIXED_SPEED_MODE)
     if (getInputPinState()) {

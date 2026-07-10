@@ -3,6 +3,10 @@
  *
  * Variable PWM, desync, IRQ priority, telemetry send, ADC/LVC, running
  * limits, and sine/stepper branch previously inlined in main()'s while(1).
+ *
+ * Keep these as out-of-line functions: inlining desync/variable-PWM into
+ * main() was observed to provoke high-throttle free-run stalls on F051.
+ * Small helpers that are safe to inline live in faults.h / functions.h.
  */
 #ifndef RUNTIME_LOOP_H_
 #define RUNTIME_LOOP_H_
