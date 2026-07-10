@@ -76,7 +76,9 @@ has_can_suffix = $(findstring _CAN,$1)
 $(foreach MCU,$(MCU_TYPES),$(eval SVD_$(MCU) := $(wildcard $(HAL_FOLDER_$(MCU))/*.svd)))
 
 .PHONY : clean all binary $(foreach MCU,$(MCU_TYPES),$(call lc,$(MCU)))
-ALL_TARGETS := $(foreach MCU,$(MCU_TYPES),$(TARGETS_$(MCU)))
+# Host-native SITL is opt-in (`make AM32_SITL_CAN` / `make sitl`), not part of
+# the cross-compiled `make all` matrix used by Linux firmware CI.
+ALL_TARGETS := $(foreach MCU,$(filter-out SITL,$(MCU_TYPES)),$(TARGETS_$(MCU)))
 all : $(ALL_TARGETS)
 
 # create targets for compiling one mcu type, eg "make f421"

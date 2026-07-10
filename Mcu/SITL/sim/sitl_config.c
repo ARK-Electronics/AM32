@@ -226,6 +226,20 @@ static void clampf(float* v, float lo, float hi, const char* name)
     }
 }
 
+static void clampu32(uint32_t* v, uint32_t lo, uint32_t hi, const char* name)
+{
+    uint32_t nv = *v;
+    if (nv < lo) {
+        nv = lo;
+    } else if (nv > hi) {
+        nv = hi;
+    }
+    if (nv != *v) {
+        fprintf(stderr, "SITL: config %s=%u clamped to %u\n", name, *v, nv);
+        *v = nv;
+    }
+}
+
 static void config_sanitise(void)
 {
     clampf(&sitl_cfg.motor.kv, 1.0f, 1e6f, "motor.kv");
@@ -246,6 +260,22 @@ static void config_sanitise(void)
     clampf(&sitl_cfg.battery.resistance, 0.0f, 10.0f, "battery.resistance");
     clampf(&sitl_cfg.esc.rds_on, 0.0f, 1.0f, "esc.rds_on");
     clampf(&sitl_cfg.esc.diode_vf, 0.0f, 5.0f, "esc.diode_vf");
+
+    // physics_dt_ns == 0 turns sitl_isr_read_tick() into an infinite loop
+    // (accum_ns -= 0). Keep steps in a sane range for the BLDC model.
+    clampu32(&sitl_cfg.sim.physics_dt_ns, 100U, 10000U, "sim.physics_dt_ns");
+    // isr_read_ns == 0 freezes progress under PRIMASK (startup tunes /
+    // micros64 critical sections never complete). Cap at a few physics steps.
+    clampu32(&sitl_cfg.sim.isr_read_ns, 1U, sitl_cfg.sim.physics_dt_ns * 10U, "sim.isr_read_ns");
+    clampu32(&sitl_cfg.sim.loop_time_ns, 100U, 1000000U, "sim.loop_time_ns");
+
+    // match SET_SPEEDUP on the state port: [0, 100], 0 = free run
+    if (!isfinite(sitl_cfg.speedup) || sitl_cfg.speedup < 0.0f || sitl_cfg.speedup > 100.0f) {
+        const float nv = (!isfinite(sitl_cfg.speedup) || sitl_cfg.speedup < 0.0f) ? 0.0f : 100.0f;
+        fprintf(stderr, "SITL: config speedup=%g clamped to %g\n",
+            (double)sitl_cfg.speedup, (double)nv);
+        sitl_cfg.speedup = nv;
+    }
 }
 
 bool sitl_config_reload(const char* path)
@@ -320,9 +350,17 @@ void sitl_config_init(int argc, char** argv)
         case 'P':
             sitl_cfg.state_port = atoi(optarg);
             break;
-        case 's':
-            sitl_cfg.speedup = strtof(optarg, NULL);
+        case 's': {
+            char* end = NULL;
+            const float v = strtof(optarg, &end);
+            if (end == optarg || (end && *end != '\0') || !isfinite(v)) {
+                fprintf(stderr, "SITL: invalid --speedup '%s' (need a finite number)\n", optarg);
+                exit(1);
+            }
+            // range clamped in config_sanitise() to [0, 100]
+            sitl_cfg.speedup = v;
             break;
+        }
         case 'A':
             sitl_cfg.bind_any = true;
             break;

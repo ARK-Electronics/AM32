@@ -12,7 +12,12 @@ make AM32_SITL_CAN
 ```
 
 produces `obj/AM32_AM32_SITL_CAN_<version>.elf`, a normal Linux
-executable.
+executable. SITL is **not** part of `make all` (that target stays
+cross-firmware only); use `make sitl` or the product name above.
+
+Also note: RTC backup registers used by DroneCAN boot/FW-update handoff
+persist across SITL re-execs in a sibling file `<eeprom>.rtc` next to the
+eeprom backing file.
 
 ## Running
 
@@ -40,7 +45,8 @@ Options:
   ports accept unauthenticated control, so only use on trusted networks
 - `--input-type N` force the eeprom INPUT_SIGNAL_TYPE setting (0=auto
   1=dshot 2=servo 5=dronecan)
-- `--speedup X` simulation speed relative to wall clock, 0 = free running
+- `--speedup X` simulation speed relative to wall clock, 0 = free
+  running; clamped to `[0, 100]` (same as the GUI/state-port control)
 - `--uid STR` string used to derive the 16 byte unique ID
 - `--verbose` 1Hz state line on stderr
 - `--nosleep` busy wait instead of sleeping. Uses two full CPU cores but

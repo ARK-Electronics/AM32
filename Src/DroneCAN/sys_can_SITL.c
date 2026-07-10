@@ -360,16 +360,63 @@ void sys_can_getUniqueID(uint8_t id[16])
     }
 }
 
+/*
+  RTC backup survives hardware reset. SITL reboots via execv, so keep the
+  eight words next to the eeprom file (`<eeprom>.rtc`) for warm-boot /
+  FW-update handoff (RTC_BKUP0_BOOTED / SIGNAL / FWUPDATE).
+ */
 static uint32_t rtc_backup[8];
+static bool rtc_loaded;
+
+static void rtc_backup_path(char* path, size_t pathlen)
+{
+    snprintf(path, pathlen, "%s.rtc", sitl_cfg.eeprom_path);
+}
+
+static void rtc_backup_load(void)
+{
+    if (rtc_loaded) {
+        return;
+    }
+    rtc_loaded = true;
+    char path[512];
+    rtc_backup_path(path, sizeof(path));
+    FILE* f = fopen(path, "rb");
+    if (!f) {
+        return;
+    }
+    if (fread(rtc_backup, 1, sizeof(rtc_backup), f) != sizeof(rtc_backup)) {
+        memset(rtc_backup, 0, sizeof(rtc_backup));
+    }
+    fclose(f);
+}
+
+static void rtc_backup_save(void)
+{
+    char path[512];
+    rtc_backup_path(path, sizeof(path));
+    FILE* f = fopen(path, "wb");
+    if (!f) {
+        perror("SITL: rtc backup open");
+        return;
+    }
+    if (fwrite(rtc_backup, 1, sizeof(rtc_backup), f) != sizeof(rtc_backup)) {
+        perror("SITL: rtc backup write");
+    }
+    fclose(f);
+}
 
 uint32_t get_rtc_backup_register(uint8_t idx)
 {
-    return rtc_backup[idx];
+    rtc_backup_load();
+    return rtc_backup[idx & 7];
 }
 
 void set_rtc_backup_register(uint8_t idx, uint32_t value)
 {
-    rtc_backup[idx] = value;
+    rtc_backup_load();
+    rtc_backup[idx & 7] = value;
+    rtc_backup_save();
 }
 
 void setup_portpin(uint16_t portpin, bool enable)

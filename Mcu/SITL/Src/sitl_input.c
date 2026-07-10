@@ -78,6 +78,11 @@ static uint64_t cap_base_ns; // sim time of CNT=0
 static volatile uint8_t pin_idle_level; // from the last packet flags
 static uint8_t last_type = SITL_INPUT_DSHOT300;
 static uint64_t tx_done_ns; // sim time the BDShot reply transmit completes
+static uint64_t dma_done_ns; // sim time RX capture DMA should complete (0 = idle)
+static uint64_t last_edge_ns; // timestamp of the most recent synth edge
+
+// max UDP frames drained per poll so a flood cannot starve the sim thread
+#define SITL_INPUT_DRAIN_MAX 32
 
 static struct {
     uint32_t frames;
@@ -145,6 +150,7 @@ static void add_edge(uint64_t t_ns)
 {
     if (cap_index < cap_count && cap_index < 64) {
         dma_buffer[cap_index++] = cap_cnt_at(t_ns);
+        last_edge_ns = t_ns;
     }
 }
 
@@ -177,6 +183,20 @@ static void synth_frame(uint8_t type, uint16_t data)
         const uint32_t high_ns = (data & (0x8000U >> i)) ? (bit_ns * 3U) / 4U : (bit_ns * 3U) / 8U;
         add_edge(start);
         add_edge(start + high_ns);
+    }
+}
+
+// service deferred DMA completions (RX capture end / BDShot TX end)
+static void service_deferred_dma(void)
+{
+    const uint64_t now = sitl_time_ns();
+    if (out_put && tx_done_ns != 0 && now >= tx_done_ns) {
+        tx_done_ns = 0;
+        sitl_irq_pend(SITL_IRQ_DMA);
+    }
+    if (dma_done_ns != 0 && now >= dma_done_ns) {
+        dma_done_ns = 0;
+        sitl_irq_pend(SITL_IRQ_DMA);
     }
 }
 
@@ -258,44 +278,50 @@ void sitl_input_dma_irq(void)
     sitl_irq_pend(SITL_IRQ_EXTI15);
 }
 
-// called from the sim thread every 100us
+/*
+  called from the sim thread every physics step: service deferred DMA
+  IRQs, then drain the UDP input socket (up to SITL_INPUT_DRAIN_MAX
+  packets). DMA complete for a received frame is deferred until the last
+  synthesized edge time so frame duration is visible in sim time.
+ */
 void sitl_input_poll(void)
 {
     if (fd < 0) {
         return;
     }
-    // complete a pending BDShot reply transmit
-    if (out_put && tx_done_ns != 0 && sitl_time_ns() >= tx_done_ns) {
-        tx_done_ns = 0;
-        sitl_irq_pend(SITL_IRQ_DMA);
-        return;
-    }
-    struct input_pkt pkt;
-    struct sockaddr_in src;
-    socklen_t srclen = sizeof(src);
-    const ssize_t ret = recvfrom(fd, &pkt, sizeof(pkt), MSG_DONTWAIT, (struct sockaddr*)&src, &srclen);
-    if (ret < 0) {
-        return;
-    }
-    if (ret < (ssize_t)sizeof(pkt) || pkt.magic != SITL_INPUT_MAGIC || pkt.type > SITL_INPUT_DSHOT600
-        || pkt.len != 4) {
-        return;
-    }
-    last_sender = src;
-    have_sender = true;
-    last_type = pkt.type;
-    pin_idle_level = (pkt.flags & SITL_INPUT_FLAG_IDLE_HIGH) ? 1 : 0;
-    stats.frames++;
-    if (!cap_armed || out_put) {
-        // capture not armed (or the wire is driven by the reply): the
-        // frame is lost, as on the real signal wire
-        stats.dropped++;
-        return;
-    }
-    synth_frame(pkt.type, pkt.data);
-    if (cap_index >= cap_count) {
-        cap_armed = false;
-        sitl_irq_pend(SITL_IRQ_DMA);
+    service_deferred_dma();
+
+    for (int n = 0; n < SITL_INPUT_DRAIN_MAX; n++) {
+        struct input_pkt pkt;
+        struct sockaddr_in src;
+        socklen_t srclen = sizeof(src);
+        const ssize_t ret = recvfrom(fd, &pkt, sizeof(pkt), MSG_DONTWAIT,
+            (struct sockaddr*)&src, &srclen);
+        if (ret < 0) {
+            break;
+        }
+        if (ret < (ssize_t)sizeof(pkt) || pkt.magic != SITL_INPUT_MAGIC
+            || pkt.type > SITL_INPUT_DSHOT600 || pkt.len != 4) {
+            continue;
+        }
+        last_sender = src;
+        have_sender = true;
+        last_type = pkt.type;
+        pin_idle_level = (pkt.flags & SITL_INPUT_FLAG_IDLE_HIGH) ? 1 : 0;
+        stats.frames++;
+        // capture not armed, reply TX on the wire, or RX DMA still
+        // waiting for the last edge: frame is lost, as on a real wire
+        if (!cap_armed || out_put || dma_done_ns != 0) {
+            stats.dropped++;
+            continue;
+        }
+        synth_frame(pkt.type, pkt.data);
+        if (cap_index >= cap_count) {
+            cap_armed = false;
+            // complete at the last edge (or immediately if already past)
+            dma_done_ns = last_edge_ns ? last_edge_ns : sitl_time_ns();
+            service_deferred_dma();
+        }
     }
 }
 

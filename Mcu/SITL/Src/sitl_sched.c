@@ -486,10 +486,12 @@ static void* sim_thread_main(void* arg)
         sim_step_once();
         const uint64_t now = sim_time_ns_v;
 
+        // input every physics step so deferred DMA matches frame edges and
+        // UDP bursts drain without waiting for the 100us CAN/state cadence
+        sitl_input_poll();
         if (now >= next_can_poll_ns) {
             next_can_poll_ns = now + 100000; // 100us
             sitl_can_poll();
-            sitl_input_poll();
             sitl_state_poll();
         }
         watchdog_check();

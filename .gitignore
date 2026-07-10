@@ -27,3 +27,4 @@ Mcu/SITL/venv/
 **/sitl_ci.log
 am32_eeprom.bin
 am32_eeprom.bin.lock
+am32_eeprom.bin.rtc
