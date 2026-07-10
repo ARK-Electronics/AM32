@@ -11,6 +11,7 @@
 #include "functions.h"
 #include "sounds.h"
 #include "targets.h"
+#include "hwci_perf.h"
 #if DRONECAN_SUPPORT
 #include "DroneCAN/DroneCAN.h"
 #endif
@@ -90,6 +91,9 @@ void computeDshotDMA()
                     high_pin_count++;
                     if (high_pin_count > 100) {
                         dshot_telemetry = 1;
+#ifdef HWCI_PERF
+                        hwci_perf.dshot_telem_mode = 1;
+#endif
                     }
                 }
             }
@@ -103,6 +107,11 @@ void computeDshotDMA()
         if (calcCRC == checkCRC) {
             signaltimeout = 0;
             dshot_goodcounts++;
+#ifdef HWCI_PERF
+            hwci_perf.dshot_rx_good++;
+            hwci_perf.dshot_telem_mode = (uint8_t)dshot_telemetry;
+            hwci_perf.dshot_edt_mode = dshot_extended_telemetry;
+#endif
             if (dpulse[11] == 1) {
                 send_telemetry = 1;
             }
@@ -211,10 +220,16 @@ void computeDshotDMA()
                         if (EDT_ARM_ENABLE == 1) {
                             EDT_ARMED = 1;
                         }
+#ifdef HWCI_PERF
+                        hwci_perf.dshot_edt_mode = 1;
+#endif
                         break;
                     case 14:
                         dshot_extended_telemetry = 0;
                         send_EDT_deinit = 1;
+#ifdef HWCI_PERF
+                        hwci_perf.dshot_edt_mode = 0;
+#endif
                         break;
                     case 20:
                         forward = 1 - eepromBuffer.dir_reversed;
@@ -233,6 +248,9 @@ void computeDshotDMA()
             }
         } else {
             dshot_badcounts++;
+#ifdef HWCI_PERF
+            hwci_perf.dshot_rx_bad++;
+#endif
             programming_mode = 0;
         }
     }
@@ -241,6 +259,10 @@ void computeDshotDMA()
 void make_dshot_package(uint16_t com_time)
 {
     uint16_t extended_frame_to_send = 0;
+#ifdef HWCI_PERF
+    /* Snapshot the period the reply will advertise (stopped → 65535 later). */
+    const uint16_t _hwci_com_snap = com_time;
+#endif
 
     if (dshot_extended_telemetry) {
         // Only send extended telemetry if last frame wasn't extended. This ensures eRPM interleaving.
@@ -341,5 +363,14 @@ void make_dshot_package(uint16_t com_time)
         gcr[buffer_padding + 20 - i + 1] = ((((gcrnumber & 1 << i)) >> i) ^ (gcr[buffer_padding + 20 - i] >> 7)) << 7;
     }
     gcr[buffer_padding] = 0;
+#endif
+#ifdef HWCI_PERF
+    hwci_perf.dshot_tx_frames++;
+    /* Prefer the period that was actually encoded (65535 when !running). */
+    hwci_perf.dshot_last_com_us = (!running && extended_frame_to_send == 0)
+                                      ? 65535u
+                                      : _hwci_com_snap;
+    hwci_perf.dshot_telem_mode = (uint8_t)dshot_telemetry;
+    hwci_perf.dshot_edt_mode = dshot_extended_telemetry;
 #endif
 }

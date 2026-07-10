@@ -21,6 +21,18 @@ baseline, and a pass/fail report you can gate pull requests on.
             ARK 4IN1 ESC (4× STM32F051 / Cortex-M0) ── motor ── prop ── Flight Stand 50
 ```
 
+## Two exclusive bench setups
+
+| | **SETUP A — Flight Stand** | **SETUP B — ARK FPV BDShot** |
+|--|----------------------------|------------------------------|
+| ESC signal | Stand ESC out (uni DShot) | FPV motor out (BDShot) |
+| Motor command | `hwci run --profile noprop_…` | `scripts/px4_motor_stream.py` |
+| Rig file | `rig.yaml` / `config/rig.flightstand.yaml` | `config/rig.px4_bdshot.yaml` |
+| Docs | this README | [docs/BENCH_SETUPS.md](docs/BENCH_SETUPS.md), [docs/setup_px4_bdshot.md](docs/setup_px4_bdshot.md) |
+
+Use **one setup at a time** (only one host on the signal wire). Full table and
+switch procedure: **[docs/BENCH_SETUPS.md](docs/BENCH_SETUPS.md)**.
+
 ## Why it's built this way (read this first)
 
 The ARK 4IN1 runs **four independent STM32F051 MCUs** (one per channel), each a
@@ -92,11 +104,13 @@ per-motor.
 
 ### Signal, telemetry, power
 
-* **Throttle**: Flight Stand ESC output → channel-1 signal pin (PWM or DShot).
-  If your stand can't emit the protocol you want, use an external DShot
-  generator (`throttle_backend: external`).
-* **ESC telemetry**: channel-1 telemetry pad → USB-serial adapter (115200 8N1)
-  → host. The ARK target already has `USE_SERIAL_TELEMETRY`.
+* **Throttle (SETUP A)**: Flight Stand ESC output → channel-1 signal pin
+  (uni DShot/PWM). Optional: `throttle_backend: external` serial bridge.
+* **Throttle (SETUP B)**: ARK FPV BDShot owns the pin; harness uses
+  `throttle_backend: none` + `scripts/px4_motor_stream.py`. Do not attach
+  stand ESC out and FPV motor out to the same signal pin.
+* **ESC telemetry**: optional KISS wire → USB-serial (SETUP A or B). BDShot
+  eRPM does not use this wire (SETUP B returns eRPM on the signal line).
 * **Power**: bench supply or battery within the ARK 4IN1's 3–8S range; common
   ground between supply, ESC, stand, and host.
 * **Safety**: set conservative cutoffs in the profile `safety:` block (current,

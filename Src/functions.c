@@ -39,14 +39,7 @@ long map(long x, long in_min, long in_max, long out_min, long out_max)
         return map(x, in_mid + 1, in_max, out_mid, out_max);
 }
 
-uint32_t getAbsDif(int number1, int number2)
-{
-    int result = number1 - number2;
-    if (result < 0) {
-        result = -result;
-    }
-    return (uint32_t)result;
-}
+/* getAbsDif() lives in Inc/functions.h (static inline). */
 
 /* get_timer_us16() lives in Inc/functions.h so other units (e.g. the HWCI_PERF
  * instrumentation) share the same per-family utility-timer access. */

@@ -25,7 +25,9 @@ DEFAULT_TARGET = "ARK_4IN1_F051"
 BACKEND_CHOICES: dict[str, set[str]] = {
     "debugger_backend": {"openocd", "sim", "none"},
     "telem_backend": {"serial", "sim", "none"},
-    "throttle_backend": {"flightstand", "external", "sim"},
+    # "none" = ESC signal driven outside the harness (e.g. ARK FPV BDShot);
+    # use only with setup B — see docs/BENCH_SETUPS.md.
+    "throttle_backend": {"flightstand", "external", "none", "sim"},
     "stand_backend": {"grpc", "sim", "none"},
 }
 _SIM_ONLY = {"sim"}
@@ -39,6 +41,35 @@ class Segment:
     duration_s: float
     ramp: bool = False        # ramp linearly from the previous throttle
     steady: bool = False      # use this segment for steady-state metrics
+
+
+@dataclass
+class SmokeGates:
+    """Absolute pass/fail checks for a free-run / smoke profile.
+
+    Independent of baseline regression compare. When enabled, a run that
+    never spun (stuck-rotor latch, no running flag, etc.) fails CI even
+    if the host did not abort on current/safety limits.
+
+    Optional fields left None are skipped (so older firmware without
+    ``perf_esc_state`` can still gate on running/RPM/BEMF).
+    """
+    enabled: bool = False
+    # Steady segments at/above this throttle must look like "driving".
+    min_throttle: float = 0.55
+    # Fraction of samples in those segments with perf_running == 1.
+    min_running_fraction: float = 0.90
+    # Fail if any sample has stuck-rotor latch (firmware uses 102).
+    max_bemf_latch_samples: int = 0
+    # When perf_esc_state is present: high-throttle steady must be OPEN(4)
+    # or CLOSED(5) for this fraction of samples.
+    require_esc_drive_states: bool = True
+    min_esc_drive_fraction: float = 0.90
+    # Max final perf_esc_illegal_edge_count (0 = no illegal named edges).
+    max_illegal_edges: int | None = 0
+    # min_rpm keyed by throttle level (exact segment throttle match or
+    # nearest segment at/above key). Example: {1.0: 30000} for full stick.
+    min_rpm: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -56,6 +87,7 @@ class Profile:
     # Offline fallback only: on a rig the motor's pole pairs come from
     # RigConfig (recorded into the run meta), not from the test profile.
     pole_pairs: int = 7
+    smoke_gates: SmokeGates | None = None
 
     @property
     def duration_s(self) -> float:
@@ -70,6 +102,25 @@ def _safety_from(d: dict) -> SafetyLimits:
         max_rpm=d.get("max_rpm"),
         max_voltage_v=d.get("max_voltage_v"),
         max_motor_temp_c=d.get("max_motor_temp_c"),
+    )
+
+
+def _smoke_gates_from(d: dict | None) -> SmokeGates | None:
+    if not d:
+        return None
+    min_rpm = d.get("min_rpm") or {}
+    # YAML may use float keys; normalize to float.
+    min_rpm_f = {float(k): float(v) for k, v in min_rpm.items()}
+    return SmokeGates(
+        enabled=bool(d.get("enabled", True)),
+        min_throttle=float(d.get("min_throttle", 0.55)),
+        min_running_fraction=float(d.get("min_running_fraction", 0.90)),
+        max_bemf_latch_samples=int(d.get("max_bemf_latch_samples", 0)),
+        require_esc_drive_states=bool(d.get("require_esc_drive_states", True)),
+        min_esc_drive_fraction=float(d.get("min_esc_drive_fraction", 0.90)),
+        max_illegal_edges=(None if d.get("max_illegal_edges") is None
+                           else int(d["max_illegal_edges"])),
+        min_rpm=min_rpm_f,
     )
 
 
@@ -91,6 +142,7 @@ def profile_from_dict(d: dict) -> Profile:
         demag_commutation_spike=float(d.get("demag_commutation_spike", 3.0)),
         demag_rpm_drop_fraction=float(d.get("demag_rpm_drop_fraction", 0.25)),
         pole_pairs=int(d.get("pole_pairs", 7)),
+        smoke_gates=_smoke_gates_from(d.get("smoke_gates")),
     )
 
 
@@ -141,7 +193,8 @@ class RigConfig:
     telem_port: str = "/dev/ttyUSB0"
     telem_baud: int = 115200
 
-    throttle_backend: str = "sim"           # "flightstand" | "external" (| "sim")
+    # flightstand = SETUP A; external = serial bridge; none = SETUP B (PX4/BDShot owns pin)
+    throttle_backend: str = "sim"
     throttle_port: str = "/dev/ttyACM0"
     throttle_baud: int = 115200
 

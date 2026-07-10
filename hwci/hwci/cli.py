@@ -76,10 +76,23 @@ def _default_out(profile_name: str, sim: bool) -> Path:
 
 
 def _profile_for(result: RunResult) -> Profile:
-    """The exact profile a run was made with (from meta), else by name."""
+    """The exact profile a run was made with (from meta), else by name.
+
+    When the stored ``profile_def`` predates ``smoke_gates``, attach the
+    current YAML's gates by profile name so re-analyze/CI of older run
+    dirs still applies absolute health checks.
+    """
     pd = result.meta.get("profile_def")
     if pd:
-        return profile_from_dict(pd)
+        profile = profile_from_dict(pd)
+        if profile.smoke_gates is None and result.meta.get("profile"):
+            try:
+                live = load_profile(result.meta["profile"])
+                if live.smoke_gates is not None:
+                    profile.smoke_gates = live.smoke_gates
+            except FileNotFoundError:
+                pass
+        return profile
     return load_profile(result.meta.get("profile", "ci_smoke"))
 
 
@@ -137,15 +150,35 @@ def _analyze_and_report(run_dir: Path, result: RunResult, profile: Profile,
     return m, comparison
 
 
-def _verdict_rc(result: RunResult, comparison: dict | None) -> int:
-    """Exit code: 2 aborted (never trust the data), 1 gate FAIL, 0 PASS."""
+def _verdict_rc(result: RunResult, comparison: dict | None,
+                metrics: dict | None = None) -> int:
+    """Exit code: 2 aborted (never trust the data), 1 gate FAIL, 0 PASS.
+
+    Absolute ``smoke_gates`` (when present on the metrics dict) fail the run
+    even without a baseline. Baseline regression is a second independent
+    gate when comparison is supplied.
+    """
     if result.meta.get("aborted"):
         print(f"ABORTED: {result.meta['aborted']}", file=sys.stderr)
         return 2
+    smoke = (metrics or {}).get("smoke_gates")
+    smoke_ok = True
+    if smoke is not None:
+        smoke_ok = bool(smoke.get("passed"))
+        print("SMOKE_GATES:", "PASS" if smoke_ok else "FAIL")
+        for c in smoke.get("checks", []):
+            mark = "ok" if c.get("pass") else "FAIL"
+            print(f"  [{mark}] {c.get('name')}: {c.get('detail')} "
+                  f"(current={c.get('current')} limit={c.get('limit')})")
+    base_ok = True
     if comparison is not None:
-        print("VERDICT:", "PASS" if comparison["passed"] else "FAIL")
-        return 0 if comparison["passed"] else 1
-    return 0
+        base_ok = bool(comparison["passed"])
+        print("BASELINE:", "PASS" if base_ok else "FAIL")
+    if smoke is None and comparison is None:
+        return 0
+    ok = smoke_ok and base_ok
+    print("VERDICT:", "PASS" if ok else "FAIL")
+    return 0 if ok else 1
 
 
 # --------------------------------------------------------------------------
@@ -221,7 +254,7 @@ def cmd_analyze(args) -> int:
     m = metricsmod.compute(result, _profile_for(result))
     (Path(args.run_dir) / "metrics.json").write_text(json.dumps(m, indent=2))
     print(json.dumps(m["summary"], indent=2))
-    return 0
+    return _verdict_rc(result, None, metrics=m)
 
 
 def cmd_baseline_save(args) -> int:
@@ -235,11 +268,11 @@ def cmd_baseline_save(args) -> int:
 
 def cmd_report(args) -> int:
     result = RunResult.load(args.run_dir)
-    _, comparison = _analyze_and_report(
+    m, comparison = _analyze_and_report(
         Path(args.run_dir), result, _profile_for(result),
         args.baseline, args.no_plots)
     print(f"report written to {Path(args.run_dir) / 'report.md'}")
-    return _verdict_rc(result, comparison)
+    return _verdict_rc(result, comparison, metrics=m)
 
 
 def cmd_ci(args) -> int:
@@ -273,7 +306,7 @@ def cmd_ci(args) -> int:
     m, comparison = _analyze_and_report(out, result, profile,
                                         args.baseline, args.no_plots)
     print(json.dumps(m["summary"], indent=2))
-    return _verdict_rc(result, comparison)
+    return _verdict_rc(result, comparison, metrics=m)
 
 
 def cmd_tune(args) -> int:

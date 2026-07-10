@@ -41,6 +41,11 @@ COLUMNS = [
     "perf_bemf_timeout", "perf_e_rpm",
     # ESC input/arming state (proves the ESC decoded the throttle protocol)
     "perf_input", "perf_armed", "perf_running",
+    # top-level drive state machine (struct v5+)
+    "perf_esc_state", "perf_esc_illegal_edge_count",
+    # bidirectional DShot health (struct v6+)
+    "perf_dshot_rx_good", "perf_dshot_rx_bad", "perf_dshot_tx_frames",
+    "perf_dshot_last_com_us", "perf_dshot_telem_mode", "perf_dshot_edt_mode",
 ]
 
 
@@ -107,6 +112,20 @@ def make_row(t: float, segment: str, throttle_cmd: float,
             # one CSV cell, not 32 columns; _coerce leaves it a string on load
             row["perf_zc_phase_hist"] = ";".join(
                 str(v) for v in r["zc_phase_hist"])
+        if "esc_state" in r:  # struct v5+
+            row.update(
+                perf_esc_state=r["esc_state"],
+                perf_esc_illegal_edge_count=r["esc_illegal_edge_count"],
+            )
+        if "dshot_rx_good" in r:  # struct v6+
+            row.update(
+                perf_dshot_rx_good=r["dshot_rx_good"],
+                perf_dshot_rx_bad=r["dshot_rx_bad"],
+                perf_dshot_tx_frames=r["dshot_tx_frames"],
+                perf_dshot_last_com_us=r["dshot_last_com_us"],
+                perf_dshot_telem_mode=r["dshot_telem_mode"],
+                perf_dshot_edt_mode=r["dshot_edt_mode"],
+            )
     return row
 
 

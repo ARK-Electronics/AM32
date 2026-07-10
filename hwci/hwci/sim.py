@@ -120,6 +120,10 @@ class RigSimulator:
         # models mild phase locking - 20% of edges pile onto one bin
         self.zc_phase_hist = [0] * 32
         self._phase_rr = 0
+        # BDShot counters (perf struct v6)
+        self.dshot_rx_good = 0
+        self.dshot_rx_bad = 0
+        self.dshot_tx_frames = 0
 
     # --- model -------------------------------------------------------
     def set_settings(self, settings: SimSettings | None) -> None:
@@ -252,6 +256,11 @@ class RigSimulator:
         idle_hz = 120000.0 * (1.0 - 0.25 * throttle)
         self.loop_iters += int(idle_hz * dt)
         self.update_count += int(idle_hz * dt)
+        # BDShot: ~500 Hz command stream; RX good + TX reply when spinning
+        n_ds = max(1, int(500.0 * dt))
+        self.dshot_rx_good = (self.dshot_rx_good + n_ds) & 0xFFFFFFFF
+        if self.rpm > 100:
+            self.dshot_tx_frames = (self.dshot_tx_frames + n_ds) & 0xFFFFFFFF
         # current draw heats the ESC slowly
         cur = self.current
         self.temp_c += (p.ambient_temp_c + 0.9 * cur - self.temp_c) * min(1.0, dt / 5.0)
@@ -349,6 +358,9 @@ class RigSimulator:
             "bemf_timeout_state": 1 if self.desync_remaining > 0 else 0,
             "armed": 1,
             "running": 1 if self.rpm > 100 else 0,
+            # esc_state: CLOSED_LOOP(5) when spinning, ARMED_IDLE(2) otherwise
+            "esc_state": 5 if self.rpm > 100 else 2,
+            "esc_illegal_edge_count": 0,
             "loop_iters": self.loop_iters & 0xFFFFFFFF,
             # firmware clamps zero_crosses at 10000 (and resets it on
             # desync/stop) - mirror the saturation so host logic tested
@@ -364,4 +376,10 @@ class RigSimulator:
             "zc_jitter_max": self.zc_jitter_max,
             "zc_confirm_reject": self.zc_confirm_reject,
             "zc_phase_hist": tuple(self.zc_phase_hist),
+            "dshot_rx_good": self.dshot_rx_good,
+            "dshot_rx_bad": self.dshot_rx_bad,
+            "dshot_tx_frames": self.dshot_tx_frames,
+            "dshot_last_com_us": min(0xFFFF, comm_interval // 2) if self.rpm > 100 else 65535,
+            "dshot_telem_mode": 1,
+            "dshot_edt_mode": 0,
         })

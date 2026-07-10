@@ -1,0 +1,35 @@
+# SETUP B only — ARK FPV / BDShot owns the ESC signal pin.
+# This profile is for optional SWD sampling while PX4 drives the motor
+# (throttle_backend: none). It does NOT command the Flight Stand ESC out.
+# For SETUP A free-run use noprop_smoke* with rig.flightstand / rig.yaml.
+# See docs/BENCH_SETUPS.md.
+name: bdshot_smoke
+description: >
+  SETUP B (PX4 BDShot): gentle free-run shape for optional SWD logging while
+  ARK FPV drives BDShot. Harness throttle must be none — motor motion comes
+  from scripts/px4_motor_stream.py (or QGC), not this profile's throttle_cmd.
+  Do not use with Flight Stand throttle (SETUP A). ~35 s if used as a
+  timing template only.
+sample_rate_hz: 100
+arm_settle_s: 3.0
+pole_pairs: 7
+demag_rpm_drop_fraction: 0.25
+demag_commutation_spike: 3.0
+steady_tail_fraction: 0.5
+
+safety:
+  max_current_a: 50.0
+  max_motor_temp_c: 90.0
+  max_rpm: 55000
+  max_thrust_n: 2.0
+
+segments:
+  - {label: idle,    throttle: 0.00, duration_s: 2.0}
+  - {label: ramp20,  throttle: 0.20, duration_s: 3.0, ramp: true}
+  - {label: hold20,  throttle: 0.20, duration_s: 4.0, steady: true}
+  - {label: ramp50,  throttle: 0.50, duration_s: 4.0, ramp: true}
+  - {label: hold50,  throttle: 0.50, duration_s: 5.0, steady: true}
+  - {label: ramp80,  throttle: 0.80, duration_s: 4.0, ramp: true}
+  - {label: hold80,  throttle: 0.80, duration_s: 5.0, steady: true}
+  - {label: rampdn,  throttle: 0.00, duration_s: 4.0, ramp: true}
+  - {label: stop,    throttle: 0.00, duration_s: 2.0}

@@ -29,8 +29,11 @@ def render_markdown(metrics: dict, comparison: dict | None = None,
         out.append("")
 
     s = metrics["summary"]
-    if comparison is not None:
-        verdict = "✅ PASS" if comparison["passed"] else "❌ FAIL"
+    smoke = metrics.get("smoke_gates")
+    if smoke is not None or comparison is not None:
+        smoke_ok = True if smoke is None else bool(smoke.get("passed"))
+        base_ok = True if comparison is None else bool(comparison.get("passed"))
+        verdict = "✅ PASS" if (smoke_ok and base_ok) else "❌ FAIL"
         out.append(f"## Verdict: {verdict}\n")
 
     out.append("## Summary\n")
@@ -72,6 +75,20 @@ def render_markdown(metrics: dict, comparison: dict | None = None,
     out.append(f"- ESC-eRPM vs stand-RPM mismatch samples: "
                f"{d.get('esc_rpm_mismatch_samples', 0)}")
     out.append("")
+
+    smoke = metrics.get("smoke_gates")
+    if smoke is not None:
+        out.append("## Smoke / health gates\n")
+        out.append(f"- overall: **{'PASS' if smoke.get('passed') else 'FAIL'}**")
+        out.append("")
+        out.append("| check | current | limit | pass | detail |")
+        out.append("|---|---|---|---|---|")
+        for c in smoke.get("checks", []):
+            mark = "✅" if c.get("pass") else "❌"
+            out.append(
+                f"| {c.get('name')} | {_fmt(c.get('current'))} | "
+                f"{_fmt(c.get('limit'))} | {mark} | {c.get('detail', '')} |")
+        out.append("")
 
     if comparison is not None:
         out.append("## Regression checks (vs baseline)\n")

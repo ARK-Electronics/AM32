@@ -32,7 +32,16 @@ static inline uint16_t get_timer_us16(void)
 #endif
 }
 
-uint32_t getAbsDif(int number1, int number2);
+/* Hot path (desync check etc.) — keep out of a separate TU call. */
+static inline uint32_t getAbsDif(int number1, int number2)
+{
+    int result = number1 - number2;
+    if (result < 0) {
+        result = -result;
+    }
+    return (uint32_t)result;
+}
+
 void delayMicros(uint32_t micros);
 void delayMillis(uint32_t millis);
 long map(long x, long in_min, long in_max, long out_min, long out_max);
