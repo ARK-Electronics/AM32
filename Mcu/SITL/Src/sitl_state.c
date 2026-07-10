@@ -93,7 +93,7 @@ void sitl_state_init(void)
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
     addr.sin_port = htons((uint16_t)sitl_cfg.state_port);
-    addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    addr.sin_addr.s_addr = htonl(sitl_cfg.bind_any ? INADDR_ANY : INADDR_LOOPBACK);
     if (bind(fd, (struct sockaddr*)&addr, sizeof(addr)) != 0) {
         perror("SITL: state bind");
         close(fd);
@@ -171,6 +171,15 @@ void sitl_state_poll(void)
         memcpy(&period_req_ns, pkt + 4, 4);
         averaged = (pkt[3] & 1) != 0;
         apply_period();
+        // a new subscriber must not receive samples batched for the
+        // previous one
+        if (!have_sub || src.sin_addr.s_addr != sub_addr.sin_addr.s_addr
+            || src.sin_port != sub_addr.sin_port) {
+            batch.count = 0;
+            memset(sig_acc, 0, sizeof(sig_acc));
+            sig_n = 0;
+            next_sample_ns = 0;
+        }
         sub_addr = src;
         have_sub = true;
         sub_expire = time(NULL) + 2;

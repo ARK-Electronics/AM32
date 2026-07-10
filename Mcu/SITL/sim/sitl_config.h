@@ -41,6 +41,7 @@ typedef struct {
     float speedup; // 0 = free run
     int input_port; // UDP port for PWM/DShot input, 0 disables
     int state_port; // UDP port for state streaming/model control, 0 disables
+    bool bind_any; // bind input/state ports on all interfaces, not loopback
     const char* eeprom_path;
     const char* can_uri;
     const char* uid; // optional fixed unique ID string

@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <getopt.h>
+#include <math.h>
 
 #include "jsmn.h"
 
@@ -49,6 +50,7 @@ sitl_config_t sitl_cfg = {
     .speedup = 1.0f,
     .input_port = 57733,
     .state_port = 57734,
+    .bind_any = false,
     .eeprom_path = "am32_eeprom.bin",
     .can_uri = "mcast:0",
     .uid = NULL,
@@ -204,9 +206,53 @@ static void load_json(const char* path)
     }
 }
 
+/*
+  reject config values that would break the physics: motor.c divides by
+  kv, inertia and L - M, and any NaN poisons the whole state. Clamp with
+  a warning rather than exit so a bad runtime LOAD_MODEL cannot wedge a
+  running simulation
+ */
+static void clampf(float* v, float lo, float hi, const char* name)
+{
+    float nv = *v;
+    if (!isfinite(nv) || nv < lo) {
+        nv = lo;
+    } else if (nv > hi) {
+        nv = hi;
+    }
+    if (nv != *v || !isfinite(*v)) {
+        fprintf(stderr, "SITL: config %s=%g clamped to %g\n", name, (double)*v, (double)nv);
+        *v = nv;
+    }
+}
+
+static void config_sanitise(void)
+{
+    clampf(&sitl_cfg.motor.kv, 1.0f, 1e6f, "motor.kv");
+    if (sitl_cfg.motor.poles < 2 || (sitl_cfg.motor.poles & 1)) {
+        fprintf(stderr, "SITL: config motor.poles=%d invalid, using 2\n", sitl_cfg.motor.poles);
+        sitl_cfg.motor.poles = sitl_cfg.motor.poles > 2 ? sitl_cfg.motor.poles & ~1 : 2;
+    }
+    clampf(&sitl_cfg.motor.resistance, 1e-4f, 100.0f, "motor.resistance");
+    clampf(&sitl_cfg.motor.inductance, 1e-8f, 1.0f, "motor.inductance");
+    // keep L - M positive
+    clampf(&sitl_cfg.motor.mutual_inductance, -1.0f,
+        sitl_cfg.motor.inductance * 0.9f, "motor.mutual_inductance");
+    clampf(&sitl_cfg.motor.inertia, 1e-9f, 100.0f, "motor.inertia");
+    clampf(&sitl_cfg.motor.damping, 0.0f, 1.0f, "motor.damping");
+    clampf(&sitl_cfg.motor.static_friction, 0.0f, 10.0f, "motor.static_friction");
+    clampf(&sitl_cfg.motor.load_k_omega2, 0.0f, 1.0f, "motor.load_k_omega2");
+    clampf(&sitl_cfg.battery.voltage, 1.0f, 200.0f, "battery.voltage");
+    clampf(&sitl_cfg.battery.resistance, 0.0f, 10.0f, "battery.resistance");
+    clampf(&sitl_cfg.esc.rds_on, 0.0f, 1.0f, "esc.rds_on");
+    clampf(&sitl_cfg.esc.diode_vf, 0.0f, 5.0f, "esc.diode_vf");
+}
+
 bool sitl_config_reload(const char* path)
 {
-    return load_json_ex(path, true);
+    const bool ok = load_json_ex(path, true);
+    config_sanitise();
+    return ok;
 }
 
 static void usage(const char* prog)
@@ -221,6 +267,9 @@ static void usage(const char* prog)
            "                   runtime model control, 0 to disable\n"
            "                   (default 57734)\n"
            "  --speedup X      simulation speed, 0 for free running (default 1.0)\n"
+           "  --bind-any       bind the input/state UDP ports on all interfaces\n"
+           "                   instead of loopback only, for a GUI on another\n"
+           "                   host\n"
            "  --node-id N      force DroneCAN node ID\n"
            "  --input-type N   force eeprom INPUT_SIGNAL_TYPE (0=auto 1=dshot\n"
            "                   2=servo 5=dronecan)\n"
@@ -243,6 +292,7 @@ void sitl_config_init(int argc, char** argv)
         { "input-port", required_argument, NULL, 'p' },
         { "state-port", required_argument, NULL, 'P' },
         { "speedup", required_argument, NULL, 's' },
+        { "bind-any", no_argument, NULL, 'A' },
         { "node-id", required_argument, NULL, 'n' },
         { "input-type", required_argument, NULL, 'I' },
         { "uid", required_argument, NULL, 'U' },
@@ -253,7 +303,7 @@ void sitl_config_init(int argc, char** argv)
         { NULL, 0, NULL, 0 },
     };
     int c;
-    while ((c = getopt_long(argc, argv, "c:e:u:p:P:s:n:I:U:vNRh", opts, NULL)) != -1) {
+    while ((c = getopt_long(argc, argv, "c:e:u:p:P:s:An:I:U:vNRh", opts, NULL)) != -1) {
         switch (c) {
         case 'c':
             load_json(optarg);
@@ -272,6 +322,9 @@ void sitl_config_init(int argc, char** argv)
             break;
         case 's':
             sitl_cfg.speedup = strtof(optarg, NULL);
+            break;
+        case 'A':
+            sitl_cfg.bind_any = true;
             break;
         case 'n':
             sitl_cfg.node_id = atoi(optarg);
@@ -297,4 +350,5 @@ void sitl_config_init(int argc, char** argv)
             exit(c == 'h' ? 0 : 1);
         }
     }
+    config_sanitise();
 }

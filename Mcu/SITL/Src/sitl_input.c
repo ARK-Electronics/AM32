@@ -102,7 +102,7 @@ void sitl_input_init(void)
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
     addr.sin_port = htons((uint16_t)sitl_cfg.input_port);
-    addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    addr.sin_addr.s_addr = htonl(sitl_cfg.bind_any ? INADDR_ANY : INADDR_LOOPBACK);
     if (bind(fd, (struct sockaddr*)&addr, sizeof(addr)) != 0) {
         perror("SITL: input bind");
         close(fd);
@@ -277,7 +277,8 @@ void sitl_input_poll(void)
     if (ret < 0) {
         return;
     }
-    if (ret < (ssize_t)sizeof(pkt) || pkt.magic != SITL_INPUT_MAGIC || pkt.type > SITL_INPUT_DSHOT600) {
+    if (ret < (ssize_t)sizeof(pkt) || pkt.magic != SITL_INPUT_MAGIC || pkt.type > SITL_INPUT_DSHOT600
+        || pkt.len != 4) {
         return;
     }
     last_sender = src;

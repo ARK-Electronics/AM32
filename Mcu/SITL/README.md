@@ -35,6 +35,9 @@ Options:
   disables)
 - `--state-port N` UDP port for high rate simulation state streaming
   and runtime motor model loading (default 57734, 0 disables)
+- `--bind-any` bind the input and state ports on all interfaces instead
+  of loopback only, needed when the GUI runs on a different host. The
+  ports accept unauthenticated control, so only use on trusted networks
 - `--input-type N` force the eeprom INPUT_SIGNAL_TYPE setting (0=auto
   1=dshot 2=servo 5=dronecan)
 - `--speedup X` simulation speed relative to wall clock, 0 = free running
