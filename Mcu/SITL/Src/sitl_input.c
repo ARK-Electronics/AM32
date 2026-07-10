@@ -280,9 +280,20 @@ void sitl_input_dma_irq(void)
 
 /*
   called from the sim thread every physics step: service deferred DMA
-  IRQs, then drain the UDP input socket (up to SITL_INPUT_DRAIN_MAX
-  packets). DMA complete for a received frame is deferred until the last
-  synthesized edge time so frame duration is visible in sim time.
+  IRQs, then pull UDP frames. DMA complete for a received frame is
+  deferred until the last synthesized edge time so frame duration is
+  visible in sim time.
+
+  Wire-busy policy:
+  - BDShot TX or RX DMA still waiting for the last edge: stop receiving
+    and leave remaining datagrams queued. Consuming them would destroy
+    DShot command bursts (firmware needs 6 identical commands) that
+    GUI/catch-up senders place in the socket at once.
+  - Capture not armed: drain and drop (same as a real wire with no
+    DMA arm) so the socket does not accumulate stale zero-throttle
+    frames that would delay a later throttle change.
+  - After accepting a full capture: stop this poll so the rest of a
+    burst stays queued for the next free window.
  */
 void sitl_input_poll(void)
 {
@@ -292,6 +303,10 @@ void sitl_input_poll(void)
     service_deferred_dma();
 
     for (int n = 0; n < SITL_INPUT_DRAIN_MAX; n++) {
+        // short busy windows: keep UDP queued for the next free step
+        if (out_put || dma_done_ns != 0) {
+            break;
+        }
         struct input_pkt pkt;
         struct sockaddr_in src;
         socklen_t srclen = sizeof(src);
@@ -309,9 +324,7 @@ void sitl_input_poll(void)
         last_type = pkt.type;
         pin_idle_level = (pkt.flags & SITL_INPUT_FLAG_IDLE_HIGH) ? 1 : 0;
         stats.frames++;
-        // capture not armed, reply TX on the wire, or RX DMA still
-        // waiting for the last edge: frame is lost, as on a real wire
-        if (!cap_armed || out_put || dma_done_ns != 0) {
+        if (!cap_armed) {
             stats.dropped++;
             continue;
         }
@@ -321,6 +334,7 @@ void sitl_input_poll(void)
             // complete at the last edge (or immediately if already past)
             dma_done_ns = last_edge_ns ? last_edge_ns : sitl_time_ns();
             service_deferred_dma();
+            break;
         }
     }
 }

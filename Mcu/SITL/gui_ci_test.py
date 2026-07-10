@@ -54,13 +54,15 @@ def main():
     control_port = sprobe.getsockname()[1]
     sprobe.close()
 
+    # BDShot/EDT path only — keep CAN off so the GUI does not block on
+    # mcast/SocketCAN bring-up (DroneCAN is covered by other tests).
     with Sitl(sitl_path, ['--input-type', '1'], can_uri='none') as sitl:
         gui = subprocess.Popen(
             [args.gui_python, os.path.join(HERE, 'sitl_gui.py'),
              '--control-port', str(control_port),
              '--port', str(sitl.input_port),
              '--state-port', str(sitl.state_port),
-             '--can-uri', 'mcast:7'],
+             '--can-uri', 'none'],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env)
 
         # first launch can be slow (Qt font cache); retry the connection
@@ -80,19 +82,27 @@ def main():
             gui.kill()
             print('control port never came up')
             sys.exit(1)
+        # connect() timeout must not apply to the long idle gaps between
+        # scripted commands (arm + EDT hold is several seconds).
+        s.settimeout(None)
         f = s.makefile('r')
         responses = []
 
         def reader():
-            for line in f:
-                responses.append(line.rstrip())
+            try:
+                for line in f:
+                    responses.append(line.rstrip())
+            except OSError:
+                pass
 
         threading.Thread(target=reader, daemon=True).start()
 
+        # Hold zero throttle long enough for bidir auto-detect, arming, and
+        # EDT enable (firmware needs 6 identical DShot cmds while stopped).
         for delay, cmd in [
                 (0.1, 'ds_type dshot600'), (0.1, 'ds_bidir 1'),
-                (0.1, 'ds_enable 1'), (0.3, 'ds_edt 1'),
-                (2.5, 'ds_value 900'),
+                (0.1, 'ds_enable 1'), (0.5, 'ds_edt 1'),
+                (4.0, 'ds_value 900'),
                 (1.0, 'graph_i 1'), (0.2, 'graph_v 1'), (0.2, 'motorview 1'),
                 (4.0, 'status'),
                 (1.0, 'quit')]:
