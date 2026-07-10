@@ -196,7 +196,7 @@ sitl-venv/bin/python Mcu/SITL/run_ci_tests.py
 `run_ci_tests.py` prefers pytest; pass `--legacy` for the smaller
 stdlib-only smoke suite. The GitHub Actions workflow
 `.github/workflows/SITL.yml` runs this on every push/PR to `main` and
-`ark-release` (plus a GUI offscreen job and Windows/macOS checks).
+`ark-release` (plus a GUI offscreen job and a Windows build/smoke job).
 
 Multicast CAN over loopback works on a stock VM with no route
 configuration (the SITL self-tests its TX at startup). Timing notes for
