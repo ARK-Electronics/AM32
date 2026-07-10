@@ -180,9 +180,23 @@ requirements are:
 ```
 apt install gcc make python3 python3-venv \
     libgl1 libegl1 libfontconfig1 libxkbcommon0
-pip install dronecan        # for the DroneCAN tests
+python3 -m venv sitl-venv && sitl-venv/bin/pip install -r Mcu/SITL/requirements-ci.txt
 python3 Mcu/SITL/make_gui_env.py   # for GUI-driven tests
 ```
+
+Build and run the pytest suite (boot, DShot/BDShot/EDT, PWM, DroneCAN
+throttle + arming, parameter GetSet/save, motor model load):
+
+```
+make AM32_SITL_CAN
+sitl-venv/bin/python Mcu/SITL/run_ci_tests.py
+# or: sitl-venv/bin/pytest Mcu/SITL/tests -v --sitl obj/AM32_AM32_SITL_CAN_*.elf
+```
+
+`run_ci_tests.py` prefers pytest; pass `--legacy` for the smaller
+stdlib-only smoke suite. The GitHub Actions workflow
+`.github/workflows/SITL.yml` runs this on every push/PR to `main` and
+`ark-release` (plus a GUI offscreen job and Windows/macOS checks).
 
 Multicast CAN over loopback works on a stock VM with no route
 configuration (the SITL self-tests its TX at startup). Timing notes for

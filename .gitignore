@@ -22,3 +22,8 @@ Keil_Projects/Listings
 windows-tools.zip
 .settings/
 Mcu/SITL/venv/
+.pytest_cache/
+**/__pycache__/
+**/sitl_ci.log
+am32_eeprom.bin
+am32_eeprom.bin.lock

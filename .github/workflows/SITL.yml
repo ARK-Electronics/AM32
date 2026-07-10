@@ -2,37 +2,56 @@ name: SITL Tests
 
 on:
   push:
-    branches: ["main"]
+    branches: ["main", "ark-release"]
   pull_request:
-    branches: ["main"]
+    branches: ["main", "ark-release"]
   workflow_dispatch:
 
 jobs:
   sitl-tests:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
       - name: Build SITL
         run: make AM32_SITL_CAN
 
-      - name: Install pydronecan
-        run: python3 -m pip install dronecan
+      - name: Install CI Python deps
+        run: |
+          python3 -m venv sitl-venv
+          sitl-venv/bin/pip install -U pip
+          sitl-venv/bin/pip install -r Mcu/SITL/requirements-ci.txt
 
-      - name: Run SITL tests
+      - name: Run SITL pytest suite
         run: |
           mkdir sitl_test_run && cd sitl_test_run
-          python3 ../Mcu/SITL/run_ci_tests.py --sitl ../obj/AM32_AM32_SITL_CAN_*.elf
+          ../sitl-venv/bin/python ../Mcu/SITL/run_ci_tests.py \
+            --sitl ../obj/AM32_AM32_SITL_CAN_*.elf \
+            --junitxml=sitl-results.xml
 
       - name: Upload SITL log on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: sitl-test-log
-          path: sitl_test_run/sitl_ci.log
+          path: |
+            sitl_test_run/sitl_ci.log
+            sitl_test_run/**/sitl_ci.log
+            sitl_test_run/sitl-results.xml
+          if-no-files-found: ignore
+
+      - name: Upload junit results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sitl-junit
+          path: sitl_test_run/sitl-results.xml
+          if-no-files-found: ignore
 
   gui-test:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -58,32 +77,44 @@ jobs:
         with:
           name: gui-test-log
           path: gui_test_run/sitl_ci.log
+          if-no-files-found: ignore
 
   macos-tests:
     runs-on: macos-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
       - name: Build SITL
         run: make AM32_SITL_CAN
 
-      - name: Install pydronecan
-        run: python3 -m pip install --break-system-packages dronecan
+      - name: Install CI Python deps
+        run: |
+          python3 -m venv sitl-venv
+          sitl-venv/bin/pip install -U pip
+          sitl-venv/bin/pip install -r Mcu/SITL/requirements-ci.txt
 
-      - name: Run SITL tests
+      - name: Run SITL pytest suite
         run: |
           mkdir sitl_test_run && cd sitl_test_run
-          python3 ../Mcu/SITL/run_ci_tests.py --sitl ../obj/AM32_AM32_SITL_CAN_*.elf
+          ../sitl-venv/bin/python ../Mcu/SITL/run_ci_tests.py \
+            --sitl ../obj/AM32_AM32_SITL_CAN_*.elf \
+            --junitxml=sitl-results.xml
 
       - name: Upload SITL log on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: sitl-test-log-macos
-          path: sitl_test_run/sitl_ci.log
+          path: |
+            sitl_test_run/sitl_ci.log
+            sitl_test_run/**/sitl_ci.log
+            sitl_test_run/sitl-results.xml
+          if-no-files-found: ignore
 
   windows-build:
     runs-on: windows-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 

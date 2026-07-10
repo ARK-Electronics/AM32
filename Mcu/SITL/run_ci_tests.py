@@ -1,31 +1,36 @@
 #!/usr/bin/env python3
 '''
-CI test runner for the AM32 SITL: starts the simulator, drives it
-through the PWM/DShot and DroneCAN input paths and asserts on the
-results. Only needs the python standard library; the DroneCAN test runs
-when the dronecan package is importable and is skipped otherwise.
+CI entry point for the AM32 SITL test suite.
 
-usage: run_ci_tests.py [--sitl path/to/elf]
+Prefers pytest (Mcu/SITL/tests/). Falls back to a small inline suite when
+pytest is not installed, so the script stays usable with only the stdlib
+plus optional pydronecan.
+
+usage:
+  python3 Mcu/SITL/run_ci_tests.py [--sitl path/to/elf] [-- pytest-args...]
 exits non-zero if any test fails.
 '''
 
+from __future__ import annotations
+
 import argparse
-import glob
 import os
-import struct
-import subprocess
 import sys
-import threading
 import time
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import sitl_dshot as sd
-from sitl_gui_backend import SimStream
-
 HERE = os.path.dirname(os.path.abspath(__file__))
-INPUT_PORT = 57833
-STATE_PORT = 57834
-CAN_URI = 'mcast:7'
+sys.path.insert(0, HERE)
+
+from sitl_harness import (  # noqa: E402
+    Sender,
+    Sitl,
+    find_sitl_binary,
+    free_mcast_group,
+    open_state,
+    rpm_from_state,
+    wait_for_state,
+)
+import sitl_dshot as sd  # noqa: E402
 
 failures = []
 
@@ -38,85 +43,12 @@ def check(name, cond, detail):
         failures.append(name)
 
 
-class Sitl(object):
-    def __init__(self, sitl_path, extra_args=()):
-        args = [sitl_path, '--input-port', str(INPUT_PORT),
-                '--state-port', str(STATE_PORT), '--nosleep'] + list(extra_args)
-        self.log = open('sitl_ci.log', 'ab')
-        self.proc = subprocess.Popen(args, stdout=self.log, stderr=self.log)
-        time.sleep(0.5)
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *a):
-        self.proc.kill()
-        self.proc.wait()
-        self.log.close()
-        for f in os.listdir('.'):
-            if f.startswith('am32_eeprom.bin'):
-                os.unlink(f)
-
-
-class Sender(object):
-    '''background frame sender with rate catch-up, like the GUI'''
-
-    def __init__(self, ptype, bidir=False, rate=500.0):
-        self.port = sd.InputPort('127.0.0.1', INPUT_PORT)
-        self.ptype = ptype
-        self.bidir = bidir
-        self.rate = rate
-        self.value = 1000 if ptype == sd.TYPE_PWM else 0
-        self.cmds = []
-        self.running = True
-        threading.Thread(target=self._loop, daemon=True).start()
-
-    def _loop(self):
-        nxt = time.time()
-        try:
-            self._run()
-        except OSError:
-            pass  # socket closed by stop()
-
-    def _run(self):
-        nxt = time.time()
-        while self.running:
-            now = time.time()
-            burst = 0
-            while now >= nxt and burst < 10:
-                nxt += 1.0 / self.rate
-                if self.cmds:
-                    self.port.send_dshot(self.cmds.pop(0), ptype=self.ptype,
-                                         telem=True, bidir=self.bidir)
-                elif self.ptype == sd.TYPE_PWM:
-                    self.port.send_pwm(int(self.value))
-                else:
-                    self.port.send_dshot(int(self.value), ptype=self.ptype,
-                                         bidir=self.bidir)
-                burst += 1
-            if now - nxt > 0.25:
-                nxt = now
-            time.sleep(0.0005)
-
-    def stop(self):
-        self.running = False
-        self.port.close()
-
-
-def rpm_from_state(sim, window=1.0):
-    w = sim.window(window)
-    if not w:
-        return -1
-    return sum(s[1] for s in w) / len(w) * 60.0 / 6.28318
-
-
 def test_dshot(sitl_path, name, ptype, bidir, edt, value, rpm_lo, rpm_hi, input_type=1):
-    with Sitl(sitl_path, ['--can-uri', 'none', '--input-type', str(input_type)]):
-        sim = SimStream('127.0.0.1', STATE_PORT, period_us=200)
-        sim.enabled = True
-        tx = Sender(ptype, bidir=bidir)
+    with Sitl(sitl_path, ['--input-type', str(input_type)], can_uri='none') as sitl:
+        sim = open_state('127.0.0.1', sitl.state_port, period_us=200)
+        tx = Sender('127.0.0.1', sitl.input_port, ptype, bidir=bidir)
         try:
-            time.sleep(2.2)                    # arm at zero throttle
+            time.sleep(2.2)
             if edt:
                 tx.cmds = [sd.DSHOT_CMD_EDT_ENABLE] * 8
                 time.sleep(0.5)
@@ -142,7 +74,6 @@ def test_dshot(sitl_path, name, ptype, bidir, edt, value, rpm_lo, rpm_hi, input_
                     check(name + ' edt values',
                           edt_vals.get('temp') == 25 and 14 < edt_vals.get('volt', 0) < 18,
                           'edt=%s' % edt_vals)
-            # motor must stop again at zero throttle
             tx.value = 1000 if ptype == sd.TYPE_PWM else 0
             time.sleep(3.0)
             rpm = rpm_from_state(sim, 0.3)
@@ -158,23 +89,17 @@ def test_dronecan(sitl_path):
     except ImportError:
         print('SKIP: dronecan not installed, DroneCAN test skipped')
         return
-    with Sitl(sitl_path, ['--can-uri', CAN_URI, '--node-id', '10']):
-        sim = SimStream('127.0.0.1', STATE_PORT, period_us=200)
-        sim.enabled = True
-        # some CI runners (github macos) have no multicast capable route
-        # and the SITL cannot bring CAN up: skip rather than fail, with
-        # the SITL log for diagnosis
-        deadline = time.time() + 5
-        while time.time() < deadline and not sim.samples:
-            time.sleep(0.2)
-        if not sim.samples:
+    can_uri = 'mcast:%d' % free_mcast_group()
+    with Sitl(sitl_path, ['--node-id', '10'], can_uri=can_uri, wait_s=1.0) as sitl:
+        sim = open_state('127.0.0.1', sitl.state_port, period_us=200)
+        if not wait_for_state(sim, timeout=5.0):
             print('SKIP: SITL state stream never started with CAN enabled, '
                   'multicast is probably unavailable on this host. SITL log tail:')
             sys.stdout.flush()
-            os.system('tail -5 sitl_ci.log')
+            print(sitl.log_tail(5))
             sim.close()
             return
-        node = dronecan.make_node(CAN_URI, node_id=100, bitrate=1000000)
+        node = dronecan.make_node(can_uri, node_id=100, bitrate=1000000)
         status = {}
 
         def on_esc(e):
@@ -202,31 +127,57 @@ def test_dronecan(sitl_path):
         sim.close()
 
 
-def main():
-    ap = argparse.ArgumentParser(description=__doc__)
-    # don't hardcode the firmware version in the default binary path
-    pat = os.path.join(HERE, '..', '..', 'obj', 'AM32_AM32_SITL_CAN_*.elf')
-    hits = sorted(glob.glob(pat))
-    ap.add_argument('--sitl', default=os.path.normpath(hits[0]) if hits else None)
-    args = ap.parse_args()
-
-    if not os.path.exists(args.sitl):
-        print('SITL binary not found: %s' % args.sitl)
-        sys.exit(2)
-
-    test_dshot(args.sitl, 'dshot600 bidir edt', sd.TYPE_DSHOT600,
+def run_legacy(sitl_path):
+    test_dshot(sitl_path, 'dshot600 bidir edt', sd.TYPE_DSHOT600,
                bidir=True, edt=True, value=800, rpm_lo=4000, rpm_hi=7000)
-    test_dshot(args.sitl, 'dshot300', sd.TYPE_DSHOT300,
+    test_dshot(sitl_path, 'dshot300', sd.TYPE_DSHOT300,
                bidir=False, edt=False, value=600, rpm_lo=3000, rpm_hi=6000)
-    test_dshot(args.sitl, 'pwm', sd.TYPE_PWM,
+    test_dshot(sitl_path, 'pwm', sd.TYPE_PWM,
                bidir=False, edt=False, value=1500, rpm_lo=4000, rpm_hi=9000,
                input_type=2)
-    test_dronecan(args.sitl)
-
+    test_dronecan(sitl_path)
     if failures:
         print('\n%d FAILED: %s' % (len(failures), ', '.join(failures)))
-        sys.exit(1)
+        return 1
     print('\nall tests passed')
+    return 0
+
+
+def run_pytest(sitl_path, extra):
+    import pytest
+    args = [
+        os.path.join(HERE, 'tests'),
+        '-v',
+        '--tb=short',
+        '--sitl', sitl_path,
+    ]
+    args += extra
+    return pytest.main(args)
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument('--sitl', default=None, help='path to SITL binary')
+    ap.add_argument('--legacy', action='store_true',
+                    help='run the small stdlib suite instead of pytest')
+    args, rest = ap.parse_known_args()
+
+    sitl_path = find_sitl_binary(args.sitl)
+    if not sitl_path or not os.path.exists(sitl_path):
+        print('SITL binary not found: %s' % sitl_path)
+        sys.exit(2)
+
+    if not args.legacy:
+        try:
+            import pytest  # noqa: F401
+        except ImportError:
+            print('pytest not installed; falling back to legacy suite '
+                  '(pip install -r Mcu/SITL/requirements-ci.txt)')
+            args.legacy = True
+
+    if args.legacy:
+        sys.exit(run_legacy(sitl_path))
+    sys.exit(run_pytest(sitl_path, rest))
 
 
 if __name__ == '__main__':

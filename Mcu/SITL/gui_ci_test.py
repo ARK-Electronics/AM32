@@ -7,8 +7,9 @@ scopes, motor view) and asserts on the telemetry it reports.
 usage: gui_ci_test.py --gui-python Mcu/SITL/venv/bin/python3
 '''
 
+from __future__ import annotations
+
 import argparse
-import glob
 import os
 import re
 import socket
@@ -18,39 +19,56 @@ import threading
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from run_ci_tests import Sitl, check, failures, INPUT_PORT, STATE_PORT
+from sitl_harness import Sitl, find_sitl_binary, free_udp_port  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-CONTROL_PORT = 57899
+failures = []
+
+
+def check(name, cond, detail):
+    status = 'PASS' if cond else 'FAIL'
+    print('%s: %s (%s)' % (status, name, detail))
+    sys.stdout.flush()
+    if not cond:
+        failures.append(name)
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--gui-python', required=True)
-    # don't hardcode the firmware version in the default binary path
-    pat = os.path.join(HERE, '..', '..', 'obj', 'AM32_AM32_SITL_CAN_*.elf')
-    hits = sorted(glob.glob(pat))
-    ap.add_argument('--sitl', default=os.path.normpath(hits[0]) if hits else None)
+    ap.add_argument('--sitl', default=None)
     args = ap.parse_args()
+
+    sitl_path = find_sitl_binary(args.sitl)
+    if not sitl_path or not os.path.exists(sitl_path):
+        print('SITL binary not found: %s' % sitl_path)
+        sys.exit(2)
 
     env = dict(os.environ)
     env['QT_QPA_PLATFORM'] = 'offscreen'
+    control_port = free_udp_port()
+    # free_udp_port returns a UDP port; TCP control port needs its own bind.
+    # Re-bind via TCP to get a free TCP port.
+    sprobe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sprobe.bind(('127.0.0.1', 0))
+    control_port = sprobe.getsockname()[1]
+    sprobe.close()
 
-    with Sitl(args.sitl, ['--can-uri', 'none', '--input-type', '1']):
+    with Sitl(sitl_path, ['--input-type', '1'], can_uri='none') as sitl:
         gui = subprocess.Popen(
             [args.gui_python, os.path.join(HERE, 'sitl_gui.py'),
-             '--control-port', str(CONTROL_PORT),
-             '--port', str(INPUT_PORT), '--state-port', str(STATE_PORT),
+             '--control-port', str(control_port),
+             '--port', str(sitl.input_port),
+             '--state-port', str(sitl.state_port),
              '--can-uri', 'mcast:7'],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env)
 
         # first launch can be slow (Qt font cache); retry the connection
-        responses = []
         s = None
         deadline = time.time() + 45
         while time.time() < deadline:
             try:
-                s = socket.create_connection(('127.0.0.1', CONTROL_PORT), timeout=5)
+                s = socket.create_connection(('127.0.0.1', control_port), timeout=5)
                 break
             except OSError:
                 if gui.poll() is not None:
@@ -63,6 +81,7 @@ def main():
             print('control port never came up')
             sys.exit(1)
         f = s.makefile('r')
+        responses = []
 
         def reader():
             for line in f:
