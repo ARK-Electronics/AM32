@@ -1,103 +1,120 @@
-# AM32-MultiRotor-ESC-firmware
-Firmware for ARM based speed controllers
-<p align="left">
-  <a href="/LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-brightgreen" alt="GitHub license" /></a>
-</p>
+# AM32 — ARK Electronics fork
 
-The AM32 firmware is designed for STM32 ARM processors to control a brushless motor (BLDC).
-The firmware is intended to be safe and fast with smooth fast startups and linear throttle. It is meant for use with multiple vehicle types and a flight controller. The firmware can also be built with support for crawlers. For crawler usage please read this wiki page [Crawler Hardware](https://github.com/AlkaMotors/AM32-MultiRotor-ESC-firmware/wiki/Crawler-Hardware-and-AM32)
+Firmware for ARM-based brushless ESC (electronic speed controllers).
 
-## Features
+This repository is a **fork of [upstream AM32](https://github.com/am32-firmware/AM32)** maintained by **[ARK Electronics](https://arkelectron.com/)**. It tracks upstream capability while carrying ARK’s product line, refactor work, and test infrastructure.
 
-AM32 has the following features:
+| | Upstream | This fork |
+|--|----------|-----------|
+| Remote | [am32-firmware/AM32](https://github.com/am32-firmware/AM32) | [ARK-Electronics/AM32](https://github.com/ARK-Electronics/AM32) |
+| Product branch | `main` | **`ark-release`** |
+| Focus | Multi-vendor ESC firmware | ARK targets + maintainability + CI |
 
-- Firmware upgradable via betaflight passthrough, single wire serial or arduino
-- Servo PWM, Dshot(300, 600) motor protocol support
-- Bi-directional Dshot
-- KISS standard ESC telemetry
-- Variable PWM frequency
-- Sinusoidal startup mode, which is designed to get larger motors up to speed
-## Build instructions
-Download and install Keil community edition. Open the Keil project for the mcu you want in the "Keil projects" folder. Install any mcu packs if prompted. 
-Select the build target from the drop down box and build project 
+For stock AM32 releases, configurators, Discord, and community support, prefer **[am32.ca](https://am32.ca)** and the [upstream project](https://github.com/am32-firmware/AM32).
 
-## Firmware Release & Configuration Tool
+---
 
-The latest release of the firmware can be found [here](https://am32.ca/downloads).
+## What this fork adds
 
-The primary configurator is the [AM32 Configurator](https://am32.ca)
-which supports web browser based configuration and firmware update.
+### Global refactor
+Large control-path split out of a monolithic `main.c` into focused modules (runtime, settings, motor control helpers, and related MCU/F051 work). The goal is safer changes, clearer ownership of hot paths, and room for instrumentation without growing one file forever.
 
-You can also use a desktop configurator which you can download from here:
+### SITL (software-in-the-loop)
+Native Linux build of the firmware against a simulated motor / bridge / battery, with DroneCAN over multicast UDP. Useful for protocol, startup, and logic tests without ESC hardware.
 
-[WINDOWS](https://drive.google.com/file/d/16kaPek9umz7fQFunzBeW4pp2LgT6_E5o/view?usp=drive_link)
-[LINUX](https://drive.google.com/file/d/1QtSKwp3RT6sncPADsPkmdasGqNIk68HH/view?usp=sharing)
+- Overview: [Mcu/SITL/README.md](Mcu/SITL/README.md)
+- CI: `.github/workflows/SITL.yml`
 
-Alternately you can use the [Online-ESC Configurator](https://esc-configurator.com/) to flash or change settings with any web browser that supports web serial.
+```bash
+make arm_sdk_install   # once, for cross toolchain (SITL itself is host gcc)
+make AM32_SITL_CAN
+obj/AM32_AM32_SITL_CAN_*.elf --node-id 10 --verbose
+```
 
+### HITL / Hardware-CI
+In-the-loop bench automation for the **ARK 4IN1** (and related F051 work): build/flash, drive the motor (Flight Stand and/or PX4 BDShot setups), read on-device performance counters over SWD, and produce metrics / pass-fail reports.
 
+- Harness: [hwci/README.md](hwci/README.md)
+- Bench setups: [hwci/docs/BENCH_SETUPS.md](hwci/docs/BENCH_SETUPS.md)
+- CI: `.github/workflows/hwci.yml`
 
-## Hardware
-AM32 currently has support for STSPIN32F0, STM32F051, STM32G071, GD32E230, AT32F415 and AT32F421.
-The CKS32F051 is not recommended due to too many random issues.
-Target compatibility List can be found [here](https://github.com/am32-firmware/AM32/blob/main/Inc/targets.h)
+---
 
+## Branch model
 
-## Installation & Bootloader
+| Branch | Role |
+|--------|------|
+| **`ark-release`** | ARK integration line — open product PRs here |
+| `main` | Mirrors / tracks upstream AM32 more closely |
+| Feature branches | Short-lived; rebase onto `ark-release` unless targeting pure upstream work |
 
-To use AM32 firmware on a blank ESC, a bootloader must first be installed using an ST-LINK, GD-LINK , CMIS-DAP or AT-LINK.  THe bootloader will be dependant on the MCU used ont he esc . Choose the bootloader that matches the MCU type and signal input pin of the ESC.
-The compatibility chart has the bootloader pinouts listed.
-Current bootloaders can be found [here](https://github.com/am32-firmware/AM32-bootloader).
+---
 
-After the bootloader has been installed the main firmware from can be installed either with the configuration tools and a Betaflight flight controller or a direct connection with a usb serial adapter modified for one wire.
+## Build (make + GCC)
 
-To update an existing AM32 bootloader an update tool can be found [here](https://github.com/am32-firmware/AM32-unlocker).
+IDE project trees (Keil / MRS) are **not** maintained in this fork. Use the Makefile and the pinned **xPack GNU Arm Embedded GCC** (see `make/tools.mk`).
 
-## Support and Developers Channel
-There are two ways you can get support or participate in improving am32.
-We have a discord server here:
+```bash
+# Install the pinned Arm toolchain into tools/<os>/
+make arm_sdk_install
 
-https://discord.gg/h7ddYMmEVV
+# List / build targets (examples)
+make targets
+make -j$(nproc) ARK_4IN1_F051
+```
 
-Etiquette: Please wait around long enough for a reply - sometimes people are out flying, asleep or at work and can't answer immediately. 
+Firmware objects land under `obj/`. MCU families supported by the build system include F051, F031, G071, E230, F415, F421, L431, G431, V203, G031, A153, and SITL — exact product names live in `Inc/targets.h`.
 
-If you wish to support the project please join the Patreon.
+Optional static analysis / size helpers: `scripts/` and `make cppcheck` / related targets.
 
-https://www.patreon.com/user?u=44228479
+---
 
+## Features (shared with upstream AM32)
 
-## Sponsors
-The AM32 project would not have made this far without help from the following sponsors:
+- Firmware upgrade via Betaflight passthrough, single-wire serial, or related tools  
+- Servo PWM and DShot (300 / 600), including bi-directional DShot  
+- KISS-style ESC telemetry  
+- Variable PWM frequency and sinusoidal startup for larger motors  
+- Multi-vehicle use with a flight controller; crawler-oriented builds exist upstream  
 
-Holmes Hobbies - https://holmeshobbies.com/ - The project would not be where it is today without the support of HH. Check out the Crawlmaster V2 for the best am32 experience!
+Upstream feature docs and crawler notes: [AM32 wiki / crawler hardware](https://github.com/AlkaMotors/AM32-MultiRotor-ESC-firmware/wiki/Crawler-Hardware-and-AM32).
 
-Repeat Robotics - https://repeat-robotics.com/ - Bringing Am32 esc's to the fighting robot community!
+---
 
-Quaternium - https://www.quaternium.com/ - Firmware development support and hardware donations
+## Configuration tools & stock firmware
 
-Airbot - Many hardware donations
+These are **upstream / community** tools; they are not ARK-specific:
 
-NeutronRC - For hardware, am32 promotion and schematics 
+- [AM32 Configurator](https://am32.ca) (web) and [downloads](https://am32.ca/downloads)  
+- [esc-configurator.com](https://esc-configurator.com/)  
+- Bootloaders: [AM32-bootloader](https://github.com/am32-firmware/AM32-bootloader)  
+- Target list: [`Inc/targets.h`](Inc/targets.h) (this tree) or [upstream targets.h](https://github.com/am32-firmware/AM32/blob/main/Inc/targets.h)
 
-Aikon - Hardware donations and schematics\
-Skystars  - For hardware and taking a chance on the first commercial am32 esc's\
-Diatone - Hardware donations\
-T-motor - Motor and Hardware donations\
-HLGRC  - Hardaware donations
+To put AM32 on a blank ESC you still need a matching MCU bootloader (ST-LINK / GD-LINK / CMSIS-DAP / AT-LINK, etc.), then flash application firmware with a configurator or one-wire serial path.
 
+---
 
-## Contributors
-A big thanks to all those who contributed time, advice and code to the AM32 project.\
-Un!t\
-Hugo Chiang (Dusking)\
-Micheal Keller (Mikeller)\
-ColinNiu\
-Jacob Walser
+## Hardware (typical for this fork)
 
-And for feedback from pilots and drivers:\
-Jye Smith\
-Markus Gritsch\
-Voodoobrew
+ARK work centers on **STM32F051** 4-in-1 ESCs and related F051 targets, while the tree still builds the broader AM32 MCU set above. Upstream also documents STSPIN32F0, G071, GD32E230, AT32F415/F421, and others — see their hardware notes and compatibility charts.
 
-(and many more)
+---
 
+## Support
+
+| Topic | Where |
+|-------|--------|
+| **ARK / this fork** | [ARK-Electronics/AM32](https://github.com/ARK-Electronics/AM32) issues and PRs on `ark-release` |
+| **Upstream AM32** | [Discord](https://discord.gg/h7ddYMmEVV), [Patreon](https://www.patreon.com/user?u=44228479), [am32.ca](https://am32.ca) |
+
+---
+
+## License
+
+GPL-3.0 — see [LICENSE](LICENSE). Same license family as upstream AM32.
+
+---
+
+## Upstream credits
+
+AM32 exists because of its authors, sponsors, and community. This fork inherits that work; see the [upstream README](https://github.com/am32-firmware/AM32/blob/main/README.md) for the full sponsor and contributor lists.
