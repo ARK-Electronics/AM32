@@ -4,6 +4,10 @@
 #
 ###############################################################
 
+# Pin the xPack GNU Arm Embedded GCC version used for local builds and CI.
+# Keep in sync with make/tools_install.mk (arm_sdk_install downloads this).
+XPACK_GCC_VER := 15.2.1-1.1
+XPACK_GCC_DIR := xpack-arm-none-eabi-gcc-$(XPACK_GCC_VER)
 
 ifeq ($(OS),Windows_NT)
 UNAME_O := $(shell uname -o 2>/dev/null)
@@ -16,7 +20,7 @@ endif
 endif
 
 ifeq ($(WIN_CMD_FLOW),1)
-ARM_SDK_PREFIX:=tools/windows/xpack-arm-none-eabi-gcc-10.3.1-2.3/bin/arm-none-eabi-
+ARM_SDK_PREFIX:=tools/windows/$(XPACK_GCC_DIR)/bin/arm-none-eabi-
 SHELL:=cmd.exe
 CP:=tools\\windows\\make\\bin\\cp
 DSEP:=\\
@@ -29,7 +33,7 @@ OSDIR:=windows
 
 else ifeq ($(OS),Windows_NT)
 # Cygwin
-ARM_SDK_PREFIX:=tools/windows/xpack-arm-none-eabi-gcc-10.3.1-2.3/bin/arm-none-eabi-
+ARM_SDK_PREFIX:=tools/windows/$(XPACK_GCC_DIR)/bin/arm-none-eabi-
 CP:=cp
 DSEP:=/
 NUL:=/dev/null
@@ -43,7 +47,7 @@ else
 # MacOS and Linux
 UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
-ARM_SDK_PREFIX:=tools/macos/xpack-arm-none-eabi-gcc-10.3.1-2.3/bin/arm-none-eabi-
+ARM_SDK_PREFIX:=tools/macos/$(XPACK_GCC_DIR)/bin/arm-none-eabi-
 CP:=cp
 DSEP:=/
 NUL:=/dev/null
@@ -54,7 +58,7 @@ FGREP:=fgrep
 OSDIR:=macos
 else
 # assume Linux
-ARM_SDK_PREFIX:=tools/linux/xpack-arm-none-eabi-gcc-10.3.1-2.3/bin/arm-none-eabi-
+ARM_SDK_PREFIX:=tools/linux/$(XPACK_GCC_DIR)/bin/arm-none-eabi-
 CP:=cp
 DSEP:=/
 NUL:=/dev/null
