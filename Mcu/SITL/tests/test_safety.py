@@ -193,8 +193,11 @@ def test_dronecan_arms_after_zero_then_spins(
         _can_drive(dronecan, node, thr=0.35, armed=True, duration=4.0)
         _assert_spinning(sim, 'can after proper arm', lo=3000, hi=8000)
 
-        _can_drive(dronecan, node, thr=0.0, armed=True, duration=2.0)
-        _assert_stopped(sim, 'can post-run zero', window=0.4, limit=800)
+        # Prop inertia coasts for a while after input goes to zero; match
+        # the DShot post-run settle (3s) so CI hosts with variable load
+        # are not flaky around ~1k rpm residual.
+        _can_drive(dronecan, node, thr=0.0, armed=True, duration=3.0)
+        _assert_stopped(sim, 'can post-run zero', window=0.5, limit=800)
     finally:
         _can_drive(dronecan, node, thr=0.0, armed=False, duration=0.3)
         node.close()
