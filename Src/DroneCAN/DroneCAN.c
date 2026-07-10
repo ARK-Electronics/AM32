@@ -10,10 +10,10 @@
 
 #include "peripherals.h"
 #include "serial_telemetry.h"
-#include <common.h>
-#include <signal.h>
-#include <version.h>
-#include <eeprom.h>
+#include "common.h"
+#include "signal.h"
+#include "version.h"
+#include "eeprom.h"
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
@@ -60,7 +60,7 @@ const struct {
     uint32_t crc2; // crc32 from end of app_signature to end of fw
     char mcu[16];
     uint32_t unused[2];
-} app_signature __attribute__((section(".app_signature"))) = {
+} app_signature AM32_FLASH_SECTION(".app_signature") = {
         .magic1 = APP_SIGNATURE_MAGIC1,
         .magic2 = APP_SIGNATURE_MAGIC2,
         .fwlen = 0,
@@ -256,6 +256,11 @@ static uint64_t micros64(void)
 {
     static uint64_t base_us;
     static uint16_t last_cnt;
+    // the static state must be updated atomically, this is called from
+    // both interrupt handlers and the main loop. Save and restore
+    // PRIMASK so a caller's critical section is not ended early
+    const uint32_t primask = __get_PRIMASK();
+    __disable_irq();
 #ifdef ARTERY
     uint16_t cnt = UTILITY_TIMER->cval;
 #else
@@ -265,7 +270,11 @@ static uint64_t micros64(void)
 	base_us += 0x10000;
     }
     last_cnt = cnt;
-    return base_us + cnt;
+    const uint64_t ret = base_us + cnt;
+    if (!primask) {
+        __enable_irq();
+    }
+    return ret;
 }
 
 /*
@@ -285,6 +294,16 @@ static const uint8_t default_settings[] = {
     0x20, 0x00, 0x00, 0x00, 0x01, 0x01, 0x01, 0x1a, 0x18, 0x64, 0x37, 0x0e, 0x00, 0x00, 0x05, 0x00,
     0x80, 0x80, 0x80, 0x32, 0x00, 0x32, 0x00, 0x00, 0x0f, 0x0a, 0x0a, 0x8d, 0x66, 0x06, 0x01, 0x00
 };
+
+#ifdef MCU_SITL
+// let the SITL eeprom emulation seed a missing eeprom file with defaults
+const uint8_t* DroneCAN_default_settings(unsigned* len);
+const uint8_t* DroneCAN_default_settings(unsigned* len)
+{
+    *len = sizeof(default_settings);
+    return default_settings;
+}
+#endif
 
 static const uint8_t advance_level_v3_remap[] = {
   0x00, 0x08, 0x10, 0x16 // old values 0-3 map to new values 0,8,16,22 
@@ -427,7 +446,7 @@ static void handle_param_GetSet(CanardInstance* ins, CanardRxTransfer* transfer)
             }
             if ((uint8_t *)p->ptr == &eepromBuffer.advance_level) {
               // automatically remap old values
-              if (pkt.value.integer_value < sizeof(advance_level_v3_remap)) {
+              if ((uint64_t)pkt.value.integer_value < sizeof(advance_level_v3_remap)) {
                 pkt.value.integer_value = advance_level_v3_remap[pkt.value.integer_value];
               }
               // adjust for advance level offset for eeprom v3
@@ -1187,6 +1206,9 @@ static void DroneCAN_Startup(void)
         NVIC_DisableIRQ(DMA1_Channel6_IRQn);
         NVIC_DisableIRQ(EXINT15_10_IRQn);
         EXINT->inten &= ~EXINT_LINE_15;
+#elif defined(MCU_SITL)
+        NVIC_DisableIRQ(SITL_IRQ_DMA);
+        NVIC_DisableIRQ(SITL_IRQ_EXTI15);
 #else
         #error "unsupported MCU"
 #endif
@@ -1248,8 +1270,14 @@ void DroneCAN_update()
         canstats.last_raw_command_us = 0;
         set_input(0);
     }
-    if (ts - canstats.last_raw_command_us > TARGET_PERIOD_US) {
-        // ensure at least 1kHz signal is seen by main code
+    if (canstats.last_raw_command_us != 0 && ts - canstats.last_raw_command_us > TARGET_PERIOD_US) {
+        /*
+          ensure at least 1kHz signal is seen by main code. Only once we
+          have received a RawCommand: set_input() overrides the
+          dshot/servo input state, so injecting it before CAN is
+          actually the input source would kill PWM/DShot input on any
+          node with a CAN node ID
+         */
         set_input(last_can_input);
         canstats.last_raw_command_us = ts;
     }

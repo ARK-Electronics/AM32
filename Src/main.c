@@ -227,6 +227,7 @@ an settings option)
 #include "phaseouts.h"
 #include "serial_telemetry.h"
 #include "kiss_telemetry.h"
+#include "hwci_perf.h"
 #include "signal.h"
 #include "sounds.h"
 #include "targets.h"
@@ -248,7 +249,7 @@ an settings option)
 #include "DroneCAN/DroneCAN.h"
 #endif
 
-#include <version.h>
+#include "version.h"
 
 void zcfoundroutine(void);
 
@@ -344,7 +345,7 @@ uint16_t low_cell_volt_cutoff = 330; // 3.3volts per cell
 
 //=========================== END EEPROM Defaults ===========================
 
-const char filename[30] __attribute__((section(".file_name"))) = FILE_NAME;
+const char filename[30] AM32_FLASH_SECTION(".file_name") = FILE_NAME;
 _Static_assert(sizeof(FIRMWARE_NAME) <=13,"Firmware name too long");   // max 12 character firmware name plus NULL 
 
 // move these to targets folder or peripherals for each mcu
@@ -783,8 +784,19 @@ void loadEEpromSettings()
         if (motor_kv < 300) {
             low_rpm_throttle_limit = 0;
         }
-        low_rpm_level = motor_kv / 100 / (32 / eepromBuffer.motor_poles);
-        high_rpm_level = motor_kv / 12 / (32 / eepromBuffer.motor_poles);				
+        // guard divisions for an erased eeprom (motor_poles 0 or 0xff),
+        // ARM hardware division returns 0 but it is UB in C
+        uint8_t rpm_level_div = 0;
+        if (eepromBuffer.motor_poles != 0) {
+            rpm_level_div = 32 / eepromBuffer.motor_poles;
+        }
+        if (rpm_level_div != 0) {
+            low_rpm_level = motor_kv / 100 / rpm_level_div;
+            high_rpm_level = motor_kv / 12 / rpm_level_div;
+        } else {
+            low_rpm_level = 0;
+            high_rpm_level = 0;
+        }
     }
     reverse_speed_threshold = map(motor_kv, 300, 3000, 1000, 500);
     if (eepromBuffer.bi_direction){
@@ -915,6 +927,7 @@ void PeriodElapsedCallback()
     if (zero_crosses < 10000) {
         zero_crosses++;
     }
+    HWCI_PERF_ZC();
 }
 
 /*
@@ -1334,6 +1347,7 @@ if (!stepper_sine && armed) {
 
 void tenKhzRoutine()
 { // 20khz as of 2.00 to be renamed
+    HWCI_PERF_CTRL_ENTER();
     duty_cycle = duty_cycle_setpoint;
     tenkhzcounter++;
     ledcounter++;
@@ -1527,6 +1541,7 @@ void tenKhzRoutine()
     signaltimeout++;
 
 #endif
+    HWCI_PERF_CTRL_EXIT();
 }
 
 void processDshot()
@@ -1705,6 +1720,10 @@ void runBrushedLoop()
  */
 static void checkDeviceInfo(void)
 {
+#ifdef MCU_SITL
+    // no bootloader device info page in SITL
+    return;
+#endif
 #ifdef NXP
     uint32_t pflashBlockBase  = 0U;
     uint32_t pflashTotalSize  = 0U;
@@ -1893,6 +1912,7 @@ int main(void)
 #endif
 
     while (1) {
+        HWCI_PERF_MAIN_LOOP();
 e_com_time = ((commutation_intervals[0] + commutation_intervals[1] + commutation_intervals[2] + commutation_intervals[3] + commutation_intervals[4] + commutation_intervals[5]) + 4) >> 1; // COMMUTATION INTERVAL IS 0.5US INCREMENTS 
 
 #if defined(FIXED_DUTY_MODE) || defined(FIXED_SPEED_MODE)
