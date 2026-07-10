@@ -95,8 +95,15 @@ per-motor.
 * **Throttle**: Flight Stand ESC output → channel-1 signal pin (PWM or DShot).
   If your stand can't emit the protocol you want, use an external DShot
   generator (`throttle_backend: external`).
+* **Bidirectional DShot (BDShot)**: the Flight Stand ESC output is
+  *unidirectional*. For BDShot eRPM replies, drive the signal from a host that
+  implements BDShot (e.g. **ARK FPV + PX4** with Actuator protocol
+  BDShot300/600). Firmware `HWCI_PERF` v6 exposes `dshot_telem_mode`,
+  RX good/bad, and TX frame counters over SWD for correlation with PX4
+  `esc_status`. See [docs/bdshot_baseline.md](docs/bdshot_baseline.md).
 * **ESC telemetry**: channel-1 telemetry pad → USB-serial adapter (115200 8N1)
-  → host. The ARK target already has `USE_SERIAL_TELEMETRY`.
+  → host. The ARK target already has `USE_SERIAL_TELEMETRY`. (BDShot eRPM does
+  not use this wire.)
 * **Power**: bench supply or battery within the ARK 4IN1's 3–8S range; common
   ground between supply, ESC, stand, and host.
 * **Safety**: set conservative cutoffs in the profile `safety:` block (current,

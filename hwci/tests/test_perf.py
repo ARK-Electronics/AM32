@@ -11,7 +11,8 @@ def test_layout_sizes():
     assert perf.SIZE_BY_VERSION[2] == 80
     assert perf.SIZE_BY_VERSION[3] == 84
     assert perf.SIZE_BY_VERSION[4] == 148
-    assert perf.SIZE == perf.SIZE_BY_VERSION[5] == 152
+    assert perf.SIZE_BY_VERSION[5] == 152
+    assert perf.SIZE == perf.SIZE_BY_VERSION[6] == 168
 
 
 def test_host_cmd_offset_matches_layout():
@@ -147,9 +148,31 @@ def test_v5_roundtrip_esc_state():
         "esc_illegal_edge_count": 3,
         "armed": 1,
         "running": 1,
-    })
+    }, version=5)
     assert len(blob) == 152
     s = perf.decode(blob)
     assert s.raw["zc_phase_hist"] == hist
     assert s.raw["esc_state"] == 5
     assert s.raw["esc_illegal_edge_count"] == 3
+    assert "dshot_rx_good" not in s.raw
+
+
+def test_v6_roundtrip_bdshot_fields():
+    blob = perf.encode({
+        "esc_state": 5,
+        "dshot_rx_good": 120000,
+        "dshot_rx_bad": 3,
+        "dshot_tx_frames": 119900,
+        "dshot_last_com_us": 420,
+        "dshot_telem_mode": 1,
+        "dshot_edt_mode": 1,
+    })
+    assert len(blob) == 168
+    r = perf.decode(blob).raw
+    assert r["dshot_rx_good"] == 120000
+    assert r["dshot_rx_bad"] == 3
+    assert r["dshot_tx_frames"] == 119900
+    assert r["dshot_last_com_us"] == 420
+    assert r["dshot_telem_mode"] == 1
+    assert r["dshot_edt_mode"] == 1
+    assert r["esc_state"] == 5

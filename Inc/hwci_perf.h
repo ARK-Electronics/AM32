@@ -36,7 +36,9 @@
 #endif
 
 #include <stdint.h>
-#include "esc_state.h" /* esc_state, esc_illegal_edge_count for snapshot */
+/* Do not include esc_state.h here: host-side probe compiles (hwci tests)
+ * only need the layout. MAIN_LOOP expands where esc_state globals are in
+ * scope (main / runtime). */
 
 /* ASCII "HWC1" in little-endian memory order - lets the host locate/validate
  * the struct either by ELF symbol or by scanning RAM for the magic. */
@@ -45,8 +47,9 @@
  * v3: appended zc_confirm_reject after the v2 jitter block (host_cmd stays
  *     frozen at offset 60).
  * v4: appended the 32-bin PWM-phase histogram of accepted zero-crossings.
- * v5: appended esc_state + illegal edge counter (drive state machine). */
-#define HWCI_PERF_VERSION 5u
+ * v5: appended esc_state + illegal edge counter (drive state machine).
+ * v6: appended bidirectional DShot (BDShot) RX/TX health counters. */
+#define HWCI_PERF_VERSION 6u
 
 /* PWM-phase histogram bins (power of two: the binning multiply-shift and the
  * host's modular math both assume it). */
@@ -137,7 +140,18 @@ typedef struct hwci_perf_s {
     uint8_t  esc_state;                /* off 148: esc_state_t enum value  */
     uint8_t  _pad_esc;                 /* off 149: alignment               */
     uint16_t esc_illegal_edge_count;   /* off 150: named-transition faults */
-} hwci_perf_t;                         /* total size: 152 bytes             */
+
+    /* --- v6: bidirectional DShot (BDShot) health ---
+     * Separates "FC never enabled BDShot" from "ESC RX CRC death" from
+     * "ESC TX'd eRPM but host decode failed". Monotonic u32 counters are
+     * host-diffed like loop_iters. Updated from dshot.c under HWCI_PERF. */
+    uint32_t dshot_rx_good;            /* off 152: good-CRC frames          */
+    uint32_t dshot_rx_bad;             /* off 156: bad-CRC frames           */
+    uint32_t dshot_tx_frames;          /* off 160: BDShot reply packages    */
+    uint16_t dshot_last_com_us;        /* off 164: last packed com period   */
+    uint8_t  dshot_telem_mode;         /* off 166: 0=uni DShot, 1=BDShot    */
+    uint8_t  dshot_edt_mode;           /* off 167: EDT enabled              */
+} hwci_perf_t;                         /* total size: 168 bytes             */
 
 extern volatile hwci_perf_t hwci_perf;
 
