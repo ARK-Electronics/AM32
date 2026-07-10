@@ -37,6 +37,9 @@ COLUMNS = [
     "perf_bemf_timeout", "perf_e_rpm",
     # ESC input/arming state (proves the ESC decoded the throttle protocol)
     "perf_input", "perf_armed", "perf_running",
+    # bidirectional DShot health (struct v3+; blank on older firmware)
+    "perf_dshot_rx_good", "perf_dshot_rx_bad", "perf_dshot_tx_frames",
+    "perf_dshot_last_com_us", "perf_dshot_telem_mode", "perf_dshot_edt_mode",
 ]
 
 
@@ -96,6 +99,15 @@ def make_row(t: float, segment: str, throttle_cmd: float,
                 perf_zc_jitter_sum=r["zc_jitter_sum"],
                 perf_zc_interval_sum=r["zc_interval_sum"],
                 perf_zc_jitter_max=r["zc_jitter_max"],
+            )
+        if "dshot_rx_good" in r:  # struct v3+
+            row.update(
+                perf_dshot_rx_good=r["dshot_rx_good"],
+                perf_dshot_rx_bad=r["dshot_rx_bad"],
+                perf_dshot_tx_frames=r["dshot_tx_frames"],
+                perf_dshot_last_com_us=r["dshot_last_com_us"],
+                perf_dshot_telem_mode=r["dshot_telem_mode"],
+                perf_dshot_edt_mode=r["dshot_edt_mode"],
             )
     return row
 

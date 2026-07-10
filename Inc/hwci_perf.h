@@ -40,8 +40,9 @@
 /* ASCII "HWC1" in little-endian memory order - lets the host locate/validate
  * the struct either by ELF symbol or by scanning RAM for the magic. */
 #define HWCI_PERF_MAGIC   0x31435748u
-/* v2: appended the zero-cross jitter block (zc_*) after host_cmd. */
-#define HWCI_PERF_VERSION 2u
+/* v2: appended the zero-cross jitter block (zc_*) after host_cmd.
+ * v3: appended bidirectional DShot (BDShot) RX/TX health counters. */
+#define HWCI_PERF_VERSION 3u
 
 /* Commands the host may write to hwci_perf.host_cmd (cleared by firmware). */
 #define HWCI_CMD_NONE          0u
@@ -104,7 +105,22 @@ typedef struct hwci_perf_s {
     uint32_t zc_interval_sum;          /* off 72 : sum raw interval, ticks  */
     uint16_t zc_jitter_max;            /* off 76 : worst single deviation   */
     uint16_t _pad2;                    /* off 78 : keep sizeof 4-aligned    */
-} hwci_perf_t;                         /* total size: 80 bytes              */
+
+    /* --- v3: bidirectional DShot (BDShot) health ---
+     * Separates "FC never enabled BDShot" from "ESC RX CRC death" from
+     * "ESC TX'd eRPM but host decode failed". Monotonic u32 counters are
+     * host-diffed like loop_iters (wrap-safe). telem_mode is set when the
+     * idle-high auto-detect latches dshot_telemetry; edt_mode tracks the
+     * EDT enable command path. last_com_us is the period packed into the
+     * most recent reply (0.5 us units of e_com_time, or 65535 when stopped).
+     * Updated from dshot.c under HWCI_PERF only (zero cost when off). */
+    uint32_t dshot_rx_good;            /* off 80 : good-CRC frames          */
+    uint32_t dshot_rx_bad;             /* off 84 : bad-CRC frames           */
+    uint32_t dshot_tx_frames;          /* off 88 : BDShot reply packages    */
+    uint16_t dshot_last_com_us;        /* off 92 : last packed com period   */
+    uint8_t  dshot_telem_mode;         /* off 94 : 0=uni DShot, 1=BDShot    */
+    uint8_t  dshot_edt_mode;           /* off 95 : EDT enabled              */
+} hwci_perf_t;                         /* total size: 96 bytes              */
 
 extern volatile hwci_perf_t hwci_perf;
 

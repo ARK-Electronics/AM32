@@ -67,6 +67,10 @@ class RigSimulator:
         self.zc_jitter_sum = 0
         self.zc_interval_sum = 0
         self.zc_jitter_max = 0
+        # BDShot counters (perf struct v3) — phenomenological, for harness tests
+        self.dshot_rx_good = 0
+        self.dshot_rx_bad = 0
+        self.dshot_tx_frames = 0
 
     # --- model -------------------------------------------------------
     def _rpm_max(self) -> float:
@@ -119,6 +123,11 @@ class RigSimulator:
         idle_hz = 120000.0 * (1.0 - 0.25 * throttle)
         self.loop_iters += int(idle_hz * dt)
         self.update_count += int(idle_hz * dt)
+        # BDShot: ~500 Hz command stream; RX good + TX reply when armed/running
+        n_ds = max(1, int(500.0 * dt))
+        self.dshot_rx_good = (self.dshot_rx_good + n_ds) & 0xFFFFFFFF
+        if self.rpm > 100:
+            self.dshot_tx_frames = (self.dshot_tx_frames + n_ds) & 0xFFFFFFFF
         # current draw heats the ESC slowly
         cur = self.current
         self.temp_c += (p.ambient_temp_c + 0.9 * cur - self.temp_c) * min(1.0, dt / 5.0)
@@ -228,4 +237,10 @@ class RigSimulator:
             "zc_jitter_sum": self.zc_jitter_sum,
             "zc_interval_sum": self.zc_interval_sum,
             "zc_jitter_max": self.zc_jitter_max,
+            "dshot_rx_good": self.dshot_rx_good,
+            "dshot_rx_bad": self.dshot_rx_bad,
+            "dshot_tx_frames": self.dshot_tx_frames,
+            "dshot_last_com_us": min(0xFFFF, comm_interval // 2) if self.rpm > 100 else 65535,
+            "dshot_telem_mode": 1,
+            "dshot_edt_mode": 0,
         })

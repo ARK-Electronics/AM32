@@ -8,7 +8,8 @@ from hwci import perf
 
 def test_layout_sizes():
     assert perf.SIZE_BY_VERSION[1] == 64
-    assert perf.SIZE == perf.SIZE_BY_VERSION[2] == 80
+    assert perf.SIZE_BY_VERSION[2] == 80
+    assert perf.SIZE == perf.SIZE_BY_VERSION[3] == 96
 
 
 def test_host_cmd_offset_matches_layout():
@@ -58,6 +59,24 @@ def test_roundtrip_zc_jitter_fields():
     assert r["zc_jitter_max"] == 41
 
 
+def test_roundtrip_bdshot_fields():
+    blob = perf.encode({
+        "dshot_rx_good": 120000,
+        "dshot_rx_bad": 3,
+        "dshot_tx_frames": 119900,
+        "dshot_last_com_us": 420,
+        "dshot_telem_mode": 1,
+        "dshot_edt_mode": 1,
+    })
+    r = perf.decode(blob).raw
+    assert r["dshot_rx_good"] == 120000
+    assert r["dshot_rx_bad"] == 3
+    assert r["dshot_tx_frames"] == 119900
+    assert r["dshot_last_com_us"] == 420
+    assert r["dshot_telem_mode"] == 1
+    assert r["dshot_edt_mode"] == 1
+
+
 def test_v1_roundtrip_has_no_zc_keys():
     # Old firmware (A side of an A/B session) reports a 64-byte v1 struct;
     # it must decode cleanly and simply not carry the jitter fields.
@@ -67,12 +86,22 @@ def test_v1_roundtrip_has_no_zc_keys():
     assert s.ctrl_exec_us_max == 18
     assert s.loop_iters == 42
     assert "zc_count" not in s.raw
+    assert "dshot_rx_good" not in s.raw
+
+
+def test_v2_roundtrip_has_no_bdshot_keys():
+    blob = perf.encode({"loop_iters": 9, "zc_count": 11}, version=2)
+    assert len(blob) == perf.SIZE_BY_VERSION[2]
+    s = perf.decode(blob)
+    assert s.loop_iters == 9
+    assert s.raw["zc_count"] == 11
+    assert "dshot_rx_good" not in s.raw
 
 
 def test_v1_decodes_from_oversized_read():
-    # PerfReader sizes its read from the ELF symbol, but a v2-sized buffer
+    # PerfReader sizes its read from the ELF symbol, but a v3-sized buffer
     # holding a v1 struct (plus trailing junk) must still decode as v1.
-    blob = perf.encode({"loop_iters": 7}, version=1) + b"\xa5" * 16
+    blob = perf.encode({"loop_iters": 7}, version=1) + b"\xa5" * 32
     s = perf.decode(blob)
     assert s.loop_iters == 7
     assert "zc_count" not in s.raw
