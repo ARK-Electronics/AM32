@@ -75,6 +75,7 @@ void sitl_nvic_disable_irq(int irq);
 void sitl_irq_pend(int irq);
 void sitl_primask_set(void); // __disable_irq
 void sitl_primask_clear(void); // __enable_irq
+uint32_t sitl_primask_get(void); // __get_PRIMASK
 void sitl_system_reset(void) __attribute__((noreturn));
 
 // watchdog

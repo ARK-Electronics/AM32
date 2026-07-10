@@ -34,3 +34,8 @@ static inline void __enable_irq(void)
 {
     sitl_primask_clear();
 }
+
+static inline uint32_t __get_PRIMASK(void)
+{
+    return sitl_primask_get();
+}

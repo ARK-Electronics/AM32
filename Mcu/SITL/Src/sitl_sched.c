@@ -165,6 +165,11 @@ void sitl_primask_set(void)
     __atomic_store_n(&primask, 1, __ATOMIC_SEQ_CST);
 }
 
+uint32_t sitl_primask_get(void)
+{
+    return (uint32_t)__atomic_load_n(&primask, __ATOMIC_SEQ_CST);
+}
+
 void sitl_primask_clear(void)
 {
     if (!sitl_in_sim_thread()) {
@@ -178,7 +183,10 @@ void sitl_primask_clear(void)
 
 /*
   firmware thread suspension. SIGUSR1 parks the firmware thread on
-  resume_sem; sem_post/sem_wait are async-signal-safe
+  resume_sem. Blocking in a handler is not formally async-signal-safe,
+  but these are bare syscall wrappers taking no library locks; the one
+  real hazard is parking this thread inside a locked stdio call while
+  the sim thread also prints, so diagnostics prints are kept rare
  */
 static void sigusr1_handler(int sig)
 {

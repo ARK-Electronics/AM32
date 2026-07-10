@@ -257,7 +257,9 @@ static uint64_t micros64(void)
     static uint64_t base_us;
     static uint16_t last_cnt;
     // the static state must be updated atomically, this is called from
-    // both interrupt handlers and the main loop
+    // both interrupt handlers and the main loop. Save and restore
+    // PRIMASK so a caller's critical section is not ended early
+    const uint32_t primask = __get_PRIMASK();
     __disable_irq();
 #ifdef ARTERY
     uint16_t cnt = UTILITY_TIMER->cval;
@@ -269,7 +271,9 @@ static uint64_t micros64(void)
     }
     last_cnt = cnt;
     const uint64_t ret = base_us + cnt;
-    __enable_irq();
+    if (!primask) {
+        __enable_irq();
+    }
     return ret;
 }
 
