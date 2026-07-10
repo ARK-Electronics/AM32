@@ -4,11 +4,32 @@
 
   The electrical model follows the approach of open-bldc-csim
   (https://github.com/open-bldc/open-bldc-csim, GPLv3+, Piotr
-  Esden-Tempski): per phase currents with a solved star point voltage so
-  the floating phase terminal voltage (and therefore the BEMF zero
-  crossing seen by the comparator) is physical. Extended with fet Rds_on,
-  body diode clamping of a floating phase that still carries current, and
-  battery internal resistance.
+  Esden-Tempski), which in turn implements Kang & Yoo, "Switching
+  Pattern-Independent Simulation Model for Brushless DC Motors", Journal
+  of Power Electronics 11-2, 2011:
+  https://jpels.org/digital-library/manuscript/file/17706/8_JPE-10238.pdf
+
+  As in the paper, each step finds the conducting phases from the switch
+  and diode states, computes the motor neutral as the average of (v - e)
+  over the conducting phases (paper eq 10) and integrates
+  v = R*i + (L-M)*di/dt + e + v_m for each of them (paper eq 1), so the
+  floating phase terminal voltage (and therefore the BEMF zero crossing
+  seen by the comparator) is physical for any switching pattern.
+
+  Differences from the paper:
+   - gate states come from the emulated TIM1 compare outputs and the AM32
+     phase modes rather than switching functions, which adds dead time
+     windows with body diode conduction
+   - fets have Rds_on, and the diode Vf appears in the clamped terminal
+     voltage, not only in the diode on/off conditions
+   - the battery has internal resistance, so Vdc sags with load instead
+     of being stiff
+   - the load model adds a k*omega^2 propeller torque and static friction
+     to the paper's viscous damping
+   - torque uses the flux linkage form kt*sum(shape*i) (the second form
+     of paper eq 2), which is valid at omega = 0
+   - integration is forward euler at 500ns steps rather than ode45 at
+     2.5us
 
   Conventions:
    - phase currents are positive INTO the motor terminal
@@ -231,9 +252,10 @@ void motor_step(uint64_t now_ns, uint32_t dt_ns)
         }
     }
 
-    // terminal voltages. A driven phase is tied to the rail through the
-    // fet; an undriven phase carrying current is clamped by a body diode;
-    // an undriven phase without current floats at e + v_star
+    // terminal voltages (paper eq 9); conducting[] is the excited set of
+    // paper eq 8. A driven phase is tied to the rail through the fet; an
+    // undriven phase carrying current is clamped by a body diode; an
+    // undriven phase without current floats at e + v_star
     double v[3];
     double r_eff[3];
     bool conducting[3];
@@ -248,7 +270,7 @@ void motor_step(uint64_t now_ns, uint32_t dt_ns)
             r_eff[p] += rds;
             conducting[p] = true;
         } else if (fabs(m.i[p]) > i_eps) {
-            // body diode freewheeling
+            // body diode freewheeling (paper eq 7, current condition)
             v[p] = m.i[p] < 0 ? vbus + vf : -vf;
             conducting[p] = true;
         } else {
@@ -258,8 +280,9 @@ void motor_step(uint64_t now_ns, uint32_t dt_ns)
         }
     }
 
-    // star point voltage from the conducting phases (sum of currents is
-    // zero and impedances are equal)
+    // star point voltage from the conducting phases (paper eq 10; sum of
+    // currents is zero and impedances are equal). With nothing conducting
+    // the network floats; centre it on the bus as a symmetric bridge does
     double v_star = 0;
     int n_cond = 0;
     for (int p = 0; p < 3; p++) {
@@ -268,18 +291,45 @@ void motor_step(uint64_t now_ns, uint32_t dt_ns)
             n_cond++;
         }
     }
-    if (n_cond > 0) {
-        v_star /= n_cond;
-    }
-    // a single conducting phase cannot drive current into the star point
-    if (n_cond == 1) {
+    v_star = n_cond > 0 ? v_star / n_cond : 0.5 * vbus;
+
+    // paper eq 7 second condition / fig 2(e): a body diode also turns on
+    // when the floating terminal voltage e + v_m would exceed the rails,
+    // even with no phase current. This clamps the floating phase at high
+    // BEMF and lets a windmilling motor rectify into the battery. Each
+    // new clamp moves the star point, so iterate
+    for (int pass = 0; pass < 3; pass++) {
+        bool changed = false;
         for (int p = 0; p < 3; p++) {
-            if (conducting[p] && !hi[p] && !lo[p]) {
-                // lone diode phase: current decays through the diode
+            if (conducting[p]) {
+                continue;
+            }
+            const double vt = e[p] + v_star;
+            if (vt > vbus + vf) {
+                v[p] = vbus + vf;
+            } else if (vt < -vf) {
+                v[p] = -vf;
+            } else {
+                continue;
+            }
+            conducting[p] = true;
+            changed = true;
+        }
+        if (!changed) {
+            break;
+        }
+        v_star = 0;
+        n_cond = 0;
+        for (int p = 0; p < 3; p++) {
+            if (conducting[p]) {
+                v_star += v[p] - e[p];
+                n_cond++;
             }
         }
+        v_star /= n_cond;
     }
 
+    // an open phase floats at e + v_m (paper eq 9)
     for (int p = 0; p < 3; p++) {
         if (!conducting[p]) {
             v[p] = e[p] + v_star;
@@ -290,7 +340,7 @@ void motor_step(uint64_t now_ns, uint32_t dt_ns)
         m.v_term[p] = v[p];
     }
 
-    // phase current derivatives, semi-implicit euler
+    // phase current derivatives (paper eq 1), forward euler
     for (int p = 0; p < 3; p++) {
         if (!conducting[p]) {
             continue;
@@ -320,13 +370,14 @@ void motor_step(uint64_t now_ns, uint32_t dt_ns)
         }
     }
 
-    // electromagnetic torque: tau = ke * sum(shape_p * i_p)
+    // electromagnetic torque: tau = ke * sum(shape_p * i_p) (paper eq 2)
     double tau = 0;
     for (int p = 0; p < 3; p++) {
         tau += m.ke * shape[p] * m.i[p];
     }
 
-    // load torques
+    // load torques and motion (paper eq 3, plus k*omega^2 propeller
+    // load and static friction)
     const double w = m.omega;
     double tau_load = sitl_cfg.motor.damping * w + sitl_cfg.motor.load_k_omega2 * w * fabs(w);
     double tau_net = tau - tau_load;
