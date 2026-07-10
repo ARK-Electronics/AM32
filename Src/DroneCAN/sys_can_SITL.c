@@ -66,6 +66,7 @@ static uint16_t crc16_CCITT(const uint8_t* buf, uint32_t len)
 void sys_can_init(void)
 {
     const char* name = sitl_cfg.can_uri;
+    fprintf(stderr, "SITL: CAN init %s\n", name);
     if (strcmp(name, "none") == 0) {
         // no CAN bus: the node stays in DNA allocation forever, so
         // DroneCAN never injects throttle. Used for pure PWM/DShot tests
