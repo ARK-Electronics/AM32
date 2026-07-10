@@ -1,0 +1,39 @@
+# =============================================================================
+# SETUP B — ARK FPV BDShot host (NO Flight Stand throttle on the signal wire)
+# =============================================================================
+# Who drives ESC signal:  ARK FPV (PX4 BDShot300/600 + EDT) — NOT this harness
+# Who measures eRPM:      PX4 esc_status (scripts/px4_*.py)
+# Who reads MCU perf:     optional ST-Link + OpenOCD (hwci_perf dshot_* v6)
+#
+# Wire ESC signal ONLY to the FPV motor pad. Disconnect Flight Stand ESC out.
+# Do NOT run noprop_smoke / efficiency profiles with this rig expecting the
+# stand to spin the motor — throttle_backend is "none".
+#
+# Motor command examples:
+#   ./scripts/px4_motor_stream.py --port /dev/ttyACM2 --steps 0.12:5,0.3:6
+#   ./scripts/px4_bdshot_capture.py --port /dev/ttyACM2 --duration 40
+# See docs/BENCH_SETUPS.md and docs/setup_px4_bdshot.md.
+# =============================================================================
+
+target: ARK_4IN1_F051
+
+# Flash + SWD instrumentation while PX4 owns the signal pin.
+debugger_backend: openocd
+openocd_bin: openocd
+
+# KISS serial is optional; PX4 may already consume telem on its own UART.
+telem_backend: none
+
+# Critical: harness does not drive throttle (PX4 does).
+throttle_backend: none
+
+# Stand sensors optional. Default none so a pure FPV+battery bench works.
+# Set stand_backend: grpc only if you want optical RPM/thrust while the
+# signal wire is still on the FPV (stand ESC output must stay disconnected).
+stand_backend: none
+# stand_host: 192.168.7.20
+# stand_port: 50051
+
+motor_name: "JS Technology 2306 1800KV"
+pole_pairs: 7
+prop: "none (free-run / noprop BDShot)"

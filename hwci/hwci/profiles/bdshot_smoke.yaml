@@ -1,12 +1,15 @@
+# SETUP B only — ARK FPV / BDShot owns the ESC signal pin.
+# This profile is for optional SWD sampling while PX4 drives the motor
+# (throttle_backend: none). It does NOT command the Flight Stand ESC out.
+# For SETUP A free-run use noprop_smoke* with rig.flightstand / rig.yaml.
+# See docs/BENCH_SETUPS.md.
 name: bdshot_smoke
 description: >
-  No-prop free-run smoke intended for bidirectional DShot (BDShot) baseline
-  capture on main_instrumented. Gentle holds through 20/50/80 so SWD can
-  sample dshot_telem_mode, RX good/bad, and TX frame counters while a BDShot
-  host (e.g. ARK FPV + PX4) drives the signal line. Flight Stand throttle is
-  unidirectional — use this profile only when throttle_backend can emit
-  BDShot (external generator or PX4 host); with stand DShot you will still
-  get uni-directional counters (telem_mode stays 0). ~35 s.
+  SETUP B (PX4 BDShot): gentle free-run shape for optional SWD logging while
+  ARK FPV drives BDShot. Harness throttle must be none — motor motion comes
+  from scripts/px4_motor_stream.py (or QGC), not this profile's throttle_cmd.
+  Do not use with Flight Stand throttle (SETUP A). ~35 s if used as a
+  timing template only.
 sample_rate_hz: 100
 arm_settle_s: 3.0
 pole_pairs: 7
@@ -15,7 +18,6 @@ demag_commutation_spike: 3.0
 steady_tail_fraction: 0.5
 
 safety:
-  # No-prop free-run; host current is a backstop, not a tight limit.
   max_current_a: 50.0
   max_motor_temp_c: 90.0
   max_rpm: 55000

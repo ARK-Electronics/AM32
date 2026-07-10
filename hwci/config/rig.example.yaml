@@ -30,7 +30,9 @@ telem_port: /dev/esc-telem     # udev symlink recommended (see scripts/99-hwci.r
 telem_baud: 115200
 
 # --- throttle source (what drives the ESC signal wire) ---
-throttle_backend: flightstand  # flightstand | external
+# SETUP A: flightstand (or external serial bridge)
+# SETUP B: none  — ARK FPV / PX4 owns the pin (see docs/BENCH_SETUPS.md)
+throttle_backend: flightstand  # flightstand | external | none
 # For an external DShot/PWM generator instead:
 # throttle_backend: external
 # throttle_port: /dev/esc-throttle

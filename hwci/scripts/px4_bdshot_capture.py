@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
-"""Capture PX4 ESC telemetry over USB MAVLink for AM32 BDShot baseline.
+"""SETUP B only: capture PX4 ESC_STATUS over USB (BDShot eRPM / telem).
 
-Intended setup (main_instrumented + ARK FPV, PX4 1.17):
+Not for SETUP A (Flight Stand). See docs/BENCH_SETUPS.md.
+
+Intended setup (ARK FPV + PX4 BDShot):
   * ARK FPV USB → host (/dev/ttyACM*)
   * Actuator output = BDShot300/600 with EDT (if available)
   * Optional: KISS/serial ESC telem on a UART (publishes into same esc_status)
