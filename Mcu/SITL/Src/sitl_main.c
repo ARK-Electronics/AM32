@@ -5,6 +5,7 @@
  */
 
 #include <fcntl.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/file.h>
@@ -73,6 +74,11 @@ static void lock_instance(void)
 
 int main(int argc, char** argv)
 {
+    // Connected UDP send() can raise SIGPIPE on macOS/BSD when multicast
+    // is unavailable (e.g. GitHub Actions runners). Ignore it so the
+    // caller gets EPIPE/ECONNREFUSED instead of a silent death.
+    signal(SIGPIPE, SIG_IGN);
+
     sitl_saved_argv = argv;
     sitl_config_init(argc, argv);
     lock_instance();

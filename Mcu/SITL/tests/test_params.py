@@ -66,18 +66,25 @@ def _set_param(node, target, name, value, attempts=5):
     return None
 
 
-def test_param_get_defaults(sitl_factory, state_stream, mcast_uri):
-    sitl = sitl_factory(
+def _require_mcast_node(sitl, sim, mcast_uri, our_id=110):
+    if not wait_for_state(sim, timeout=5.0):
+        pytest.skip('multicast/state unavailable\n' + sitl.log_tail())
+    node, found = _wait_for_node(mcast_uri, our_id=our_id)
+    if 10 not in found:
+        node.close()
+        pytest.skip('ESC node 10 not seen on %s (mcast likely broken)\n%s'
+                    % (mcast_uri, sitl.log_tail()))
+    return node, found
+
+
+def test_param_get_defaults(sitl_can_factory, state_stream, mcast_uri):
+    sitl = sitl_can_factory(
         extra_args=['--node-id', '10'],
         can_uri=mcast_uri,
         wait_s=1.0)
     sim = state_stream(sitl)
-    if not wait_for_state(sim, timeout=5.0):
-        pytest.skip('multicast unavailable\n' + sitl.log_tail())
-
-    node, found = _wait_for_node(mcast_uri)
+    node, found = _require_mcast_node(sitl, sim, mcast_uri)
     try:
-        assert 10 in found, 'ESC node 10 not seen: %s' % found
         rsp = _get_param(node, 10, 'MOTOR_POLES')
         assert rsp is not None, 'GetSet failed for MOTOR_POLES\n' + sitl.log_tail()
         assert int(rsp.value.integer_value) == 14, rsp.value
@@ -91,18 +98,14 @@ def test_param_get_defaults(sitl_factory, state_stream, mcast_uri):
         node.close()
 
 
-def test_param_set_telem_rate(sitl_factory, state_stream, mcast_uri):
-    sitl = sitl_factory(
+def test_param_set_telem_rate(sitl_can_factory, state_stream, mcast_uri):
+    sitl = sitl_can_factory(
         extra_args=['--node-id', '10'],
         can_uri=mcast_uri,
         wait_s=1.0)
     sim = state_stream(sitl)
-    if not wait_for_state(sim, timeout=5.0):
-        pytest.skip('multicast unavailable\n' + sitl.log_tail())
-
-    node, found = _wait_for_node(mcast_uri, our_id=111)
+    node, found = _require_mcast_node(sitl, sim, mcast_uri, our_id=111)
     try:
-        assert 10 in found, found
         new_rate = 50
         rsp = _set_param(node, 10, 'TELEM_RATE', new_rate)
         assert rsp is not None, 'set TELEM_RATE failed\n' + sitl.log_tail()
@@ -114,18 +117,14 @@ def test_param_set_telem_rate(sitl_factory, state_stream, mcast_uri):
         node.close()
 
 
-def test_param_save_opcode(sitl_factory, state_stream, mcast_uri):
-    sitl = sitl_factory(
+def test_param_save_opcode(sitl_can_factory, state_stream, mcast_uri):
+    sitl = sitl_can_factory(
         extra_args=['--node-id', '10'],
         can_uri=mcast_uri,
         wait_s=1.0)
     sim = state_stream(sitl)
-    if not wait_for_state(sim, timeout=5.0):
-        pytest.skip('multicast unavailable\n' + sitl.log_tail())
-
-    node, found = _wait_for_node(mcast_uri, our_id=112)
+    node, found = _require_mcast_node(sitl, sim, mcast_uri, our_id=112)
     try:
-        assert 10 in found, found
         assert _set_param(node, 10, 'BEEP_VOLUME', 7) is not None
         ok = False
         for _ in range(5):

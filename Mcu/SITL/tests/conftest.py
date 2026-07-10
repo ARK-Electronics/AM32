@@ -14,6 +14,7 @@ sys.path.insert(0, SITL_DIR)
 
 from sitl_harness import (  # noqa: E402
     Sitl,
+    SitlStartError,
     find_sitl_binary,
     free_mcast_group,
     open_state,
@@ -70,6 +71,29 @@ def sitl_factory(sitl_path, workdir):
 @pytest.fixture
 def mcast_uri():
     return 'mcast:%d' % free_mcast_group()
+
+
+@pytest.fixture
+def sitl_can_factory(sitl_factory):
+    '''like sitl_factory, but skip the test if multicast CAN cannot start.
+
+    GitHub macOS runners historically lack a usable multicast route; the
+    SITL either dies during CAN init or never becomes reachable. Match
+    upstream behaviour: skip rather than fail the job.
+    '''
+
+    def _make(extra_args=(), can_uri=None, **kw):
+        if can_uri is None:
+            raise TypeError('sitl_can_factory requires can_uri')
+        try:
+            return sitl_factory(extra_args=extra_args, can_uri=can_uri, **kw)
+        except SitlStartError as e:
+            if e.looks_like_mcast_failure:
+                pytest.skip('SITL multicast CAN unavailable on this host:\n%s'
+                            % e)
+            raise
+
+    return _make
 
 
 @pytest.fixture

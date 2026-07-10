@@ -21,8 +21,8 @@ def _multicast_usable(sitl, sim, timeout=5.0):
         'multicast is probably unavailable.\n' + sitl.log_tail())
 
 
-def test_dronecan_throttle_and_esc_status(sitl_factory, state_stream, mcast_uri):
-    sitl = sitl_factory(
+def test_dronecan_throttle_and_esc_status(sitl_can_factory, state_stream, mcast_uri):
+    sitl = sitl_can_factory(
         extra_args=['--node-id', '10'],
         can_uri=mcast_uri,
         wait_s=1.0)
@@ -67,9 +67,9 @@ def test_dronecan_throttle_and_esc_status(sitl_factory, state_stream, mcast_uri)
         node.close()
 
 
-def test_dronecan_requires_arming(sitl_factory, state_stream, mcast_uri):
+def test_dronecan_requires_arming(sitl_can_factory, state_stream, mcast_uri):
     '''default REQUIRE_ARMING=1: RawCommand alone must not spin the motor'''
-    sitl = sitl_factory(
+    sitl = sitl_can_factory(
         extra_args=['--node-id', '10'],
         can_uri=mcast_uri,
         wait_s=1.0)

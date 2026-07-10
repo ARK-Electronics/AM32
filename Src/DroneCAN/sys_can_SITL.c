@@ -125,11 +125,17 @@ void sys_can_init(void)
     }
     const int one = 1;
     setsockopt(fd_in, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+#ifdef SO_REUSEPORT
+    // macOS needs SO_REUSEPORT for multiple SITL instances / pydronecan
+    // on the same mcast group+port
+    setsockopt(fd_in, SOL_SOCKET, SO_REUSEPORT, &one, sizeof(one));
+#endif
     struct sockaddr_in bind_addr = addr;
-#if defined(__CYGWIN__) || defined(_WIN32)
-    // Windows cannot bind to a multicast group address; bind the port
-    // on INADDR_ANY and rely on the group membership plus the packet
-    // magic/CRC for filtering, as pydronecan's mcast driver does
+#if defined(__CYGWIN__) || defined(_WIN32) || defined(__APPLE__)
+    // Windows and macOS cannot reliably bind to a multicast group
+    // address; bind the port on INADDR_ANY and rely on the group
+    // membership plus the packet magic/CRC for filtering, as
+    // pydronecan's mcast driver does
     bind_addr.sin_addr.s_addr = htonl(INADDR_ANY);
 #endif
     if (bind(fd_in, (struct sockaddr*)&bind_addr, sizeof(bind_addr)) != 0) {
@@ -184,7 +190,16 @@ void sys_can_init(void)
      */
     for (int attempt = have_if ? 1 : 0; attempt < 2; attempt++) {
         uint8_t probe[4] = { 0xde, 0xad, 0xbe, 0xef }; // wrong magic, ignored by receivers
-        send(fd_out, probe, sizeof(probe), 0);
+        // Prefer sendto over a connected send so a dead mcast route does
+        // not depend on SIGPIPE being ignored (belt-and-braces with
+        // signal(SIGPIPE, SIG_IGN) / SO_NOSIGPIPE).
+#if defined(MSG_NOSIGNAL)
+        sendto(fd_out, probe, sizeof(probe), MSG_NOSIGNAL,
+            (struct sockaddr*)&addr, sizeof(addr));
+#else
+        sendto(fd_out, probe, sizeof(probe), 0,
+            (struct sockaddr*)&addr, sizeof(addr));
+#endif
         struct pollfd pfd = { .fd = fd_in, .events = POLLIN, .revents = 0 };
         bool got = false;
         while (poll(&pfd, 1, 50) == 1) {
@@ -234,7 +249,11 @@ int16_t sys_can_transmit(const CanardCANFrame* txf)
     pkt.message_id = txf->id;
     memcpy(pkt.data, txf->data, txf->data_len);
     pkt.crc = crc16_CCITT((const uint8_t*)&pkt.flags, txf->data_len + 6);
+#if defined(MSG_NOSIGNAL)
+    const ssize_t ret = send(fd_out, &pkt, txf->data_len + MCAST_HDR_LEN, MSG_NOSIGNAL);
+#else
     const ssize_t ret = send(fd_out, &pkt, txf->data_len + MCAST_HDR_LEN, 0);
+#endif
     if (ret < 0) {
         return (errno == EAGAIN || errno == EWOULDBLOCK) ? 0 : -1;
     }

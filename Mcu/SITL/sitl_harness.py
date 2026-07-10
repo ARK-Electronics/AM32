@@ -57,6 +57,24 @@ def free_mcast_group():
     return bus
 
 
+class SitlStartError(RuntimeError):
+    '''SITL process died during startup (e.g. mcast unavailable on CI).'''
+
+    def __init__(self, returncode, log_tail):
+        self.returncode = returncode
+        self.log_tail = log_tail
+        super().__init__('SITL exited early (code %s):\n%s' % (returncode, log_tail))
+
+    @property
+    def looks_like_mcast_failure(self):
+        t = self.log_tail or ''
+        # SIGPIPE (-13) during CAN init on macOS, or an explicit mcast error
+        if self.returncode in (-13, 13):
+            return True
+        return ('CAN init mcast' in t and 'CAN on' not in t) or (
+            'multicast' in t.lower() and 'failed' in t.lower())
+
+
 class Sitl(object):
     '''start / stop one SITL instance with unique ports'''
 
@@ -87,8 +105,7 @@ class Sitl(object):
                     tail = f.read()[-800:].decode(errors='replace')
             except OSError:
                 pass
-            raise RuntimeError('SITL exited early (code %s):\n%s' % (
-                self.proc.returncode, tail))
+            raise SitlStartError(self.proc.returncode, tail)
 
     def __enter__(self):
         return self
