@@ -22,7 +22,7 @@ jobs:
       - name: Run SITL tests
         run: |
           mkdir sitl_test_run && cd sitl_test_run
-          python3 ../Mcu/SITL/run_ci_tests.py --sitl ../obj/AM32_AM32_SITL_CAN_2.20.elf
+          python3 ../Mcu/SITL/run_ci_tests.py --sitl ../obj/AM32_AM32_SITL_CAN_*.elf
 
       - name: Upload SITL log on failure
         if: failure()
@@ -50,7 +50,7 @@ jobs:
           mkdir gui_test_run && cd gui_test_run
           python3 ../Mcu/SITL/gui_ci_test.py \
             --gui-python ../Mcu/SITL/venv/bin/python3 \
-            --sitl ../obj/AM32_AM32_SITL_CAN_2.20.elf
+            --sitl ../obj/AM32_AM32_SITL_CAN_*.elf
 
       - name: Upload SITL log on failure
         if: failure()
@@ -73,7 +73,7 @@ jobs:
       - name: Run SITL tests
         run: |
           mkdir sitl_test_run && cd sitl_test_run
-          python3 ../Mcu/SITL/run_ci_tests.py --sitl ../obj/AM32_AM32_SITL_CAN_2.20.elf
+          python3 ../Mcu/SITL/run_ci_tests.py --sitl ../obj/AM32_AM32_SITL_CAN_*.elf
 
       - name: Upload SITL log on failure
         if: failure()
@@ -103,7 +103,7 @@ jobs:
         shell: C:\cygwin\bin\bash.exe --noprofile --norc -o igncr -eo pipefail '{0}'
         run: |
           cd $(cygpath -u "$GITHUB_WORKSPACE")
-          ./obj/AM32_AM32_SITL_CAN_2.20.elf --can-uri none --input-type 1 >boot.log 2>&1 &
+          ./obj/AM32_AM32_SITL_CAN_*.elf --can-uri none --input-type 1 >boot.log 2>&1 &
           sleep 3
           kill %1 || true
           cat boot.log

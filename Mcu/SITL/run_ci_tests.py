@@ -10,6 +10,7 @@ exits non-zero if any test fails.
 '''
 
 import argparse
+import glob
 import os
 import struct
 import subprocess
@@ -203,8 +204,10 @@ def test_dronecan(sitl_path):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    default_sitl = os.path.join(HERE, '..', '..', 'obj', 'AM32_AM32_SITL_CAN_2.20.elf')
-    ap.add_argument('--sitl', default=os.path.normpath(default_sitl))
+    # don't hardcode the firmware version in the default binary path
+    pat = os.path.join(HERE, '..', '..', 'obj', 'AM32_AM32_SITL_CAN_*.elf')
+    hits = sorted(glob.glob(pat))
+    ap.add_argument('--sitl', default=os.path.normpath(hits[0]) if hits else None)
     args = ap.parse_args()
 
     if not os.path.exists(args.sitl):
