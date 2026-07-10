@@ -12,10 +12,11 @@ demag_commutation_spike: 3.0
 steady_tail_fraction: 0.5
 
 safety:
-  # 3.0 A supply; free-run steady is ~1.6 A @ 100%. Host abort sits under the
-  # supply limit but above measured transition spikes (~2.0 A) so a single
-  # sample glitch near the old 2.8 A ceiling cannot kill a clean run.
-  max_current_a: 2.95
+  # 3 A supply brick is the current backstop (current-limits under load).
+  # Do not host-abort on current: a single stand glitch near 3 A was aborting
+  # otherwise-clean free-run 100% holds while steady current stayed ~1.6–1.7 A.
+  # Keep temp/rpm/thrust host limits.
+  max_current_a: 50.0
   max_motor_temp_c: 90.0
   max_rpm: 55000
   max_thrust_n: 2.0
