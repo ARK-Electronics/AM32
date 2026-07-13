@@ -93,6 +93,103 @@ Upstream feature docs and crawler notes: [AM32 wiki / crawler hardware](https://
 
 ---
 
+## Motor beeps and sounds
+
+AM32 has no speaker. Beeps are PWM on the motor phases so the windings act as a small transducer (same idea as other BLHeli-family ESCs). Implementation: [`Src/sounds.c`](Src/sounds.c) / [`Inc/sounds.h`](Inc/sounds.h). Volume is EEPROM `beep_volume` (0–11; DroneCAN param `BEEP_VOLUME`, default 5). Sounds only run when the motor is **not spinning** (idle / disarmed / zero throttle as applicable).
+
+Pitch below is **relative** (higher PWM timer prescaler → lower pitch). Exact Hz depends on MCU clock and timer setup.
+
+### Quick reference
+
+| When you hear it | Pattern (pitch) | Function | Meaning |
+|------------------|-----------------|----------|---------|
+| Power-up (brushless) | 3 rising beeps (or custom melody) | `playStartupTune` | Firmware booted and is ready for input |
+| Power-up (brushed build) | 4 rising beeps | `playBrushedStartupTune` | Brushed-mode startup |
+| Arm / throttle zero accepted | 1 rising 3-note phrase | `playInputTune` | ESC armed / input lock-in |
+| Arm + cell LVC enabled | That phrase **once per cell** | `playInputTune` × N | Detected pack cell count (`Vbat / 3.70`) |
+| Stick cal entered (PWM) | Descending whoop/sweep | `playBeaconTune3` | Entered servo high/low calibration |
+| Stick cal high done | 2 notes, **rising** | `playDefaultTone` | Max endpoint captured |
+| Stick cal low done | 2 notes, **falling** | `playChangedTone` | Min endpoint saved to EEPROM |
+| DShot beacon 1 or 5 | Same as “default” 2-note rising | `playDefaultTone` | Beacon / locate |
+| DShot beacon 2 | 2 notes, **falling** | `playChangedTone` | Beacon |
+| DShot beacon 3 | Descending sweep | `playBeaconTune3` | Beacon |
+| DShot beacon 4 | 3 notes, **falling** | `playInputTune2` | Beacon |
+| DShot cmd 12 (save settings) | Rising if normal dir, falling if reversed | `playDefaultTone` / `playChangedTone` | Settings written |
+
+### Startup
+
+| Function | When | Pattern |
+|----------|------|---------|
+| **`playStartupTune`** | Normal brushless boot (after init; also CRSF path) | If EEPROM custom tune byte 0 is programmed (not `0xFF`): plays **BlueJay-compatible** melody from `eepromBuffer.tune[]` via `playBlueJayTune`. Otherwise default: **three rising beeps** (~200 ms each), each on a different phase (prescalers 55 → 40 → 25). |
+| **`playBrushedStartupTune`** | `BRUSHED_MODE` builds only | **Four rising beeps** (~300 ms), phases 1–4 (prescalers 40 → 30 → 25 → 20). |
+| **`playBlueJayTune`** | Custom startup only | Notes/rests encoded in EEPROM tune blob (configurator “custom startup music”). Inter-note pause can scale with tune header byte 3. |
+
+Some AT32 F415 targets defer startup audio through `play_tone_flag` instead of calling the tune immediately at boot.
+
+### Armed / input recognition
+
+Played from the 20 kHz control path when the ESC transitions to armed-idle after a stable zero throttle (`Src/control_loop.c`).
+
+| Function | When | Pattern |
+|----------|------|---------|
+| **`playInputTune`** | Armed with **low-voltage cutoff mode 1** (cell-based) **off**, or as each cell beep | **Three notes, rising pitch** (~100 ms; prescalers 80 → 70 → 40). |
+| **Cell-count beeps** | Armed **and** `low_voltage_cut_off == 1` | `cell_count = battery_voltage / 370` (≈ 3.70 V/cell), then **`playInputTune` once per cell** with ~100 ms gaps. Count the phrases to read pack cell count. |
+| **`playInputTune2`** | DShot beacon 4; also used as deferred arm beep on some AT415 builds | **Three notes, falling pitch** (~75 ms; prescalers 60 → 80 → 90). |
+
+### Servo PWM stick calibration
+
+Only for **servo PWM** input when stick calibration is not disabled. Sequence in `Src/signal.c`:
+
+1. Hold **high stick** long enough → **`playBeaconTune3`** (descending multi-step whoop) — calibration mode entered.
+2. Hold steady **max** until accepted → **`playDefaultTone`** (two notes, **rising**: lower then higher).
+3. Move to **min** and hold until accepted → **`playChangedTone`** (two notes, **falling**: higher then lower) — endpoints saved.
+
+### DShot special commands (beacons & save)
+
+DShot commands run only when **armed**, **motor not running**, and the command is repeated enough times (`Src/dshot.c`). Beacons 1–5 set `play_tone_flag`; actual audio plays on the next idle/low-throttle slot in `setInput` (`Src/control_loop.c`).
+
+| DShot cmd | `play_tone_flag` | Sound | Typical use |
+|-----------|------------------|-------|-------------|
+| **1** | 1 | `playDefaultTone` — 2 notes rising | Beacon 1 |
+| **2** | 2 | `playChangedTone` — 2 notes falling | Beacon 2 |
+| **3** | 3 | `playBeaconTune3` — long descending sweep | Beacon 3 |
+| **4** | 4 | `playInputTune2` — 3 notes falling | Beacon 4 |
+| **5** | 5 | `playDefaultTone` — same as beacon 1 | Beacon 5 |
+| **12** | `1 + dir_reversed` | Rising if direction normal, falling if reversed | **Save settings** confirmation |
+
+Other DShot commands (direction, bi-dir, EDT, programming mode, etc.) do **not** play a dedicated melody unless noted above. Direction set (7/8) currently has confirmation beeps commented out in source.
+
+### Beacon sweep detail
+
+**`playBeaconTune3`**: stepped descending pitch with phase stepping (~10 ms steps, prescaler from high down toward lower values). Used as DShot beacon 3 and as the “entered stick calibration” cue.
+
+### Volume and silence
+
+| Setting | Effect |
+|---------|--------|
+| **`beep_volume` 0–11** | Duty cycle of the beep PWM (`volume * 3` compare counts). 0 is effectively silent; higher is louder (still limited so the motor barely moves). |
+| Motor spinning / throttle up | Deferred tone flags wait until throttle is at idle; beeps are not mixed into normal drive. |
+| No throttle signal after boot | ESC may stay in bootloader or keep waiting for input — you may only hear the **startup** tune, not the arm tune, until a valid zero throttle is seen. |
+
+### Defined but unused
+
+| Function | Status |
+|----------|--------|
+| **`playDuskingTune`** | Implemented in `sounds.c` (ascending then peaking melody) but **not called** from current application code. Kept for compatibility / possible future use. |
+
+### Source map
+
+| File | Role |
+|------|------|
+| [`Src/sounds.c`](Src/sounds.c) | All melody generators |
+| [`Src/main.c`](Src/main.c) | Startup tune at boot |
+| [`Src/control_loop.c`](Src/control_loop.c) | Arm beeps, cell count, deferred DShot tones |
+| [`Src/dshot.c`](Src/dshot.c) | DShot command → tone flag |
+| [`Src/signal.c`](Src/signal.c) | Servo stick-calibration tones |
+| [`Src/settings.c`](Src/settings.c) | Applies `beep_volume` from EEPROM |
+
+---
+
 ## Configuration tools & stock firmware
 
 These are **upstream / community** tools; they are not ARK-specific:
