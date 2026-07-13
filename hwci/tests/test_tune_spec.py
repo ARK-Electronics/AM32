@@ -30,9 +30,13 @@ def test_minimal_spec_gets_documented_defaults():
 
 def test_example_spec_loads():
     spec = load_tune_spec(REPO_ROOT / "hwci" / "tunes" / "example.yaml")
-    assert {s.name for s in spec.stages} == {"advance", "pwm", "modes", "ramp"}
+    assert {s.name for s in spec.stages} == {
+        "advance", "pwm", "modes", "advance_polish", "ramp"}
     assert spec.parameters["advance_level"].refine_step == 2
-    assert spec.stages[3].measure == "ramp_rate"
+    assert next(s for s in spec.stages if s.name == "ramp").measure == "ramp_rate"
+    polish = next(s for s in spec.stages if s.name == "advance_polish")
+    assert polish.polish_radius == 4
+    assert spec.finals.min_delta_pct == 1.0
 
 
 def test_name_is_required():
@@ -117,6 +121,33 @@ def test_ab_candidate_out_of_range_fails():
 def test_unsupported_finals_pattern_fails():
     with pytest.raises(TuneSpecError, match="ABBA"):
         tune_spec_from_dict(_minimal(finals={"pattern": "AABB"}))
+
+
+def test_high_throttle_out_of_range_fails():
+    with pytest.raises(TuneSpecError, match="high_throttle"):
+        tune_spec_from_dict(_minimal(finals={"high_throttle": 1.5}))
+    with pytest.raises(TuneSpecError, match="high_throttle"):
+        tune_spec_from_dict(_minimal(finals={"high_throttle": 0.0}))
+
+
+def test_high_throttle_accepted():
+    spec = tune_spec_from_dict(_minimal(finals={"high_throttle": 0.70,
+                                                "high_throttle_dwell_s": 3.0}))
+    assert spec.finals.high_throttle == 0.70
+    assert spec.finals.high_throttle_dwell_s == 3.0
+
+
+def test_polish_radius_requires_sweep():
+    with pytest.raises(TuneSpecError, match="polish_radius"):
+        tune_spec_from_dict(_minimal(stages=[
+            {"name": "m", "ab_candidates": [{}], "polish_radius": 2}]))
+
+
+def test_min_delta_pct_negative_fails():
+    with pytest.raises(TuneSpecError, match="min_delta_pct"):
+        tune_spec_from_dict(_minimal(finals={"min_delta_pct": -1}))
+
+
 
 
 def test_non_mapping_spec_fails(tmp_path):

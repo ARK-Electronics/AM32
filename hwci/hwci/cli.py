@@ -352,9 +352,47 @@ def cmd_tune(args) -> int:
         backend.close()
     pdf = out / "tune_report.pdf"
     print(f"report: {out / 'report.md'}"
+          + f"\npilot card: {out / 'pilot_card.md'}"
           + (f"\nPDF report: {pdf}" if pdf.exists() else "")
           + f"\nbest settings: {out / 'best_settings.bin'} "
           f"({'winner' if result['confirmed'] else 'default kept'})")
+    return 0
+
+
+def cmd_campaign(args) -> int:
+    """Aggregate pilot cards from one or more tune session directories."""
+    from . import tuner as tunermod
+
+    dirs: list[Path] = []
+    for raw in args.sessions:
+        p = Path(raw)
+        if p.is_dir():
+            dirs.append(p)
+        else:
+            # allow glob patterns
+            matched = sorted(Path().glob(raw))
+            dirs.extend(m for m in matched if m.is_dir())
+    if not dirs:
+        print("error: no session directories found", file=sys.stderr)
+        return 2
+    cards = []
+    for d in dirs:
+        card = tunermod.load_pilot_card(d)
+        if card is None:
+            print(f"warning: skip {d} (no pilot_card.json / result)",
+                  file=sys.stderr)
+            continue
+        cards.append(card)
+    if not cards:
+        print("error: no pilot cards loaded", file=sys.stderr)
+        return 2
+    md = tunermod.campaign_table_md(cards)
+    if args.out:
+        out = Path(args.out)
+        out.write_text(md)
+        print(f"wrote {out}")
+    else:
+        print(md, end="" if md.endswith("\n") else "\n")
     return 0
 
 
@@ -535,6 +573,14 @@ def build_parser() -> argparse.ArgumentParser:
                     help="resume a checkpointed session from its directory "
                          "(spec/config/mode are reloaded from the session)")
     sp.set_defaults(func=cmd_tune)
+
+    sp = sub.add_parser(
+        "campaign",
+        help="aggregate pilot cards from tune session dirs into a summary table")
+    sp.add_argument("sessions", nargs="+",
+                    help="session directories and/or globs (e.g. runs/tune-*)")
+    sp.add_argument("--out", help="write markdown here (default: stdout)")
+    sp.set_defaults(func=cmd_campaign)
 
     sp = sub.add_parser(
         "settings", help="read/write/diff the AM32 EEPROM settings page")

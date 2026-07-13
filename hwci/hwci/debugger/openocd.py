@@ -70,8 +70,27 @@ class OpenOcdDebugger(Debugger):
 
     # --- flashing (one-shot) -----------------------------------------
     def flash(self, bin_path: str, load_addr: int = APP_LOAD_ADDR) -> None:
+        # After program+reset the AM32 bootloader can stick in programming
+        # mode when the Flight Stand holds DShot idle on the signal line
+        # (observed 2026-07-13: eeprom_address stays 0, PC in BL @ 0x08000b42).
+        # Force a handoff into the app via its vector table so settings
+        # trials (and firmware flashes) always leave the core running main.
+        # Vectors live at the app base even when ``load_addr`` is the EEPROM
+        # page (settings-only program).
+        app = APP_LOAD_ADDR
+        boot_app = (
+            f"reset halt; "
+            f"set _sp [mrw 0x{app:08x}]; "
+            f"set _pc [mrw 0x{app + 4:08x}]; "
+            f"reg msp $_sp; "
+            f"reg pc [expr {{$_pc & ~1}}]; "
+            f"resume"
+        )
         cmd = self._base_args() + [
-            "-c", f"program {{{bin_path}}} 0x{load_addr:08x} verify reset exit",
+            "-c",
+            f"program {{{bin_path}}} 0x{load_addr:08x} verify; "
+            f"{boot_app}; "
+            f"shutdown",
         ]
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
         if proc.returncode != 0:
@@ -99,12 +118,73 @@ class OpenOcdDebugger(Debugger):
             target=self._drain_stdout, daemon=True, name="openocd-drain")
         self._drain_thread.start()
         self._connect_rpc()
-        # Ensure the core is running (a fresh attach can leave it halted).
+        # Ensure the core is running the AM32 app (not stuck in the
+        # bootloader — see flash()). A fresh attach can leave the core
+        # halted or in BL after a prior reset with DShot idle held.
         try:
             self._rpc("resume")
         except DebuggerError:
             pass
+        try:
+            self.ensure_app_running()
+        except DebuggerError:
+            pass
         return self
+
+    def ensure_app_running(self) -> None:
+        """If the AM32 bootloader is stuck, jump to the app vector table.
+
+        Safe to call when the app is already running: reading the app
+        vectors and rewriting pc/msp only happens when ``eeprom_address``
+        is not a known settings page (app never initialized it).
+        """
+        # Known eeprom_address values (mirrors hwci.settings.KNOWN_EEPROM_ADDRESSES)
+        known = {0x08007C00, 0x0800F800, 0x0801F800}
+        # Symbol is in RAM; when BL is stuck the app BSS is not live, so
+        # read a few candidate RAM slots is fragile. Instead: if PC is in
+        # the bootloader flash window (below app base), force the handoff.
+        try:
+            pc_out = self._rpc("reg pc")
+            # OpenOCD: "pc (/32): 0x08000b42" or similar
+            pc = None
+            for tok in pc_out.replace(":", " ").split():
+                try:
+                    v = int(tok, 0)
+                    if 0x08000000 <= v <= 0x08020000:
+                        pc = v
+                        break
+                except ValueError:
+                    continue
+            if pc is not None and pc < APP_LOAD_ADDR:
+                self._boot_app_from_vectors()
+                return
+        except DebuggerError:
+            pass
+        # Fallback: try reading a common BSS location used by recent
+        # builds; if zero / garbage, force boot.
+        try:
+            # mrw returns hex or decimal; use read_memory for consistency
+            raw = self.read_memory(0x20000FB4, 4)  # typical eeprom_address
+            val = struct.unpack("<I", raw)[0]
+            if val not in known:
+                raw2 = self.read_memory(0x20000EB4, 4)
+                val2 = struct.unpack("<I", raw2)[0]
+                if val2 not in known:
+                    self._boot_app_from_vectors()
+        except (DebuggerError, struct.error):
+            self._boot_app_from_vectors()
+
+    def _boot_app_from_vectors(self) -> None:
+        """Load MSP/PC from the app vector table at APP_LOAD_ADDR and resume."""
+        app = APP_LOAD_ADDR
+        self._rpc("halt")
+        sp = struct.unpack("<I", self.read_memory(app, 4))[0]
+        rv = struct.unpack("<I", self.read_memory(app + 4, 4))[0]
+        pc = rv & ~1
+        self._rpc(f"reg msp 0x{sp:08x}")
+        self._rpc(f"reg pc 0x{pc:08x}")
+        self._rpc("resume")
+        time.sleep(0.3)  # let loadEEpromSettings run
 
     def _drain_stdout(self) -> None:
         proc = self._proc

@@ -87,4 +87,6 @@ finals:
   profile: tune_probe   # short probe instead of the full efficiency sweep
   pattern: ABBA
   repeats: 1
+  extra_repeats_if_close: 0   # keep quick budget tight
+  min_delta_pct: 0.5          # looser than full; still rejects pure noise
   startup_check: true

@@ -84,6 +84,11 @@ stages:
       - {variable_pwm: 2}
       - {auto_advance: 1}
     repeats: 2                # interleaved: A B C D | A B C D
+  # Re-climb advance under the modes winner (coordinate-search polish).
+  - name: advance_polish
+    sweep: advance_level
+    search: climb
+    polish_radius: 4          # only ±4 around incumbent (setting units)
   - name: ramp
     measure: ramp_rate        # measure the powertrain step response once
                               # (tau, transient A per % duty lead), COMPUTE
@@ -94,6 +99,13 @@ stages:
 finals:
   profile: efficiency_sweep   # full sweep, winner vs default
   pattern: ABBA
-  repeats: 1                  # one ABBA block (2 paired deltas) - sized to
-                              # the quieter post-prop-flip bench
+  repeats: 1                  # base ABBA blocks; extra_repeats_if_close
+                              # adds more when Δ is near the min-delta floor
+  extra_repeats_if_close: 1
+  min_delta_pct: 1.0          # confirm only if median Δ > 1% of default score
   startup_check: true
+  # Constraint-only hold through the known desync band on this bench
+  # (defaults fail arriving at ~t70 / 0.70). Failing this unconfirms the
+  # efficiency winner so we never ship a combo that cannot hold there.
+  high_throttle: 0.70
+  high_throttle_dwell_s: 4.0
