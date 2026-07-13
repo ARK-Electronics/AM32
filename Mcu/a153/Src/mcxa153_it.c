@@ -29,13 +29,10 @@ extern uint8_t average_count;
 void CMP0_IRQHandler(void)
 {
 	//Do extra check to prevent false positive interrupts
-	if((INTERVAL_TIMER_COUNT) > ((average_interval>>1)))
-	{
+	if ((INTERVAL_TIMER_COUNT) > ((average_interval >> 1))) {
 		CMP0->CSR = 0x7;
 		interruptRoutine();
-	}
-	else if (getCompOutputLevel() == rising)
-	{
+	} else if (getCompOutputLevel() == rising) {
 		CMP0->CSR = 0x7;
 	}
 }
@@ -46,13 +43,10 @@ void CMP0_IRQHandler(void)
 void CMP1_IRQHandler(void)
 {
 	//Do extra check to prevent false positive interrupts
-	if((INTERVAL_TIMER_COUNT) > ((average_interval>>1)))
-	{
+	if ((INTERVAL_TIMER_COUNT) > ((average_interval >> 1))) {
 		CMP1->CSR = 0x7;
 		interruptRoutine();
-	}
-	else if (getCompOutputLevel() == rising)
-	{
+	} else if (getCompOutputLevel() == rising) {
 		CMP1->CSR = 0x7;
 	}
 }
@@ -80,13 +74,13 @@ void CTIMER0_IRQHandler(void)
 					//Configure CTIMER
 					//Configure capture control register so capture value register is loaded on CR1 falling edge and CR2 rising edge
 					modifyReg32(&CTIMER0->CCR,
-							CTIMER_CCR_CAP1RE_MASK | CTIMER_CCR_CAP2RE_MASK | CTIMER_CCR_CAP1FE_MASK | CTIMER_CCR_CAP2FE_MASK,
-							CTIMER_CCR_CAP2RE(1) | CTIMER_CCR_CAP1FE(1));
+						    CTIMER_CCR_CAP1RE_MASK | CTIMER_CCR_CAP2RE_MASK | CTIMER_CCR_CAP1FE_MASK |
+							    CTIMER_CCR_CAP2FE_MASK,
+						    CTIMER_CCR_CAP2RE(1) | CTIMER_CCR_CAP1FE(1));
 
 					//Clear timer counter on capture channel 2 rising edge
-					modifyReg32(&CTIMER0->CTCR,
-							CTIMER_CTCR_ENCC_MASK | CTIMER_CTCR_SELCC_MASK,
-							CTIMER_CTCR_ENCC(1) | CTIMER_CTCR_SELCC(4));
+					modifyReg32(&CTIMER0->CTCR, CTIMER_CTCR_ENCC_MASK | CTIMER_CTCR_SELCC_MASK,
+						    CTIMER_CTCR_ENCC(1) | CTIMER_CTCR_SELCC(4));
 
 					//Reset input detect state so it detects inverted Dshot correctly
 					inputSet = 0;
@@ -117,7 +111,7 @@ void CTIMER1_IRQHandler(void)
 {
 	uint32_t flags = CTIMER1->IR;
 
-	if(flags & CTIMER_IR_MR0INT_MASK) {
+	if (flags & CTIMER_IR_MR0INT_MASK) {
 		//Call function from main.c
 		PeriodElapsedCallback();
 	}
@@ -215,4 +209,3 @@ void LPSPI0_IRQHandler(void)
 	//Set input_ready so processDshot is called in main loop
 	input_ready = 1;
 }
-

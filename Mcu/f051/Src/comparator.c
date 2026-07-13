@@ -9,24 +9,26 @@
 #include "common.h"
 #include "targets.h"
 
-COMP_TypeDef* active_COMP = COMP1;
+COMP_TypeDef *active_COMP = COMP1;
 
 RAM_FUNC void maskPhaseInterrupts()
 {
-  EXTI->IMR &= ~(1 << 21);
-  EXTI->PR = EXTI_LINE;
+	EXTI->IMR &= ~(1 << 21);
+	EXTI->PR = EXTI_LINE;
 }
 
-RAM_FUNC void enableCompInterrupts() { EXTI->IMR |= (1 << 21); }
+RAM_FUNC void enableCompInterrupts()
+{
+	EXTI->IMR |= (1 << 21);
+}
 
 RAM_FUNC void changeCompInput()
 {
-
-if((average_interval < 400)){
-COMP->CSR = COMP->CSR & ~(1<<2);
-}else{
-COMP->CSR  = COMP->CSR | 1<<2;
-}
-  EXTI->RTSR = !rising << 21;
-  EXTI->FTSR = rising << 21;
+	if ((average_interval < 400)) {
+		COMP->CSR = COMP->CSR & ~(1 << 2);
+	} else {
+		COMP->CSR = COMP->CSR | 1 << 2;
+	}
+	EXTI->RTSR = !rising << 21;
+	EXTI->FTSR = rising << 21;
 }

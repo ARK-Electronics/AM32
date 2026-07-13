@@ -1,1 +1,11 @@
-./Mcu/**/Drivers/*
+# Paths excluded from clang-format / make format (see scripts/format.sh).
+# Patterns are repo-relative globs for documentation and IDE plugins that
+# honor this file; the shell script enforces the same set.
+
+Mcu/**/Drivers/**
+Mcu/**/CMSIS/**
+Mcu/**/Startup/**
+Src/DroneCAN/dsdl_generated/**
+Src/DroneCAN/libcanard/**
+**/jsmn.c
+**/jsmn.h

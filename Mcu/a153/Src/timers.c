@@ -21,15 +21,14 @@ void MX_IWDG_Init(void)
 	MRCC0->MRCC_GLB_CC0_SET = MRCC_MRCC_GLB_CC0_WWDT0(1);
 
 	//Enable Watchdog timer and set Watchdog clock divider
-	modifyReg32(&MRCC0->MRCC_WWDT0_CLKDIV,
-			MRCC_MRCC_WWDT0_CLKDIV_HALT_MASK | MRCC_MRCC_WWDT0_CLKDIV_DIV_MASK,
-			MRCC_MRCC_WWDT0_CLKDIV_DIV(0));
+	modifyReg32(&MRCC0->MRCC_WWDT0_CLKDIV, MRCC_MRCC_WWDT0_CLKDIV_HALT_MASK | MRCC_MRCC_WWDT0_CLKDIV_DIV_MASK,
+		    MRCC_MRCC_WWDT0_CLKDIV_DIV(0));
 
 	//Freeze clock configuration registers access
 	modifyReg32(&SYSCON->CLKUNLOCK, 0, SYSCON_CLKUNLOCK_UNLOCK(1));
 
 	//Set the watchdog timeout to 2s
-	WWDT0->TC = WWDT_TC_COUNT(2000000 >> 2);	//divide by 4 cause of fixed clock divider of 4 inside WWDT
+	WWDT0->TC = WWDT_TC_COUNT(2000000 >> 2); //divide by 4 cause of fixed clock divider of 4 inside WWDT
 
 	//Set watchdog timeout to cause a reset
 	modifyReg32(&WWDT0->MOD, WWDT_MOD_WDRESET_MASK, WWDT_MOD_WDRESET(1));
@@ -60,9 +59,8 @@ void initDshotPWMTimer(void)
 	modifyReg32(&MRCC0->MRCC_CTIMER0_CLKSEL, MRCC_MRCC_CTIMER0_CLKSEL_MUX_MASK, MRCC_MRCC_CTIMER0_CLKSEL_MUX(1));
 
 	//Enable CTIMER0 and set divider to 2, so clock frequency is 96MHz
-	modifyReg32(&MRCC0->MRCC_CTIMER0_CLKDIV,
-			MRCC_MRCC_CTIMER0_CLKDIV_HALT_MASK | MRCC_MRCC_CTIMER0_CLKDIV_DIV_MASK,
-			MRCC_MRCC_CTIMER0_CLKDIV_DIV(1));
+	modifyReg32(&MRCC0->MRCC_CTIMER0_CLKDIV, MRCC_MRCC_CTIMER0_CLKDIV_HALT_MASK | MRCC_MRCC_CTIMER0_CLKDIV_DIV_MASK,
+		    MRCC_MRCC_CTIMER0_CLKDIV_DIV(1));
 
 	//Enable CTIMER0 peripheral clock
 	MRCC0->MRCC_GLB_CC0_SET = MRCC_MRCC_GLB_RST0_CTIMER0(1);
@@ -75,9 +73,8 @@ void initDshotPWMTimer(void)
 
 	//Set PWM/Dshot input pin to timer capture/compare input
 	//Enable input buffer and disable pull-up/down resistor
-	modifyReg32(&INPUT_PIN_PORT->PCR[INPUT_PIN],
-			PORT_PCR_MUX_MASK | PORT_PCR_IBE_MASK | PORT_PCR_PE_MASK | PORT_PCR_PS_MASK,
-			PORT_PCR_MUX(INPUT_PIN_ALT_FUNC) | PORT_PCR_IBE(1) | PORT_PCR_PE(0) | PORT_PCR_PS(1));
+	modifyReg32(&INPUT_PIN_PORT->PCR[INPUT_PIN], PORT_PCR_MUX_MASK | PORT_PCR_IBE_MASK | PORT_PCR_PE_MASK | PORT_PCR_PS_MASK,
+		    PORT_PCR_MUX(INPUT_PIN_ALT_FUNC) | PORT_PCR_IBE(1) | PORT_PCR_PE(0) | PORT_PCR_PS(1));
 
 	//Set PWM/Dshot input pin as TIMER0 capture input for capture register 1 and 2
 	INPUTMUX0->CTIMER0CAP[1] = INPUT_PIN_CAPTURE_INP;
@@ -90,23 +87,20 @@ void initDshotPWMTimer(void)
 	CTIMER0->MR[0] = 0;
 
 	//Set match1 value to generate an interrupt after timer is reset in receiveDshot() after around 10us.
-	CTIMER0->MR[1] = 1000;	//10us
+	CTIMER0->MR[1] = 1000; //10us
 
 	//Enable interrupt on Match1 event
 	modifyReg32(&CTIMER0->MCR, 0, CTIMER_MCR_MR1I(1));
 
 	//Configure capture control register so capture value register is loaded on CR1 rising edge and CR2 falling edge
-	modifyReg32(&CTIMER0->CCR,
-			CTIMER_CCR_CAP1RE_MASK | CTIMER_CCR_CAP2RE_MASK | CTIMER_CCR_CAP1FE_MASK | CTIMER_CCR_CAP2FE_MASK,
-			CTIMER_CCR_CAP1RE(1) | CTIMER_CCR_CAP2FE(1));
+	modifyReg32(&CTIMER0->CCR, CTIMER_CCR_CAP1RE_MASK | CTIMER_CCR_CAP2RE_MASK | CTIMER_CCR_CAP1FE_MASK | CTIMER_CCR_CAP2FE_MASK,
+		    CTIMER_CCR_CAP1RE(1) | CTIMER_CCR_CAP2FE(1));
 
 	//Clear timer counter on capture channel 2 falling edge
-	modifyReg32(&CTIMER0->CTCR,
-			CTIMER_CTCR_ENCC_MASK | CTIMER_CTCR_SELCC_MASK,
-			CTIMER_CTCR_ENCC(0) | CTIMER_CTCR_SELCC(5));
+	modifyReg32(&CTIMER0->CTCR, CTIMER_CTCR_ENCC_MASK | CTIMER_CTCR_SELCC_MASK, CTIMER_CTCR_ENCC(0) | CTIMER_CTCR_SELCC(5));
 
 	//Enable interrupt
-	__NVIC_SetPriority(CTIMER0_IRQn, 1);	//set interrupt priority to 1
+	__NVIC_SetPriority(CTIMER0_IRQn, 1); //set interrupt priority to 1
 	__NVIC_EnableIRQ(CTIMER0_IRQn);
 }
 
@@ -130,9 +124,8 @@ void initComTimer(void)
 
 	//Enable CTIMER1 timer
 	//And set CTIMER1 clock divider to /1
-	modifyReg32(&MRCC0->MRCC_CTIMER1_CLKDIV,
-			MRCC_MRCC_SYSTICK_CLKDIV_DIV_MASK | MRCC_MRCC_SYSTICK_CLKDIV_HALT(1),
-			MRCC_MRCC_SYSTICK_CLKDIV_DIV(0));
+	modifyReg32(&MRCC0->MRCC_CTIMER1_CLKDIV, MRCC_MRCC_SYSTICK_CLKDIV_DIV_MASK | MRCC_MRCC_SYSTICK_CLKDIV_HALT(1),
+		    MRCC_MRCC_SYSTICK_CLKDIV_DIV(0));
 
 	//Freeze clock configuration registers access
 	modifyReg32(&SYSCON->CLKUNLOCK, 0, SYSCON_CLKUNLOCK_UNLOCK(1));
@@ -142,15 +135,13 @@ void initComTimer(void)
 
 	//Enable reset on match0 event.
 	//Do not yet enable interrupt on match0 event, as this causes the commutation to start and stagnate, drawing lots of current!
-	modifyReg32(&CTIMER1->MCR,
-				CTIMER_MCR_MR0R_MASK | CTIMER_MCR_MR0I_MASK,
-				CTIMER_MCR_MR0R(1));
+	modifyReg32(&CTIMER1->MCR, CTIMER_MCR_MR0R_MASK | CTIMER_MCR_MR0I_MASK, CTIMER_MCR_MR0R(1));
 
 	//Set shadow match0 event at 30Hz
 	CTIMER1->MR[0] = 65535;
 
 	//Enable interrupt
-	__NVIC_SetPriority(CTIMER1_IRQn, 0);	//set interrupt priority to 0
+	__NVIC_SetPriority(CTIMER1_IRQn, 0); //set interrupt priority to 0
 	__NVIC_EnableIRQ(CTIMER1_IRQn);
 }
 
@@ -173,9 +164,8 @@ void initIntervalTimer(void)
 
 	//Enable CTIMER2 timer
 	//And set CTIMER2 clock divider to /1
-	modifyReg32(&MRCC0->MRCC_CTIMER2_CLKDIV,
-			MRCC_MRCC_SYSTICK_CLKDIV_DIV_MASK | MRCC_MRCC_SYSTICK_CLKDIV_HALT(1),
-			MRCC_MRCC_SYSTICK_CLKDIV_DIV(0));
+	modifyReg32(&MRCC0->MRCC_CTIMER2_CLKDIV, MRCC_MRCC_SYSTICK_CLKDIV_DIV_MASK | MRCC_MRCC_SYSTICK_CLKDIV_HALT(1),
+		    MRCC_MRCC_SYSTICK_CLKDIV_DIV(0));
 
 	//Freeze clock configuration registers access
 	modifyReg32(&SYSCON->CLKUNLOCK, 0, SYSCON_CLKUNLOCK_UNLOCK(1));
@@ -217,9 +207,8 @@ void initTenKHzTimer(void)
 
 	//Enable Low-power timer
 	//And set Low-power timer clock divider to /1
-	modifyReg32(&MRCC0->MRCC_LPTMR0_CLKDIV,
-			MRCC_MRCC_LPTMR0_CLKDIV_DIV_MASK | MRCC_MRCC_LPTMR0_CLKDIV_HALT(1),
-			MRCC_MRCC_LPTMR0_CLKDIV_DIV(0));
+	modifyReg32(&MRCC0->MRCC_LPTMR0_CLKDIV, MRCC_MRCC_LPTMR0_CLKDIV_DIV_MASK | MRCC_MRCC_LPTMR0_CLKDIV_HALT(1),
+		    MRCC_MRCC_LPTMR0_CLKDIV_DIV(0));
 
 	//Freeze clock configuration registers access
 	modifyReg32(&SYSCON->CLKUNLOCK, 0, SYSCON_CLKUNLOCK_UNLOCK(1));
@@ -237,7 +226,7 @@ void initTenKHzTimer(void)
 	LPTMR0->CMR = 1000000 / LOOP_FREQUENCY_HZ;
 
 	//Enable Low-power timer interrupt
-	__NVIC_SetPriority(LPTMR0_IRQn, 3);	//set interrupt priority to 3
+	__NVIC_SetPriority(LPTMR0_IRQn, 3); //set interrupt priority to 3
 	__NVIC_EnableIRQ(LPTMR0_IRQn);
 }
 
@@ -292,8 +281,7 @@ inline void resetInputCaptureTimer(void)
 	//Synchronously resets Timer Counter and Prescaler after next positive edge of CTIMER function clock.
 	//So, delay at least one operation when CPU clock is 96MHz
 	modifyReg32(&CTIMER0->TCR, 0, CTIMER_TCR_CRST(1));
-//	delayMicros(2);
-	__asm volatile ("nop");
+	//	delayMicros(2);
+	__asm volatile("nop");
 	modifyReg32(&CTIMER0->TCR, CTIMER_TCR_CRST_MASK, 0);
 }
-

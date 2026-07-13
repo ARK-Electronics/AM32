@@ -29,7 +29,8 @@ void telem_UART_Init()
 
 	//Select UART clock FRO_12M
 	//Has 32-bit registers so every address increment counts as 32-bits
-	modifyReg32((&MRCC0->MRCC_LPUART0_CLKSEL + (2 * SERIAL_TELEMETRY_MODULE)), MRCC_MRCC_LPUART0_CLKSEL_MUX_MASK, MRCC_MRCC_LPUART0_CLKSEL_MUX(0));
+	modifyReg32((&MRCC0->MRCC_LPUART0_CLKSEL + (2 * SERIAL_TELEMETRY_MODULE)), MRCC_MRCC_LPUART0_CLKSEL_MUX_MASK,
+		    MRCC_MRCC_LPUART0_CLKSEL_MUX(0));
 
 	//Enable UART clock
 	//Has 32-bit registers so every address increment counts as 32-bits
@@ -40,9 +41,8 @@ void telem_UART_Init()
 
 	//Set UART pins
 	//Set alternative pin function and enable pull-up and input buffer
-	modifyReg32(&SERIAL_TELEMETRY_TX_PORT->PCR[SERIAL_TELEMETRY_TX_PIN],
-			PORT_PCR_MUX_MASK,
-			PORT_PCR_MUX(SERIAL_TELEMETRY_TX_ALT_FUNC) | PORT_PCR_PS(1) | PORT_PCR_PE(1) | PORT_PCR_IBE(1));
+	modifyReg32(&SERIAL_TELEMETRY_TX_PORT->PCR[SERIAL_TELEMETRY_TX_PIN], PORT_PCR_MUX_MASK,
+		    PORT_PCR_MUX(SERIAL_TELEMETRY_TX_ALT_FUNC) | PORT_PCR_PS(1) | PORT_PCR_PE(1) | PORT_PCR_IBE(1));
 
 	//Set UART1 out of reset
 	modifyReg32(&SERIAL_TELEMETRY->GLOBAL, LPUART_GLOBAL_RST_MASK, 0);
@@ -51,9 +51,7 @@ void telem_UART_Init()
 	//CLK = 12MHz
 	//SBR = 0x4, OSR = 25
 	//Set OSR=25, SBR=4
-	modifyReg32(&SERIAL_TELEMETRY->BAUD, \
-			LPUART_BAUD_OSR_MASK | LPUART_BAUD_SBR_MASK, \
-			LPUART_BAUD_OSR(25) | LPUART_BAUD_SBR(4));
+	modifyReg32(&SERIAL_TELEMETRY->BAUD, LPUART_BAUD_OSR_MASK | LPUART_BAUD_SBR_MASK, LPUART_BAUD_OSR(25) | LPUART_BAUD_SBR(4));
 
 	//Enable TX FIFO watermark flag to generate DMA request
 	modifyReg32(&SERIAL_TELEMETRY->BAUD, LPUART_BAUD_TDMAE_MASK, LPUART_BAUD_TDMAE(1));
@@ -79,13 +77,11 @@ void enable_telem_UART(void)
 void send_telem_DMA(uint8_t bytes)
 {
 	//Sets the amount of major loop counts to handle before DMA transfer complete
-	modifyReg16(&DMA0->CH[DMA_CH_UART].TCD_CITER_ELINKNO, DMA_TCD_CITER_ELINKNO_CITER_MASK,
-			DMA_TCD_CITER_ELINKNO_CITER(bytes));
+	modifyReg16(&DMA0->CH[DMA_CH_UART].TCD_CITER_ELINKNO, DMA_TCD_CITER_ELINKNO_CITER_MASK, DMA_TCD_CITER_ELINKNO_CITER(bytes));
 
 	//Sets the amount of major loop counts after a DMA transfer completes
 	//i.e. the CITER register gets this BITER value after DMA transfer complete
-	modifyReg16(&DMA0->CH[DMA_CH_UART].TCD_BITER_ELINKNO, DMA_TCD_BITER_ELINKNO_BITER_MASK,
-			DMA_TCD_BITER_ELINKNO_BITER(bytes));
+	modifyReg16(&DMA0->CH[DMA_CH_UART].TCD_BITER_ELINKNO, DMA_TCD_BITER_ELINKNO_BITER_MASK, DMA_TCD_BITER_ELINKNO_BITER(bytes));
 
 	//Set last source address adjustment to 0 bytes
 	//Adds this value to the source address when the major loop is complete.

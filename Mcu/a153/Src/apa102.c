@@ -20,9 +20,8 @@ void init_apa102(void)
 	modifyReg32(&MRCC0->MRCC_LPSPI1_CLKSEL, MRCC_MRCC_LPSPI1_CLKSEL_MUX_MASK, MRCC_MRCC_LPSPI1_CLKSEL_MUX(0));
 
 	//Enable LPSPI1 and set divider to 0, so clock frequency is 12MHz
-	modifyReg32(&MRCC0->MRCC_LPSPI1_CLKDIV,
-			MRCC_MRCC_LPSPI1_CLKDIV_HALT_MASK | MRCC_MRCC_LPSPI1_CLKDIV_DIV_MASK,
-			MRCC_MRCC_LPSPI1_CLKDIV_DIV(0));
+	modifyReg32(&MRCC0->MRCC_LPSPI1_CLKDIV, MRCC_MRCC_LPSPI1_CLKDIV_HALT_MASK | MRCC_MRCC_LPSPI1_CLKDIV_DIV_MASK,
+		    MRCC_MRCC_LPSPI1_CLKDIV_DIV(0));
 
 	//Enable peripheral clocks
 	MRCC0->MRCC_GLB_CC0_SET = MRCC_MRCC_GLB_CC0_LPSPI1(1);
@@ -35,9 +34,7 @@ void init_apa102(void)
 
 	//Set that SIN is used for input and SOUT for output data
 	//Set LPSPI master operating mode
-	modifyReg32(&LPSPI1->CFGR1,
-			LPSPI_CFGR1_PINCFG_MASK | LPSPI_CFGR1_MASTER_MASK,
-			LPSPI_CFGR1_PINCFG(0) | LPSPI_CFGR1_MASTER(1));
+	modifyReg32(&LPSPI1->CFGR1, LPSPI_CFGR1_PINCFG_MASK | LPSPI_CFGR1_MASTER_MASK, LPSPI_CFGR1_PINCFG(0) | LPSPI_CFGR1_MASTER(1));
 
 	//Set CCR
 	LPSPI1->CCR = 0;
@@ -45,9 +42,8 @@ void init_apa102(void)
 	//Set baud rate to 6MHz by setting prescaler to 0.
 	//Baud rate = function clock ÷ (2^PRESCALE × (SCKSET + SCKHLD + 2))
 	//Set frame size to 32.
-	modifyReg32(&LPSPI1->TCR,
-			LPSPI_TCR_PRESCALE_MASK | LPSPI_TCR_FRAMESZ_MASK,
-			LPSPI_TCR_PRESCALE(0) | LPSPI_TCR_FRAMESZ(31) | LPSPI_TCR_RXMSK(1));
+	modifyReg32(&LPSPI1->TCR, LPSPI_TCR_PRESCALE_MASK | LPSPI_TCR_FRAMESZ_MASK,
+		    LPSPI_TCR_PRESCALE(0) | LPSPI_TCR_FRAMESZ(31) | LPSPI_TCR_RXMSK(1));
 
 	//Configure LPSPI pins, P2_12 = SCK, P2_13 = SDO
 	modifyReg32(&PORT2->PCR[12], PORT_PCR_MUX_MASK, PORT_PCR_MUX(2));
@@ -82,8 +78,6 @@ void send_LED_RGB(uint8_t red, uint8_t green, uint8_t blue)
 		LPSPI1->TDR = dataframe[i];
 
 		//Wait while LPSPI is busy
-		while(LPSPI1->SR & LPSPI_SR_MBF_MASK) {}
+		while (LPSPI1->SR & LPSPI_SR_MBF_MASK) {}
 	}
 }
-
-

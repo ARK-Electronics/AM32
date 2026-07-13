@@ -6,7 +6,7 @@
  * Description        : Library configuration file.
 *********************************************************************************
 * Copyright (c) 2021 Nanjing Qinheng Microelectronics Co., Ltd.
-* Attention: This software (modified or not) and binary are used for 
+* Attention: This software (modified or not) and binary are used for
 * microcontroller manufactured by Nanjing Qinheng Microelectronics.
 *******************************************************************************/
 #ifndef __CH32V20x_CONF_H
@@ -33,10 +33,4 @@
 #include "ch32v20x_it.h"
 #include "ch32v20x_misc.h"
 
-
 #endif /* __CH32V20x_CONF_H */
-
-
-	
-	
-	

@@ -204,14 +204,14 @@ an settings option)
 *2.11    - RC-Car mode fix
 *2.12    - Reduce Advance on hard braking
 *2.13    - Remove Input capture filter for dshot2400
-         - Change dshot 300 speed detection threshold 
+         - Change dshot 300 speed detection threshold
 *2.14    - Reduce G071 zero cross checks
          - Assign all mcu's duty cycle resolution 2000 steps
 *2.15    - Enforce 1/2 commutation interval as minimum for g071
          - Revert timing change on braking
 				 - Add per target over-ride option to max duty cycle change.
 				 - todo fix signal detection
-*2.16    - add L431 
+*2.16    - add L431
 				 - add variable auto timing
 				 - add droneCAN
 */
@@ -248,41 +248,39 @@ an settings option)
 #include <assert.h>
 
 #ifndef NXP
-#ifdef USE_LED_STRIP
-#include "WS2812.h"
-#endif
+#	ifdef USE_LED_STRIP
+#		include "WS2812.h"
+#	endif
 #endif
 
 #ifdef USE_CRSF_INPUT
-#include "crsf.h"
+#	include "crsf.h"
 #endif
 
 #if DRONECAN_SUPPORT
-#include "DroneCAN/DroneCAN.h"
+#	include "DroneCAN/DroneCAN.h"
 #endif
 
 #include "version.h"
-
 
 // firmware build options !! fixed speed and duty cycle modes are not to be used
 // with sinusoidal startup !!
 
 //#define FIXED_DUTY_MODE  // bypasses signal input and arming, uses a set duty
-// cycle. For pumps, slot cars etc 
+// cycle. For pumps, slot cars etc
 //#define FIXED_DUTY_MODE_POWER 100     //
 // 0-100 percent not used in fixed speed mode
 
 // #define FIXED_SPEED_MODE  // bypasses input signal and runs at a fixed rpm
-// using the speed control loop PID 
+// using the speed control loop PID
 //#define FIXED_SPEED_MODE_RPM  1000  //
 // intended final rpm , ensure pole pair numbers are entered correctly in config
 // tool.
 
 // #define BRUSHED_MODE         // overrides all brushless config settings,
-// enables two channels for brushed control 
+// enables two channels for brushed control
 //#define GIMBAL_MODE     // also
 // sinusoidal_startup needs to be on, maps input to sinusoidal angle.
-
 
 /* Runtime globals: motor_runtime.c */
 
@@ -290,234 +288,237 @@ an settings option)
 
 int main(void)
 {
-
 #ifdef NXP
-    initCorePeripherals();
-    checkDeviceInfo();
-    loadEEpromSettings();
-    enableCorePeripherals();
-    initAfterJump();
+	initCorePeripherals();
+	checkDeviceInfo();
+	loadEEpromSettings();
+	enableCorePeripherals();
+	initAfterJump();
 #else
-    initAfterJump();
-    checkDeviceInfo();
-    initCorePeripherals();
-    enableCorePeripherals();
-    loadEEpromSettings();
+	initAfterJump();
+	checkDeviceInfo();
+	initCorePeripherals();
+	enableCorePeripherals();
+	loadEEpromSettings();
 #endif
 
-    if (VERSION_MAJOR != eepromBuffer.version.major || VERSION_MINOR != eepromBuffer.version.minor || EEPROM_VERSION > eepromBuffer.eeprom_version) {
-        eepromBuffer.version.major = VERSION_MAJOR;
-        eepromBuffer.version.minor = VERSION_MINOR;
-        eepromBuffer.eeprom_version = EEPROM_VERSION;
-        saveEEpromSettings();
-    }
-    
-    if (eepromBuffer.dir_reversed == 1) {
-        forward = 0;
-    } else {
-        forward = 1;
-    }
-    tim1_arr = TIMER1_MAX_ARR;
-    if (!eepromBuffer.comp_pwm) {
-        eepromBuffer.use_sine_start = 0; // sine start requires complementary pwm.
-    }
+	if (VERSION_MAJOR != eepromBuffer.version.major || VERSION_MINOR != eepromBuffer.version.minor ||
+	    EEPROM_VERSION > eepromBuffer.eeprom_version) {
+		eepromBuffer.version.major = VERSION_MAJOR;
+		eepromBuffer.version.minor = VERSION_MINOR;
+		eepromBuffer.eeprom_version = EEPROM_VERSION;
+		saveEEpromSettings();
+	}
 
-    if (eepromBuffer.rc_car_reverse) { // overrides a whole lot of things!
-        throttle_max_at_low_rpm = 1000;
-        eepromBuffer.bi_direction = 1;
-        eepromBuffer.use_sine_start = 0;
-        low_rpm_throttle_limit = 1;
-        eepromBuffer.variable_pwm = 0;
-        // eepromBuffer.stall_protection = 1;
-        eepromBuffer.comp_pwm = 0;
-        eepromBuffer.stuck_rotor_protection = 0;
-        minimum_duty_cycle = minimum_duty_cycle + 50;
-        stall_protect_minimum_duty = stall_protect_minimum_duty + 50;
-        min_startup_duty = min_startup_duty + 50;
-    }
+	if (eepromBuffer.dir_reversed == 1) {
+		forward = 0;
+	} else {
+		forward = 1;
+	}
+	tim1_arr = TIMER1_MAX_ARR;
+	if (!eepromBuffer.comp_pwm) {
+		eepromBuffer.use_sine_start = 0; // sine start requires complementary pwm.
+	}
+
+	if (eepromBuffer.rc_car_reverse) { // overrides a whole lot of things!
+		throttle_max_at_low_rpm = 1000;
+		eepromBuffer.bi_direction = 1;
+		eepromBuffer.use_sine_start = 0;
+		low_rpm_throttle_limit = 1;
+		eepromBuffer.variable_pwm = 0;
+		// eepromBuffer.stall_protection = 1;
+		eepromBuffer.comp_pwm = 0;
+		eepromBuffer.stuck_rotor_protection = 0;
+		minimum_duty_cycle = minimum_duty_cycle + 50;
+		stall_protect_minimum_duty = stall_protect_minimum_duty + 50;
+		min_startup_duty = min_startup_duty + 50;
+	}
 
 #ifdef MCU_F031
-    GPIOF->BSRR = LL_GPIO_PIN_6; // uncomment to take bridge out of standby mode
-                                 // and set oc level
-    GPIOF->BRR = LL_GPIO_PIN_7; // out of standby mode
-    GPIOA->BRR = LL_GPIO_PIN_11;
+	GPIOF->BSRR = LL_GPIO_PIN_6; // uncomment to take bridge out of standby mode
+	// and set oc level
+	GPIOF->BRR = LL_GPIO_PIN_7; // out of standby mode
+	GPIOA->BRR = LL_GPIO_PIN_11;
 #endif
 #ifdef MCU_G031
-    GPIOA->BRR = LL_GPIO_PIN_11;
-    GPIOA->BSRR = LL_GPIO_PIN_12;    // Pa12 attached to enable on dev board
+	GPIOA->BRR = LL_GPIO_PIN_11;
+	GPIOA->BSRR = LL_GPIO_PIN_12; // Pa12 attached to enable on dev board
 #endif
 #ifdef USE_LED_STRIP
-    send_LED_RGB(125, 0, 0);
+	send_LED_RGB(125, 0, 0);
 #endif
 #ifdef USE_RGB_LED
-     setIndividualRGBLed(1,0,0);
+	setIndividualRGBLed(1, 0, 0);
 #endif
 
 #ifdef USE_CRSF_INPUT
-    inputSet = 1;
-    playStartupTune();
-    MX_IWDG_Init();
-    LL_IWDG_ReloadCounter(IWDG);
+	inputSet = 1;
+	playStartupTune();
+	MX_IWDG_Init();
+	LL_IWDG_ReloadCounter(IWDG);
 #else
-#if defined(FIXED_DUTY_MODE) || defined(FIXED_SPEED_MODE)
-    MX_IWDG_Init();
-    RELOAD_WATCHDOG_COUNTER();
-    inputSet = 1;
-    escToArmedIdle();
-    adjusted_input = 48;
-    newinput = 48;
-		comStep(2);
-#ifdef FIXED_SPEED_MODE
-    use_speed_control_loop = 1;
-    eepromBuffer.use_sine_start = 0;
-    target_e_com_time = 60000000 / FIXED_SPEED_MODE_RPM / (eepromBuffer.motor_poles / 2);
-    input = 48;
-#endif
+#	if defined(FIXED_DUTY_MODE) || defined(FIXED_SPEED_MODE)
+	MX_IWDG_Init();
+	RELOAD_WATCHDOG_COUNTER();
+	inputSet = 1;
+	escToArmedIdle();
+	adjusted_input = 48;
+	newinput = 48;
+	comStep(2);
+#		ifdef FIXED_SPEED_MODE
+	use_speed_control_loop = 1;
+	eepromBuffer.use_sine_start = 0;
+	target_e_com_time = 60000000 / FIXED_SPEED_MODE_RPM / (eepromBuffer.motor_poles / 2);
+	input = 48;
+#		endif
 
-#else
-#ifdef BRUSHED_MODE
-    // bi_direction = 1;
-    commutation_interval = 5000;
-    eepromBuffer.use_sine_start = 0;
-    maskPhaseInterrupts();
-    playBrushedStartupTune();
-#else
- #ifdef MCU_AT415
-    play_tone_flag = 5;
- #else
-    playStartupTune();
-	#endif
-#endif
-    zero_input_count = 0;
-    MX_IWDG_Init();
-    RELOAD_WATCHDOG_COUNTER();
-#ifdef GIMBAL_MODE
-    eepromBuffer.bi_direction = 1;
-    eepromBuffer.use_sine_start = 1;
-#endif
+#	else
+#		ifdef BRUSHED_MODE
+	// bi_direction = 1;
+	commutation_interval = 5000;
+	eepromBuffer.use_sine_start = 0;
+	maskPhaseInterrupts();
+	playBrushedStartupTune();
+#		else
+#			ifdef MCU_AT415
+	play_tone_flag = 5;
+#			else
+	playStartupTune();
+#			endif
+#		endif
+	zero_input_count = 0;
+	MX_IWDG_Init();
+	RELOAD_WATCHDOG_COUNTER();
+#		ifdef GIMBAL_MODE
+	eepromBuffer.bi_direction = 1;
+	eepromBuffer.use_sine_start = 1;
+#		endif
 
-#ifdef USE_ADC_INPUT
-    armed_count_threshold = 5000;
-    inputSet = 1;
+#		ifdef USE_ADC_INPUT
+	armed_count_threshold = 5000;
+	inputSet = 1;
 
-#else
-    // checkForHighSignal();     // will reboot if signal line is high for 10ms
-    receiveDshotDma();
-    if (drive_by_rpm) {
-        use_speed_control_loop = 1;
-    }
-#endif
+#		else
+	// checkForHighSignal();     // will reboot if signal line is high for 10ms
+	receiveDshotDma();
+	if (drive_by_rpm) {
+		use_speed_control_loop = 1;
+	}
+#		endif
 
-#endif // end fixed duty mode ifdef
-#endif // end crsf input
+#	endif // end fixed duty mode ifdef
+#endif	       // end crsf input
 
 #ifdef MCU_F051
-    MCU_Id = DBGMCU->IDCODE &= 0xFFF;
-    REV_Id = DBGMCU->IDCODE >> 16;
+	MCU_Id = DBGMCU->IDCODE &= 0xFFF;
+	REV_Id = DBGMCU->IDCODE >> 16;
 
-    if (REV_Id >= 4096) {
-        temperature_offset = 0;
-    } else {
-        temperature_offset = 230;
-    }
+	if (REV_Id >= 4096) {
+		temperature_offset = 0;
+	} else {
+		temperature_offset = 230;
+	}
 
 #endif
 #ifdef NEUTRONRC_G071
-    setInputPullDown();
+	setInputPullDown();
 #else
-    setInputPullUp();
+	setInputPullUp();
 #endif
 
 #ifdef USE_STARTUP_BOOST
-  min_startup_duty = min_startup_duty + 200 + ((eepromBuffer.pwm_frequency * 100)/24);
-  minimum_duty_cycle = minimum_duty_cycle + 50 + ((eepromBuffer.pwm_frequency * 50 )/24);
-  startup_max_duty_cycle = startup_max_duty_cycle + 400;
+	min_startup_duty = min_startup_duty + 200 + ((eepromBuffer.pwm_frequency * 100) / 24);
+	minimum_duty_cycle = minimum_duty_cycle + 50 + ((eepromBuffer.pwm_frequency * 50) / 24);
+	startup_max_duty_cycle = startup_max_duty_cycle + 400;
 #endif
 
-    uint16_t last_tim1_arr = 0; // force scale factor computation on first pass
+	uint16_t last_tim1_arr = 0; // force scale factor computation on first pass
 
-    // minimum_duty_cycle is final at this point, precompute the input to duty
-    // cycle slopes so setInput multiplies instead of calling map()
-    throttle_duty_slope_q16 = (((uint32_t)(2000 - minimum_duty_cycle)) << 16) / (2047 - 47);
-    sine_throttle_duty_slope_q16 = (((uint32_t)(2000 - (minimum_duty_cycle + 40))) << 16) / (2047 - 137);
+	// minimum_duty_cycle is final at this point, precompute the input to duty
+	// cycle slopes so setInput multiplies instead of calling map()
+	throttle_duty_slope_q16 = (((uint32_t)(2000 - minimum_duty_cycle)) << 16) / (2047 - 47);
+	sine_throttle_duty_slope_q16 = (((uint32_t)(2000 - (minimum_duty_cycle + 40))) << 16) / (2047 - 137);
 
-    escReconcileFromFlags();
+	escReconcileFromFlags();
 
-    while (1) {
-        HWCI_PERF_MAIN_LOOP();
-e_com_time = ((commutation_intervals[0] + commutation_intervals[1] + commutation_intervals[2] + commutation_intervals[3] + commutation_intervals[4] + commutation_intervals[5]) + 4) >> 1; // COMMUTATION INTERVAL IS 0.5US INCREMENTS 
+	while (1) {
+		HWCI_PERF_MAIN_LOOP();
+		e_com_time = ((commutation_intervals[0] + commutation_intervals[1] + commutation_intervals[2] + commutation_intervals[3] +
+			       commutation_intervals[4] + commutation_intervals[5]) +
+			      4) >>
+			     1; // COMMUTATION INTERVAL IS 0.5US INCREMENTS
 
 #if defined(FIXED_DUTY_MODE) || defined(FIXED_SPEED_MODE)
-        setInput();
+		setInput();
 #endif
 
 #ifdef NEED_INPUT_READY
- #ifdef MCU_F031
-    if (input_ready) {
-    setInput(); 
-    input_ready = 0;
-    }
-#else
-    if (input_ready) {
-     processDshot();
-     input_ready = 0;
-     }
+#	ifdef MCU_F031
+		if (input_ready) {
+			setInput();
+			input_ready = 0;
+		}
+#	else
+		if (input_ready) {
+			processDshot();
+			input_ready = 0;
+		}
+#	endif
 #endif
-#endif
-if(zero_crosses < 5){
-    if(eepromBuffer.bi_direction){
-     min_bemf_counts_up = TARGET_MIN_BEMF_COUNTS + 1;
-     min_bemf_counts_down = TARGET_MIN_BEMF_COUNTS + 1;
-   }else{
-     min_bemf_counts_up = TARGET_MIN_BEMF_COUNTS * 2;
-     min_bemf_counts_down = TARGET_MIN_BEMF_COUNTS * 2;
-   }
-}else{
-	  min_bemf_counts_up = TARGET_MIN_BEMF_COUNTS;
-	  min_bemf_counts_down = TARGET_MIN_BEMF_COUNTS;
-}
+		if (zero_crosses < 5) {
+			if (eepromBuffer.bi_direction) {
+				min_bemf_counts_up = TARGET_MIN_BEMF_COUNTS + 1;
+				min_bemf_counts_down = TARGET_MIN_BEMF_COUNTS + 1;
+			} else {
+				min_bemf_counts_up = TARGET_MIN_BEMF_COUNTS * 2;
+				min_bemf_counts_down = TARGET_MIN_BEMF_COUNTS * 2;
+			}
+		} else {
+			min_bemf_counts_up = TARGET_MIN_BEMF_COUNTS;
+			min_bemf_counts_down = TARGET_MIN_BEMF_COUNTS;
+		}
 
-       RELOAD_WATCHDOG_COUNTER();
+		RELOAD_WATCHDOG_COUNTER();
 
-        runtimeUpdateVariablePwm(&last_tim1_arr);
-        faultPollSignalTimeout();
+		runtimeUpdateVariablePwm(&last_tim1_arr);
+		faultPollSignalTimeout();
 #ifdef USE_CUSTOM_LED
-        if ((input >= 47) && (input < 1947)) {
-            if (ledcounter > (2000 >> forward)) {
-                GPIOB->BSRR = LL_GPIO_PIN_3;
-            } else {
-                GPIOB->BRR = LL_GPIO_PIN_3;
-            }
-            if (ledcounter > (4000 >> forward)) {
-                ledcounter = 0;
-            }
-        }
-        if (input > 1947) {
-            GPIOB->BSRR = LL_GPIO_PIN_3;
-        }
-        if (input < 47) {
-            GPIOB->BRR = LL_GPIO_PIN_3;
-        }
+		if ((input >= 47) && (input < 1947)) {
+			if (ledcounter > (2000 >> forward)) {
+				GPIOB->BSRR = LL_GPIO_PIN_3;
+			} else {
+				GPIOB->BRR = LL_GPIO_PIN_3;
+			}
+			if (ledcounter > (4000 >> forward)) {
+				ledcounter = 0;
+			}
+		}
+		if (input > 1947) {
+			GPIOB->BSRR = LL_GPIO_PIN_3;
+		}
+		if (input < 47) {
+			GPIOB->BRR = LL_GPIO_PIN_3;
+		}
 #endif
 
-        if (tenkhzcounter > LOOP_FREQUENCY_HZ) { // 1s sample interval 10000
-            consumed_current += (actual_current << 16) / 360;
-            tenkhzcounter = 0;
-        }
+		if (tenkhzcounter > LOOP_FREQUENCY_HZ) { // 1s sample interval 10000
+			consumed_current += (actual_current << 16) / 360;
+			tenkhzcounter = 0;
+		}
 
-        faultUpdateBemfTimeoutPolicy();
-        runtimeProcessDesyncCheck();
-        runtimeUpdateDshotIrqPriority();
-        runtimeSendTelemetryIfNeeded();
-        runtimeProcessAdcAndProtections();
-        runtimeMotorModeTick();
+		faultUpdateBemfTimeoutPolicy();
+		runtimeProcessDesyncCheck();
+		runtimeUpdateDshotIrqPriority();
+		runtimeSendTelemetryIfNeeded();
+		runtimeProcessAdcAndProtections();
+		runtimeMotorModeTick();
 #ifdef BRUSHED_MODE
-        runBrushedLoop();
+		runBrushedLoop();
 #endif
 #if DRONECAN_SUPPORT
-	DroneCAN_update();
+		DroneCAN_update();
 #endif
-    }
+	}
 }
 
 #ifdef USE_FULL_ASSERT
@@ -528,12 +529,12 @@ if(zero_crosses < 5){
  * @param  line: assert_param error line source number
  * @retval None
  */
-void assert_failed(uint8_t* file, uint32_t line)
+void assert_failed(uint8_t *file, uint32_t line)
 {
-    /* USER CODE BEGIN 6 */
-    /* User can add his own implementation to report the file name and line
+	/* USER CODE BEGIN 6 */
+	/* User can add his own implementation to report the file name and line
        number, tex: printf("Wrong parameters value: file %s on line %d\r\n", file,
        line) */
-    /* USER CODE END 6 */
+	/* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */

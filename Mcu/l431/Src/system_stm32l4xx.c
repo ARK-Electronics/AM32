@@ -69,10 +69,10 @@
 */
 uint32_t SystemCoreClock = 4000000U;
 
-const uint8_t  AHBPrescTable[16] = {0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U, 1U, 2U, 3U, 4U, 6U, 7U, 8U, 9U};
-const uint8_t  APBPrescTable[8] =  {0U, 0U, 0U, 0U, 1U, 2U, 3U, 4U};
-const uint32_t MSIRangeTable[12] = {100000U,   200000U,   400000U,   800000U,  1000000U,  2000000U, \
-                                    4000000U, 8000000U, 16000000U, 24000000U, 32000000U, 48000000U};
+const uint8_t AHBPrescTable[16] = {0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U, 1U, 2U, 3U, 4U, 6U, 7U, 8U, 9U};
+const uint8_t APBPrescTable[8] = {0U, 0U, 0U, 0U, 1U, 2U, 3U, 4U};
+const uint32_t MSIRangeTable[12] = {100000U,  200000U,	400000U,   800000U,   1000000U,	 2000000U,
+				    4000000U, 8000000U, 16000000U, 24000000U, 32000000U, 48000000U};
 
 /**
   * @brief  Setup the microcontroller system.
@@ -82,31 +82,31 @@ const uint32_t MSIRangeTable[12] = {100000U,   200000U,   400000U,   800000U,  1
 void SystemInit(void)
 {
 #if defined(USER_VECT_TAB_ADDRESS)
-  /* Configure the Vector Table location -------------------------------------*/
-  SCB->VTOR = VECT_TAB_BASE_ADDRESS | VECT_TAB_OFFSET;
+	/* Configure the Vector Table location -------------------------------------*/
+	SCB->VTOR = VECT_TAB_BASE_ADDRESS | VECT_TAB_OFFSET;
 #endif
 
-  /* FPU settings ------------------------------------------------------------*/
+	/* FPU settings ------------------------------------------------------------*/
 #if (__FPU_PRESENT == 1) && (__FPU_USED == 1)
-  SCB->CPACR |= ((3UL << 20U)|(3UL << 22U));  /* set CP10 and CP11 Full Access */
+	SCB->CPACR |= ((3UL << 20U) | (3UL << 22U)); /* set CP10 and CP11 Full Access */
 #endif
 
-  /* Reset the RCC clock configuration to the default reset state ------------*/
-  /* Set MSION bit */
-  RCC->CR |= RCC_CR_MSION;
+	/* Reset the RCC clock configuration to the default reset state ------------*/
+	/* Set MSION bit */
+	RCC->CR |= RCC_CR_MSION;
 
-  /* Reset CFGR register */
-  RCC->CFGR = 0x00000000U;
+	/* Reset CFGR register */
+	RCC->CFGR = 0x00000000U;
 
-  /* Reset HSEON, CSSON , HSION, and PLLON bits */
-  RCC->CR &= 0xEAF6FFFFU;
+	/* Reset HSEON, CSSON , HSION, and PLLON bits */
+	RCC->CR &= 0xEAF6FFFFU;
 
-  /* Reset PLLCFGR register */
-  RCC->PLLCFGR = 0x00001000U;
+	/* Reset PLLCFGR register */
+	RCC->PLLCFGR = 0x00001000U;
 
-  /* Reset HSEBYP bit */
-  RCC->CR &= 0xFFFBFFFFU;
+	/* Reset HSEBYP bit */
+	RCC->CR &= 0xFFFBFFFFU;
 
-  /* Disable all interrupts */
-  RCC->CIER = 0x00000000U;
+	/* Disable all interrupts */
+	RCC->CIER = 0x00000000U;
 }

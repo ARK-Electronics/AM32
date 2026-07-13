@@ -6,7 +6,7 @@
  */
 
 #ifndef COMPARATOR_H_
-#define COMPARATOR_H_
+#	define COMPARATOR_H_
 #endif /* COMPARATOR_H_ */
 
 #define COMP_PA0 0b1100001

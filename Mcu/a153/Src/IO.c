@@ -7,8 +7,9 @@
 
 #include "IO.h"
 
-char ic_timer_prescaler = (CPU_FREQUENCY_MHZ / 5);	//Used to detect input type (Dshot300, Dshot600 and PWM400). Divide by 8 is best for MCXA153 at 96MHz CPU
-volatile uint32_t dma_buffer[64] = { 0 };
+char ic_timer_prescaler =
+	(CPU_FREQUENCY_MHZ / 5); //Used to detect input type (Dshot300, Dshot600 and PWM400). Divide by 8 is best for MCXA153 at 96MHz CPU
+volatile uint32_t dma_buffer[64] = {0};
 char out_put = 0;
 uint8_t buffer_padding = 0;
 
@@ -25,15 +26,14 @@ void receiveDshotDma()
 
 	//Disable clearing the timer when capture event occurs
 	modifyReg32(&CTIMER0->CTCR, CTIMER_CTCR_ENCC_MASK, 0);
-	
+
 	//Disable DMA hardware request
 	modifyReg32(&DMA0->CH[DMA_CH_DshotPWM].CH_CSR, DMA_CH_CSR_ERQ_MASK, 0);
 
 	//Set PWM/Dshot input pin to timer capture/compare input
 	//Enable input buffer and disable pull-up/down resistor
-	modifyReg32(&INPUT_PIN_PORT->PCR[INPUT_PIN],
-			PORT_PCR_MUX_MASK | PORT_PCR_IBE_MASK | PORT_PCR_PE_MASK | PORT_PCR_PS_MASK,
-			PORT_PCR_MUX(INPUT_PIN_ALT_FUNC) | PORT_PCR_IBE(1) | PORT_PCR_PE(0) | PORT_PCR_PS(1));
+	modifyReg32(&INPUT_PIN_PORT->PCR[INPUT_PIN], PORT_PCR_MUX_MASK | PORT_PCR_IBE_MASK | PORT_PCR_PE_MASK | PORT_PCR_PS_MASK,
+		    PORT_PCR_MUX(INPUT_PIN_ALT_FUNC) | PORT_PCR_IBE(1) | PORT_PCR_PE(0) | PORT_PCR_PS(1));
 
 	if (buffersize > 3) {
 		//Update Match1 event to correct for possible prescaler changes. Should be around 10us.
@@ -69,12 +69,11 @@ void receiveDshotDma()
 	resetInputCaptureTimer();
 
 	// Wait for timer to be larger than 0, otherwise DMA request is triggered.
-	while (CTIMER0->TC == 0)
-	{
+	while (CTIMER0->TC == 0) {
 		// Do nothing
-		__asm volatile ("nop");
+		__asm volatile("nop");
 	}
-	
+
 	//Clear CTimer interrupt request to prevent unwanted DMA triggers
 	modifyReg32(&CTIMER0->IR, 0, 0xff);
 
@@ -91,9 +90,8 @@ void sendDshotDma()
 	out_put = 1;
 
 	//Change Dshot pin to SPI0_SDI with pull-up
-	modifyReg32(&INPUT_PIN_PORT->PCR[INPUT_PIN],
-			PORT_PCR_MUX_MASK | PORT_PCR_IBE_MASK | PORT_PCR_PE_MASK | PORT_PCR_PS_MASK,
-			PORT_PCR_MUX(2) | PORT_PCR_IBE(0) | PORT_PCR_PE(1) | PORT_PCR_PS(1));
+	modifyReg32(&INPUT_PIN_PORT->PCR[INPUT_PIN], PORT_PCR_MUX_MASK | PORT_PCR_IBE_MASK | PORT_PCR_PE_MASK | PORT_PCR_PS_MASK,
+		    PORT_PCR_MUX(2) | PORT_PCR_IBE(0) | PORT_PCR_PE(1) | PORT_PCR_PS(1));
 
 	//Functional LPSPI0 clock is 12MHz. To get 5/4 x Dshot bit rate, SPI prescaler should be:
 	//Dshot600 => 750kbit => prescaler = 8
@@ -103,16 +101,14 @@ void sendDshotDma()
 	if (ic_timer_prescaler) {
 		//Set transmit prescaler to 16 for Dshot300
 		//Set framesize to 21 bits
-		modifyReg32(&LPSPI0->TCR,
-				LPSPI_TCR_PRESCALE_MASK | LPSPI_TCR_FRAMESZ_MASK,
-				LPSPI_TCR_PRESCALE(4) | LPSPI_TCR_FRAMESZ(20) | LPSPI_TCR_RXMSK(1));
-	//Is Dshot600
+		modifyReg32(&LPSPI0->TCR, LPSPI_TCR_PRESCALE_MASK | LPSPI_TCR_FRAMESZ_MASK,
+			    LPSPI_TCR_PRESCALE(4) | LPSPI_TCR_FRAMESZ(20) | LPSPI_TCR_RXMSK(1));
+		//Is Dshot600
 	} else {
 		//Set transmit prescaler to 8 for Dshot600
 		//Set framesize to 21 bits
-		modifyReg32(&LPSPI0->TCR,
-				LPSPI_TCR_PRESCALE_MASK | LPSPI_TCR_FRAMESZ_MASK,
-				LPSPI_TCR_PRESCALE(3) | LPSPI_TCR_FRAMESZ(20) | LPSPI_TCR_RXMSK(1));
+		modifyReg32(&LPSPI0->TCR, LPSPI_TCR_PRESCALE_MASK | LPSPI_TCR_FRAMESZ_MASK,
+			    LPSPI_TCR_PRESCALE(3) | LPSPI_TCR_FRAMESZ(20) | LPSPI_TCR_RXMSK(1));
 	}
 
 	//Send GCR data to LPSPI FIFO
@@ -122,18 +118,16 @@ void sendDshotDma()
 uint8_t getInputPinState()
 {
 	//Set INPUT_PIN to a GPIO pin
-	modifyReg32(&INPUT_PIN_PORT->PCR[INPUT_PIN],
-			PORT_PCR_MUX_MASK | PORT_PCR_IBE_MASK | PORT_PCR_PE_MASK | PORT_PCR_PS_MASK,
-			PORT_PCR_MUX(0) | PORT_PCR_IBE(1) | PORT_PCR_PE(0) | PORT_PCR_PS(1));
+	modifyReg32(&INPUT_PIN_PORT->PCR[INPUT_PIN], PORT_PCR_MUX_MASK | PORT_PCR_IBE_MASK | PORT_PCR_PE_MASK | PORT_PCR_PS_MASK,
+		    PORT_PCR_MUX(0) | PORT_PCR_IBE(1) | PORT_PCR_PE(0) | PORT_PCR_PS(1));
 
 	//Read INPUT_PIN value
 	uint8_t readPinData = INPUT_PIN_GPIO->PDR[INPUT_PIN];
 
 	//Set PWM/Dshot input pin to timer capture/compare input
 	//Enable input buffer and disable pull-up/down resistor
-	modifyReg32(&INPUT_PIN_PORT->PCR[INPUT_PIN],
-			PORT_PCR_MUX_MASK | PORT_PCR_IBE_MASK | PORT_PCR_PE_MASK | PORT_PCR_PS_MASK,
-			PORT_PCR_MUX(INPUT_PIN_ALT_FUNC) | PORT_PCR_IBE(1) | PORT_PCR_PE(0) | PORT_PCR_PS(1));
+	modifyReg32(&INPUT_PIN_PORT->PCR[INPUT_PIN], PORT_PCR_MUX_MASK | PORT_PCR_IBE_MASK | PORT_PCR_PE_MASK | PORT_PCR_PS_MASK,
+		    PORT_PCR_MUX(INPUT_PIN_ALT_FUNC) | PORT_PCR_IBE(1) | PORT_PCR_PE(0) | PORT_PCR_PS(1));
 
 	return readPinData;
 }
@@ -141,17 +135,13 @@ uint8_t getInputPinState()
 void setInputPullDown()
 {
 	//Enable internal pull-down resistor
-	modifyReg32(&INPUT_PIN_PORT->PCR[INPUT_PIN],
-			PORT_PCR_PE_MASK | PORT_PCR_PS_MASK,
-			PORT_PCR_PE(1) | PORT_PCR_PS(0));
+	modifyReg32(&INPUT_PIN_PORT->PCR[INPUT_PIN], PORT_PCR_PE_MASK | PORT_PCR_PS_MASK, PORT_PCR_PE(1) | PORT_PCR_PS(0));
 }
 
 void setInputPullUp()
 {
 	//Enable internal pull-up resistor
-	modifyReg32(&INPUT_PIN_PORT->PCR[INPUT_PIN],
-			PORT_PCR_PE_MASK | PORT_PCR_PS_MASK,
-			PORT_PCR_PE(1) | PORT_PCR_PS(1));
+	modifyReg32(&INPUT_PIN_PORT->PCR[INPUT_PIN], PORT_PCR_PE_MASK | PORT_PCR_PS_MASK, PORT_PCR_PE(1) | PORT_PCR_PS(1));
 }
 
 void setInputPullNone()

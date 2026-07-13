@@ -7,6 +7,21 @@ on:
   workflow_dispatch:
 
 jobs:
+  format:
+    name: clang-format (check_format)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install clang-format
+        run: |
+          python3 -m pip install --user 'clang-format==22.1.5'
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          clang-format --version
+
+      - name: Check formatting
+        run: make check_format
+
   cppcheck:
     name: cppcheck (ARK F051 control path)
     runs-on: ubuntu-latest

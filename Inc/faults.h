@@ -11,10 +11,10 @@
 
 /* Optional fault IDs for future telemetry / logging (not yet exposed). */
 typedef enum {
-    FAULT_NONE = 0,
-    FAULT_STUCK_ROTOR,
-    FAULT_SIGNAL_TIMEOUT,
-    FAULT_BEMF_STALL,
+	FAULT_NONE = 0,
+	FAULT_STUCK_ROTOR,
+	FAULT_SIGNAL_TIMEOUT,
+	FAULT_BEMF_STALL,
 } fault_id_t;
 
 /*

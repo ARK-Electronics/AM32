@@ -21,11 +21,11 @@
 /* Define to prevent recursive inclusion
  * -------------------------------------*/
 #ifndef __STM32G0xx_IT_H
-#define __STM32G0xx_IT_H
+#	define __STM32G0xx_IT_H
 
-#ifdef __cplusplus
+#	ifdef __cplusplus
 extern "C" {
-#endif
+#	endif
 
 /* Private includes
  * ----------------------------------------------------------*/
@@ -72,9 +72,9 @@ void DMA1_Ch4_7_DMAMUX1_OVR_IRQHandler(void);
 void TIM6_DAC_LPTIM1_IRQHandler(void);
 /* USER CODE END EFP */
 
-#ifdef __cplusplus
+#	ifdef __cplusplus
 }
-#endif
+#	endif
 
 #endif /* __STM32G0xx_IT_H */
 

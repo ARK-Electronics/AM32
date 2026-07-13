@@ -41,9 +41,7 @@ void initDMA_DshotPWM(void)
 
 	//Set number of bytes to 8
 	//We are reading CR[1] and CR[2]
-	modifyReg32(&DMA0->CH[DMA_CH_DshotPWM].TCD_NBYTES_MLOFFNO,
-			DMA_TCD_NBYTES_MLOFFNO_NBYTES_MASK,
-			DMA_TCD_NBYTES_MLOFFNO_NBYTES(8));
+	modifyReg32(&DMA0->CH[DMA_CH_DshotPWM].TCD_NBYTES_MLOFFNO, DMA_TCD_NBYTES_MLOFFNO_NBYTES_MASK, DMA_TCD_NBYTES_MLOFFNO_NBYTES(8));
 
 	//Set source address to CR[1] to make the DMA circulate between CR[1] and CR[2] properly
 	DMA0->CH[DMA_CH_DshotPWM].TCD_SADDR = (uint32_t)&CTIMER0->CR[1];
@@ -80,7 +78,7 @@ void initDMA_DshotPWM(void)
 	DMA0->CH[DMA_CH_DshotPWM].CH_MUX = kDma0RequestMuxCtimer0M0;
 
 	//Enable DMA0 CH0 interrupts
-	__NVIC_SetPriority(DMA_CH_DshotPWM_IRQ, 1);		//Set Dshot/PWM interrupt priority to 1
+	__NVIC_SetPriority(DMA_CH_DshotPWM_IRQ, 1); //Set Dshot/PWM interrupt priority to 1
 	__NVIC_EnableIRQ(DMA_CH_DshotPWM_IRQ);
 }
 
@@ -102,8 +100,10 @@ void initDMA_ADC(void)
 	modifyReg32(&SYSCON->CLKUNLOCK, 0, SYSCON_CLKUNLOCK_UNLOCK(1));
 
 	//Set current and beginning major loop count to ADC data size
-	modifyReg16(&DMA0->CH[DMA_CH_ADC].TCD_CITER_ELINKNO, DMA_TCD_CITER_ELINKNO_CITER_MASK, DMA_TCD_CITER_ELINKNO_CITER(ADCDataDMA_size));
-	modifyReg16(&DMA0->CH[DMA_CH_ADC].TCD_BITER_ELINKNO, DMA_TCD_BITER_ELINKNO_BITER_MASK, DMA_TCD_BITER_ELINKNO_BITER(ADCDataDMA_size));
+	modifyReg16(&DMA0->CH[DMA_CH_ADC].TCD_CITER_ELINKNO, DMA_TCD_CITER_ELINKNO_CITER_MASK,
+		    DMA_TCD_CITER_ELINKNO_CITER(ADCDataDMA_size));
+	modifyReg16(&DMA0->CH[DMA_CH_ADC].TCD_BITER_ELINKNO, DMA_TCD_BITER_ELINKNO_BITER_MASK,
+		    DMA_TCD_BITER_ELINKNO_BITER(ADCDataDMA_size));
 
 	//Set number of bytes to 2
 	modifyReg32(&DMA0->CH[DMA_CH_ADC].TCD_NBYTES_MLOFFNO, DMA_TCD_NBYTES_MLOFFNO_NBYTES_MASK, DMA_TCD_NBYTES_MLOFFNO_NBYTES(2));
@@ -140,7 +140,7 @@ void initDMA_ADC(void)
 	DMA0->CH[DMA_CH_ADC].CH_MUX = kDma0RequestMuxAdc0FifoRequest;
 
 	//Enable DMA0 CH1 interrupt
-	__NVIC_SetPriority(DMA_CH_ADC_IRQ, 1);	//Set ADC interrupt priority to 1
+	__NVIC_SetPriority(DMA_CH_ADC_IRQ, 1); //Set ADC interrupt priority to 1
 	__NVIC_EnableIRQ(DMA_CH_ADC_IRQ);
 }
 
@@ -165,12 +165,12 @@ void initDMA_UART(void)
 
 	//Sets the amount of major loop counts to handle before DMA transfer complete
 	modifyReg16(&DMA0->CH[DMA_CH_UART].TCD_CITER_ELINKNO, DMA_TCD_CITER_ELINKNO_CITER_MASK,
-			DMA_TCD_CITER_ELINKNO_CITER(nbDataToTransmit));
+		    DMA_TCD_CITER_ELINKNO_CITER(nbDataToTransmit));
 
 	//Sets the amount of major loop counts after a DMA transfer completes
 	//i.e. the CITER register gets this BITER value after DMA transfer complete
 	modifyReg16(&DMA0->CH[DMA_CH_UART].TCD_BITER_ELINKNO, DMA_TCD_BITER_ELINKNO_BITER_MASK,
-			DMA_TCD_BITER_ELINKNO_BITER(nbDataToTransmit));
+		    DMA_TCD_BITER_ELINKNO_BITER(nbDataToTransmit));
 
 	//Set number of bytes to 1
 	modifyReg32(&DMA0->CH[DMA_CH_UART].TCD_NBYTES_MLOFFNO, DMA_TCD_NBYTES_MLOFFNO_NBYTES_MASK, DMA_TCD_NBYTES_MLOFFNO_NBYTES(1));
@@ -210,7 +210,7 @@ void initDMA_UART(void)
 	modifyReg16(&DMA0->CH[DMA_CH_UART].TCD_CSR, DMA_TCD_CSR_DREQ_MASK, DMA_TCD_CSR_DREQ(1));
 
 	//Enable DMA0 CH2 interrupt
-	__NVIC_SetPriority(DMA_CH_UART_IRQ, 2);	//Set UART interrupt priority to 2
+	__NVIC_SetPriority(DMA_CH_UART_IRQ, 2); //Set UART interrupt priority to 2
 	__NVIC_EnableIRQ(DMA_CH_UART_IRQ);
 }
 
@@ -282,4 +282,3 @@ void doDshotCorrection(void)
 		}
 	}
 }
-

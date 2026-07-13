@@ -21,22 +21,22 @@
 
 long map(long x, long in_min, long in_max, long out_min, long out_max)
 {
-    if (x >= in_max)
-        return out_max;
-		if (x <= in_min)
-        return out_min;
-    if (in_min > in_max)
-        return map(x, in_max, in_min, out_max, out_min);
-    if (out_min == out_max)
-        return out_min;
-    const long in_mid = (in_min + in_max) >> 1;
-    const long out_mid = (out_min + out_max) >> 1;
-    if (in_min == in_mid)
-        return out_mid;
-    if (x <= in_mid)
-        return map(x, in_min, in_mid, out_min, out_mid);
-    else
-        return map(x, in_mid + 1, in_max, out_mid, out_max);
+	if (x >= in_max)
+		return out_max;
+	if (x <= in_min)
+		return out_min;
+	if (in_min > in_max)
+		return map(x, in_max, in_min, out_max, out_min);
+	if (out_min == out_max)
+		return out_min;
+	const long in_mid = (in_min + in_max) >> 1;
+	const long out_mid = (out_min + out_max) >> 1;
+	if (in_min == in_mid)
+		return out_mid;
+	if (x <= in_mid)
+		return map(x, in_min, in_mid, out_min, out_mid);
+	else
+		return map(x, in_mid + 1, in_max, out_mid, out_max);
 }
 
 /* getAbsDif() lives in Inc/functions.h (static inline). */
@@ -50,7 +50,7 @@ long map(long x, long in_min, long in_max, long out_min, long out_max)
 void delayMicros(uint32_t micros)
 {
 #ifdef NXP
-    //Set delay value
+	//Set delay value
 	modifyReg32(&UTICK0->CTRL, UTICK_CTRL_DELAYVAL_MASK, UTICK_CTRL_DELAYVAL(micros));
 
 	//Wait until micro-tick timer is finished
@@ -59,12 +59,10 @@ void delayMicros(uint32_t micros)
 	//Clear UTICK interrupt flag
 	UTICK0->STAT = UTICK_STAT_INTR(1);
 #else
-    const uint16_t cval_start = get_timer_us16();
-    while ((uint16_t)(get_timer_us16() - cval_start) < (uint16_t)micros) {
-    }
+	const uint16_t cval_start = get_timer_us16();
+	while ((uint16_t)(get_timer_us16() - cval_start) < (uint16_t)micros) {}
 #endif
 }
-
 
 /*
   delay in millis, convenience wrapper around delayMicros
@@ -76,63 +74,59 @@ void delayMillis(uint32_t millis)
 #ifdef NXP
 	delayMicros(1000UL * millis);
 #else
-    while (millis-- > 0) {
-        delayMicros(1000UL);
-    }
+	while (millis-- > 0) {
+		delayMicros(1000UL);
+	}
 #endif
 }
 
 uint8_t update_crc8(uint8_t crc, uint8_t crc_seed)
 {
-    uint8_t crc_u, i;
-    crc_u = crc;
-    crc_u ^= crc_seed;
-    for (i = 0; i < 8; i++) {
-        crc_u = (crc_u & 0x80) ? 0x7 ^ (crc_u << 1) : (crc_u << 1);
-    }
-    return (crc_u);
+	uint8_t crc_u, i;
+	crc_u = crc;
+	crc_u ^= crc_seed;
+	for (i = 0; i < 8; i++) {
+		crc_u = (crc_u & 0x80) ? 0x7 ^ (crc_u << 1) : (crc_u << 1);
+	}
+	return (crc_u);
 }
 
-uint8_t get_crc8(uint8_t* Buf, uint8_t BufLen)
+uint8_t get_crc8(uint8_t *Buf, uint8_t BufLen)
 {
-    uint8_t crc = 0, i;
-    for (i = 0; i < BufLen; i++) {
-        crc = update_crc8(Buf[i], crc);
-    }
-    return (crc);
+	uint8_t crc = 0, i;
+	for (i = 0; i < BufLen; i++) {
+		crc = update_crc8(Buf[i], crc);
+	}
+	return (crc);
 }
 
 #ifdef MCU_AT421
-void gpio_mode_QUICK(gpio_type* gpio_periph, uint32_t mode,
-    uint32_t pull_up_down, uint32_t pin)
+void gpio_mode_QUICK(gpio_type *gpio_periph, uint32_t mode, uint32_t pull_up_down, uint32_t pin)
 {
-    gpio_periph->cfgr = (((((gpio_periph->cfgr))) & (~(((pin * pin) * (0x3UL << (0U)))))) | (((pin * pin) * mode)));
+	gpio_periph->cfgr = (((((gpio_periph->cfgr))) & (~(((pin * pin) * (0x3UL << (0U)))))) | (((pin * pin) * mode)));
 }
-void gpio_mode_set(gpio_type* gpio_periph, uint32_t mode, uint32_t pull_up_down,
-    uint32_t pin)
+void gpio_mode_set(gpio_type *gpio_periph, uint32_t mode, uint32_t pull_up_down, uint32_t pin)
 {
-    gpio_periph->cfgr = (((((gpio_periph->cfgr))) & (~(((pin * pin) * (0x3UL << (0U)))))) | (((pin * pin) * mode)));
-    gpio_periph->pull = ((((((gpio_periph->pull))) & (~(((pin * pin) * (0x3UL << (0U)))))) | (((pin * pin) * pull_up_down))));
+	gpio_periph->cfgr = (((((gpio_periph->cfgr))) & (~(((pin * pin) * (0x3UL << (0U)))))) | (((pin * pin) * mode)));
+	gpio_periph->pull = ((((((gpio_periph->pull))) & (~(((pin * pin) * (0x3UL << (0U)))))) | (((pin * pin) * pull_up_down))));
 }
 #endif
 
 #ifdef MCU_AT415
-void gpio_mode_QUICK(gpio_type* gpio_periph, uint32_t mode,
-    uint32_t pull_up_down, uint32_t pin)
+void gpio_mode_QUICK(gpio_type *gpio_periph, uint32_t mode, uint32_t pull_up_down, uint32_t pin)
 {
-    __disable_irq();
-    gpio_init_type gpio_init_struct;
-    gpio_default_para_init(&gpio_init_struct);
+	__disable_irq();
+	gpio_init_type gpio_init_struct;
+	gpio_default_para_init(&gpio_init_struct);
 
-    if (GPIO_MODE_MUX) {
-    }
+	if (GPIO_MODE_MUX) {}
 
-    gpio_init_struct.gpio_mode = mode;
-    gpio_init_struct.gpio_pins = pin;
-    gpio_init_struct.gpio_pull = pull_up_down;
+	gpio_init_struct.gpio_mode = mode;
+	gpio_init_struct.gpio_pins = pin;
+	gpio_init_struct.gpio_pull = pull_up_down;
 
-    gpio_init(gpio_periph, &gpio_init_struct);
+	gpio_init(gpio_periph, &gpio_init_struct);
 
-    __enable_irq();
+	__enable_irq();
 }
 #endif

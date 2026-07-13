@@ -28,36 +28,36 @@
 
 #ifdef HWCI_PERF
 
-#if defined(NXP) || defined(WCH)
+#	if defined(NXP) || defined(WCH)
 /* NXP has no free-running 1 MHz utility timer (get_timer_us16() returns 0).
  * On WCH the utility timer doubles as INTERVAL_TIMER, which main.c zeroes at
  * every zero-cross, so mid-measurement resets would corrupt every reading. */
-#error "HWCI_PERF is not supported on this MCU family (needs a free-running 1 MHz utility timer)"
-#endif
+#		error "HWCI_PERF is not supported on this MCU family (needs a free-running 1 MHz utility timer)"
+#	endif
 
-#include <stdint.h>
+#	include <stdint.h>
 /* Do not include esc_state.h here: host-side probe compiles (hwci tests)
  * only need the layout. MAIN_LOOP expands where esc_state globals are in
  * scope (main / runtime). */
 
 /* ASCII "HWC1" in little-endian memory order - lets the host locate/validate
  * the struct either by ELF symbol or by scanning RAM for the magic. */
-#define HWCI_PERF_MAGIC   0x31435748u
+#	define HWCI_PERF_MAGIC 0x31435748u
 /* v2: appended the zero-cross jitter block (zc_*) after host_cmd.
  * v3: appended zc_confirm_reject after the v2 jitter block (host_cmd stays
  *     frozen at offset 60).
  * v4: appended the 32-bin PWM-phase histogram of accepted zero-crossings.
  * v5: appended esc_state + illegal edge counter (drive state machine).
  * v6: appended bidirectional DShot (BDShot) RX/TX health counters. */
-#define HWCI_PERF_VERSION 6u
+#	define HWCI_PERF_VERSION 6u
 
 /* PWM-phase histogram bins (power of two: the binning multiply-shift and the
  * host's modular math both assume it). */
-#define HWCI_ZC_PHASE_BINS 32u
+#	define HWCI_ZC_PHASE_BINS 32u
 
 /* Commands the host may write to hwci_perf.host_cmd (cleared by firmware). */
-#define HWCI_CMD_NONE          0u
-#define HWCI_CMD_RESET_STATS   0xA5u   /* clear the min/max accumulators */
+#	define HWCI_CMD_NONE 0u
+#	define HWCI_CMD_RESET_STATS 0xA5u /* clear the min/max accumulators */
 
 /*
  * Naturally-aligned layout (NOT packed): Cortex-M0 faults on unaligned word
@@ -67,64 +67,64 @@
  * HWCI_PERF_VERSION on any layout change.
  */
 typedef struct hwci_perf_s {
-    uint32_t magic;                    /* off 0  : HWCI_PERF_MAGIC          */
-    uint16_t version;                  /* off 4  : HWCI_PERF_VERSION        */
-    uint16_t size;                     /* off 6  : sizeof(hwci_perf_t)      */
+	uint32_t magic;	  /* off 0  : HWCI_PERF_MAGIC          */
+	uint16_t version; /* off 4  : HWCI_PERF_VERSION        */
+	uint16_t size;	  /* off 6  : sizeof(hwci_perf_t)      */
 
-    /* --- loop timing, microseconds (UTILITY_TIMER 1us tick) --- */
-    uint16_t ctrl_exec_us_last;        /* off 8  : last tenKhzRoutine run   */
-    uint16_t ctrl_exec_us_max;         /* off 10 : worst-case run           */
-    uint16_t ctrl_period_us_last;      /* off 12 : last entry-to-entry gap  */
-    uint16_t ctrl_period_us_max;       /* off 14 : worst-case gap (jitter)  */
-    uint16_t ctrl_period_us_min;       /* off 16 : best-case gap            */
-    uint16_t main_loop_us_last;        /* off 18 : last while(1) iteration  */
-    uint16_t main_loop_us_max;         /* off 20 : worst-case iteration     */
+	/* --- loop timing, microseconds (UTILITY_TIMER 1us tick) --- */
+	uint16_t ctrl_exec_us_last;   /* off 8  : last tenKhzRoutine run   */
+	uint16_t ctrl_exec_us_max;    /* off 10 : worst-case run           */
+	uint16_t ctrl_period_us_last; /* off 12 : last entry-to-entry gap  */
+	uint16_t ctrl_period_us_max;  /* off 14 : worst-case gap (jitter)  */
+	uint16_t ctrl_period_us_min;  /* off 16 : best-case gap            */
+	uint16_t main_loop_us_last;   /* off 18 : last while(1) iteration  */
+	uint16_t main_loop_us_max;    /* off 20 : worst-case iteration     */
 
-    /* --- live state snapshot (mirrors telemetry for self-contained logs) --- */
-    uint16_t input;                    /* off 22 : throttle input 0..2047   */
-    uint16_t duty_cycle;               /* off 24 : applied duty 0..2000     */
-    uint16_t e_rpm;                    /* off 26 : electrical rpm / 100     */
-    uint16_t voltage_cv;               /* off 28 : battery, centivolts      */
-    int16_t  current_ca;               /* off 30 : current, centiamps       */
-    int16_t  temperature_c;            /* off 32 : MCU/FET temp, Celsius    */
-    uint8_t  bemf_timeout_state;       /* off 34 : bemf_timeout_happened    */
-    uint8_t  armed;                    /* off 35 : armed flag               */
-    uint8_t  running;                  /* off 36 : running flag             */
-    uint8_t  _pad0;                    /* off 37 : alignment                */
-    uint16_t _pad1;                    /* off 38 : align next u32 to off 40 */
+	/* --- live state snapshot (mirrors telemetry for self-contained logs) --- */
+	uint16_t input;		    /* off 22 : throttle input 0..2047   */
+	uint16_t duty_cycle;	    /* off 24 : applied duty 0..2000     */
+	uint16_t e_rpm;		    /* off 26 : electrical rpm / 100     */
+	uint16_t voltage_cv;	    /* off 28 : battery, centivolts      */
+	int16_t current_ca;	    /* off 30 : current, centiamps       */
+	int16_t temperature_c;	    /* off 32 : MCU/FET temp, Celsius    */
+	uint8_t bemf_timeout_state; /* off 34 : bemf_timeout_happened    */
+	uint8_t armed;		    /* off 35 : armed flag               */
+	uint8_t running;	    /* off 36 : running flag             */
+	uint8_t _pad0;		    /* off 37 : alignment                */
+	uint16_t _pad1;		    /* off 38 : align next u32 to off 40 */
 
-    /* --- counters ---
+	/* --- counters ---
      * loop_iters is monotonic (the host differences it vs wall-clock for the
      * idle-residual CPU-load estimate). zero_cross_count mirrors main.c's
      * zero_crosses, which SATURATES at 10000 and resets on desync/stop - it
      * is a diagnostic value, NOT a monotonic counter. update_count increments
      * once per snapshot (every HWCI_PERF_SNAPSHOT_DIV main-loop iterations).
      */
-    uint32_t loop_iters;               /* off 40 : while(1) iterations      */
-    uint32_t zero_cross_count;         /* off 44 : zero_crosses mirror (sat)*/
-    uint32_t commutation_interval;     /* off 48 : raw, 0.5us units         */
-    uint32_t commutation_interval_max; /* off 52 : worst-case (slowest)     */
-    uint32_t update_count;             /* off 56 : ++ each snapshot         */
-    volatile uint32_t host_cmd;        /* off 60 : host writes, fw clears   */
+	uint32_t loop_iters;		   /* off 40 : while(1) iterations      */
+	uint32_t zero_cross_count;	   /* off 44 : zero_crosses mirror (sat)*/
+	uint32_t commutation_interval;	   /* off 48 : raw, 0.5us units         */
+	uint32_t commutation_interval_max; /* off 52 : worst-case (slowest)     */
+	uint32_t update_count;		   /* off 56 : ++ each snapshot         */
+	volatile uint32_t host_cmd;	   /* off 60 : host writes, fw clears   */
 
-    /* --- v2: zero-cross timing jitter (fed by HWCI_PERF_ZC) ---
+	/* --- v2: zero-cross timing jitter (fed by HWCI_PERF_ZC) ---
      * Appended AFTER host_cmd so its offset (60) is identical in v1 and v2
      * firmware: during an A/B session the host must be able to issue
      * RESET_STATS to whichever vintage is flashed without a layout lookup. */
-    uint32_t zc_count;                 /* off 64 : commutations accumulated */
-    uint32_t zc_jitter_sum;            /* off 68 : sum |deviation|, ticks   */
-    uint32_t zc_interval_sum;          /* off 72 : sum raw interval, ticks  */
-    uint16_t zc_jitter_max;            /* off 76 : worst single deviation   */
-    uint16_t _pad2;                    /* off 78 : keep sizeof 4-aligned    */
+	uint32_t zc_count;	  /* off 64 : commutations accumulated */
+	uint32_t zc_jitter_sum;	  /* off 68 : sum |deviation|, ticks   */
+	uint32_t zc_interval_sum; /* off 72 : sum raw interval, ticks  */
+	uint16_t zc_jitter_max;	  /* off 76 : worst single deviation   */
+	uint16_t _pad2;		  /* off 78 : keep sizeof 4-aligned    */
 
-    /* --- v3: zero-cross confirm rejections (fed by HWCI_PERF_CONFIRM_REJECT)
+	/* --- v3: zero-cross confirm rejections (fed by HWCI_PERF_CONFIRM_REJECT)
      * Monotonic like the v2 sums: the host differences consecutive
      * snapshots, so delta(reject)/delta(zc_count) over a window is the
      * rejected-edges-per-accepted-commutation ratio - the live monitor for
      * the F051 glitch-tolerant confirm loop's reject mechanism. */
-    uint32_t zc_confirm_reject;        /* off 80 : confirm-loop early-outs  */
+	uint32_t zc_confirm_reject; /* off 80 : confirm-loop early-outs  */
 
-    /* --- v4: PWM-phase histogram of accepted zero-crossings ---
+	/* --- v4: PWM-phase histogram of accepted zero-crossings ---
      * bin = TIM1 phase (CNT/ARR) of the comparator edge at ISR entry, 32
      * bins across the PWM period. Each bin is a monotonic u16 event counter
      * that wraps naturally; the host differences consecutive snapshots
@@ -134,24 +134,24 @@ typedef struct hwci_perf_s {
      * peaks = ZC<->PWM phase correlation (injection locking) - the
      * discriminator for the beat-band jitter hump investigation (PR #23
      * found 3.3x edge-window enrichment at t30). */
-    uint16_t zc_phase_hist[HWCI_ZC_PHASE_BINS]; /* off 84..147              */
+	uint16_t zc_phase_hist[HWCI_ZC_PHASE_BINS]; /* off 84..147              */
 
-    /* --- v5: top-level ESC drive state machine snapshot --- */
-    uint8_t  esc_state;                /* off 148: esc_state_t enum value  */
-    uint8_t  _pad_esc;                 /* off 149: alignment               */
-    uint16_t esc_illegal_edge_count;   /* off 150: named-transition faults */
+	/* --- v5: top-level ESC drive state machine snapshot --- */
+	uint8_t esc_state;		 /* off 148: esc_state_t enum value  */
+	uint8_t _pad_esc;		 /* off 149: alignment               */
+	uint16_t esc_illegal_edge_count; /* off 150: named-transition faults */
 
-    /* --- v6: bidirectional DShot (BDShot) health ---
+	/* --- v6: bidirectional DShot (BDShot) health ---
      * Separates "FC never enabled BDShot" from "ESC RX CRC death" from
      * "ESC TX'd eRPM but host decode failed". Monotonic u32 counters are
      * host-diffed like loop_iters. Updated from dshot.c under HWCI_PERF. */
-    uint32_t dshot_rx_good;            /* off 152: good-CRC frames          */
-    uint32_t dshot_rx_bad;             /* off 156: bad-CRC frames           */
-    uint32_t dshot_tx_frames;          /* off 160: BDShot reply packages    */
-    uint16_t dshot_last_com_us;        /* off 164: last packed com period   */
-    uint8_t  dshot_telem_mode;         /* off 166: 0=uni DShot, 1=BDShot    */
-    uint8_t  dshot_edt_mode;           /* off 167: EDT enabled              */
-} hwci_perf_t;                         /* total size: 168 bytes             */
+	uint32_t dshot_rx_good;	    /* off 152: good-CRC frames          */
+	uint32_t dshot_rx_bad;	    /* off 156: bad-CRC frames           */
+	uint32_t dshot_tx_frames;   /* off 160: BDShot reply packages    */
+	uint16_t dshot_last_com_us; /* off 164: last packed com period   */
+	uint8_t dshot_telem_mode;   /* off 166: 0=uni DShot, 1=BDShot    */
+	uint8_t dshot_edt_mode;	    /* off 167: EDT enabled              */
+} hwci_perf_t;			    /* total size: 168 bytes             */
 
 extern volatile hwci_perf_t hwci_perf;
 
@@ -172,34 +172,37 @@ void hwci_perf_reset_stats(void);
 /* 16-bit microsecond timestamp from the free-running utility timer. Macro (not
  * inline) so it is only evaluated where Inc/functions.h is already included
  * (the struct definition above stays compilable on a host compiler). */
-#define HWCI_NOW_US() get_timer_us16()
+#	define HWCI_NOW_US() get_timer_us16()
 
 /*
  * Control-loop (tenKhzRoutine, 20 kHz) instrumentation. ENTER at the very top,
  * EXIT at the very bottom. ENTER records the period (entry-to-entry); EXIT
  * records execution time (entry-to-exit). Runs in ISR context - keep it tiny.
  */
-#define HWCI_PERF_CTRL_ENTER()                                                 \
-    uint16_t _hwci_ctrl_t0 = HWCI_NOW_US();                                    \
-    do {                                                                       \
-        static uint16_t _hwci_last_entry;                                      \
-        static uint8_t  _hwci_ctrl_init;                                       \
-        if (_hwci_ctrl_init) {                                                 \
-            uint16_t _p = (uint16_t)(_hwci_ctrl_t0 - _hwci_last_entry);        \
-            hwci_perf.ctrl_period_us_last = _p;                               \
-            if (_p > hwci_perf.ctrl_period_us_max) hwci_perf.ctrl_period_us_max = _p; \
-            if (_p < hwci_perf.ctrl_period_us_min) hwci_perf.ctrl_period_us_min = _p; \
-        }                                                                      \
-        _hwci_last_entry = _hwci_ctrl_t0;                                      \
-        _hwci_ctrl_init = 1;                                                   \
-    } while (0)
+#	define HWCI_PERF_CTRL_ENTER()                                                                                                     \
+		uint16_t _hwci_ctrl_t0 = HWCI_NOW_US();                                                                                    \
+		do {                                                                                                                       \
+			static uint16_t _hwci_last_entry;                                                                                  \
+			static uint8_t _hwci_ctrl_init;                                                                                    \
+			if (_hwci_ctrl_init) {                                                                                             \
+				uint16_t _p = (uint16_t)(_hwci_ctrl_t0 - _hwci_last_entry);                                                \
+				hwci_perf.ctrl_period_us_last = _p;                                                                        \
+				if (_p > hwci_perf.ctrl_period_us_max)                                                                     \
+					hwci_perf.ctrl_period_us_max = _p;                                                                 \
+				if (_p < hwci_perf.ctrl_period_us_min)                                                                     \
+					hwci_perf.ctrl_period_us_min = _p;                                                                 \
+			}                                                                                                                  \
+			_hwci_last_entry = _hwci_ctrl_t0;                                                                                  \
+			_hwci_ctrl_init = 1;                                                                                               \
+		} while (0)
 
-#define HWCI_PERF_CTRL_EXIT()                                                  \
-    do {                                                                       \
-        uint16_t _e = (uint16_t)(HWCI_NOW_US() - _hwci_ctrl_t0);               \
-        hwci_perf.ctrl_exec_us_last = _e;                                      \
-        if (_e > hwci_perf.ctrl_exec_us_max) hwci_perf.ctrl_exec_us_max = _e;  \
-    } while (0)
+#	define HWCI_PERF_CTRL_EXIT()                                                                                                      \
+		do {                                                                                                                       \
+			uint16_t _e = (uint16_t)(HWCI_NOW_US() - _hwci_ctrl_t0);                                                           \
+			hwci_perf.ctrl_exec_us_last = _e;                                                                                  \
+			if (_e > hwci_perf.ctrl_exec_us_max)                                                                               \
+				hwci_perf.ctrl_exec_us_max = _e;                                                                           \
+		} while (0)
 
 /*
  * Zero-cross jitter instrumentation. Call once per commutation, at the END of
@@ -226,23 +229,24 @@ void hwci_perf_reset_stats(void);
  * host sampling rate. zc_jitter_max is sticky and cleared alongside the other
  * maxima by hwci_perf_reset_stats().
  */
-#define HWCI_PERF_ZC()                                                         \
-    do {                                                                       \
-        static uint16_t _zc_hist[6];                                           \
-        static uint8_t _zc_idx;                                                \
-        uint16_t _t = thiszctime;                                              \
-        uint16_t _ref = _zc_hist[_zc_idx];                                     \
-        _zc_hist[_zc_idx] = _t;                                                \
-        if (++_zc_idx == 6u) _zc_idx = 0u;                                     \
-        if (zero_crosses >= 100) {                                             \
-            uint16_t _d = (_t >= _ref) ? (uint16_t)(_t - _ref)                 \
-                                       : (uint16_t)(_ref - _t);                \
-            hwci_perf.zc_count++;                                              \
-            hwci_perf.zc_jitter_sum += _d;                                     \
-            hwci_perf.zc_interval_sum += _t;                                   \
-            if (_d > hwci_perf.zc_jitter_max) hwci_perf.zc_jitter_max = _d;    \
-        }                                                                      \
-    } while (0)
+#	define HWCI_PERF_ZC()                                                                                                             \
+		do {                                                                                                                       \
+			static uint16_t _zc_hist[6];                                                                                       \
+			static uint8_t _zc_idx;                                                                                            \
+			uint16_t _t = thiszctime;                                                                                          \
+			uint16_t _ref = _zc_hist[_zc_idx];                                                                                 \
+			_zc_hist[_zc_idx] = _t;                                                                                            \
+			if (++_zc_idx == 6u)                                                                                               \
+				_zc_idx = 0u;                                                                                              \
+			if (zero_crosses >= 100) {                                                                                         \
+				uint16_t _d = (_t >= _ref) ? (uint16_t)(_t - _ref) : (uint16_t)(_ref - _t);                                \
+				hwci_perf.zc_count++;                                                                                      \
+				hwci_perf.zc_jitter_sum += _d;                                                                             \
+				hwci_perf.zc_interval_sum += _t;                                                                           \
+				if (_d > hwci_perf.zc_jitter_max)                                                                          \
+					hwci_perf.zc_jitter_max = _d;                                                                      \
+			}                                                                                                                  \
+		} while (0)
 
 /*
  * Zero-cross confirm rejection counter. Fires on the confirm loop's
@@ -250,7 +254,10 @@ void hwci_perf_reset_stats(void);
  * back to the comparator). Runs in the comparator ISR, but only on the
  * reject path - a single volatile u32 increment, off the hot accept path.
  */
-#define HWCI_PERF_CONFIRM_REJECT() do { hwci_perf.zc_confirm_reject++; } while (0)
+#	define HWCI_PERF_CONFIRM_REJECT()                                                                                                 \
+		do {                                                                                                                       \
+			hwci_perf.zc_confirm_reject++;                                                                                     \
+		} while (0)
 
 /*
  * PWM-phase histogram of accepted zero-crossings (F051 only: reads TIM1
@@ -262,22 +269,26 @@ void hwci_perf_reset_stats(void);
  * Gated on zero_crosses >= 100 like HWCI_PERF_ZC (same "stable running"
  * threshold), and on the Q16 scale being initialized.
  */
-#if defined(MCU_F051)
-#define HWCI_PERF_ZC_PHASE_CAPTURE() uint16_t _hwci_zc_phase_cnt = (uint16_t)TIM1->CNT
-#define HWCI_PERF_ZC_PHASE_COMMIT()                                            \
-    do {                                                                       \
-        uint32_t _s = hwci_zc_phase_scale_q16;                                 \
-        if (_s != 0u && zero_crosses >= 100) {                                 \
-            uint32_t _bin = ((uint32_t)_hwci_zc_phase_cnt * _s) >> 16;         \
-            if (_bin < HWCI_ZC_PHASE_BINS) {                                   \
-                hwci_perf.zc_phase_hist[_bin]++;                               \
-            }                                                                  \
-        }                                                                      \
-    } while (0)
-#else
-#define HWCI_PERF_ZC_PHASE_CAPTURE() do {} while (0)
-#define HWCI_PERF_ZC_PHASE_COMMIT()  do {} while (0)
-#endif
+#	if defined(MCU_F051)
+#		define HWCI_PERF_ZC_PHASE_CAPTURE() uint16_t _hwci_zc_phase_cnt = (uint16_t)TIM1->CNT
+#		define HWCI_PERF_ZC_PHASE_COMMIT()                                                                                        \
+			do {                                                                                                               \
+				uint32_t _s = hwci_zc_phase_scale_q16;                                                                     \
+				if (_s != 0u && zero_crosses >= 100) {                                                                     \
+					uint32_t _bin = ((uint32_t)_hwci_zc_phase_cnt * _s) >> 16;                                         \
+					if (_bin < HWCI_ZC_PHASE_BINS) {                                                                   \
+						hwci_perf.zc_phase_hist[_bin]++;                                                           \
+					}                                                                                                  \
+				}                                                                                                          \
+			} while (0)
+#	else
+#		define HWCI_PERF_ZC_PHASE_CAPTURE()                                                                                       \
+			do {                                                                                                               \
+			} while (0)
+#		define HWCI_PERF_ZC_PHASE_COMMIT()                                                                                        \
+			do {                                                                                                               \
+			} while (0)
+#	endif
 
 /*
  * Background-loop instrumentation. Call once at the top of the main while(1).
@@ -298,61 +309,76 @@ void hwci_perf_reset_stats(void);
  * cached into a local before use so the compare and the store can't see two
  * different values (a torn read would let the sticky max go backwards).
  */
-#define HWCI_PERF_SNAPSHOT_DIV 64u
+#	define HWCI_PERF_SNAPSHOT_DIV 64u
 
-#define HWCI_PERF_MAIN_LOOP()                                                  \
-    do {                                                                       \
-        uint16_t _n = HWCI_NOW_US();                                           \
-        static uint16_t _hwci_main_last;                                       \
-        static uint8_t  _hwci_main_init;                                       \
-        static uint8_t  _hwci_prev_armed;                                      \
-        if (_hwci_main_init) {                                                 \
-            uint16_t _d = (uint16_t)(_n - _hwci_main_last);                    \
-            hwci_perf.main_loop_us_last = _d;                                  \
-            if (_d > hwci_perf.main_loop_us_max) hwci_perf.main_loop_us_max = _d; \
-        }                                                                      \
-        _hwci_main_last = _n;                                                  \
-        _hwci_main_init = 1;                                                   \
-        hwci_perf.loop_iters++;                                                \
-        if ((hwci_perf.loop_iters & (HWCI_PERF_SNAPSHOT_DIV - 1u)) == 0u) {    \
-            uint32_t _ci = commutation_interval;                               \
-            uint8_t _armed = (uint8_t)armed;                                   \
-            hwci_perf.input = input;                                           \
-            hwci_perf.duty_cycle = duty_cycle;                                 \
-            hwci_perf.e_rpm = e_rpm;                                           \
-            hwci_perf.voltage_cv = battery_voltage;                            \
-            hwci_perf.current_ca = actual_current;                             \
-            hwci_perf.temperature_c = degrees_celsius;                         \
-            hwci_perf.bemf_timeout_state = (uint8_t)bemf_timeout_happened;     \
-            hwci_perf.armed = _armed;                                          \
-            hwci_perf.running = (uint8_t)running;                              \
-            hwci_perf.esc_state = (uint8_t)esc_state;                          \
-            hwci_perf.esc_illegal_edge_count = esc_illegal_edge_count;         \
-            hwci_perf.zero_cross_count = zero_crosses;                         \
-            hwci_perf.commutation_interval = _ci;                              \
-            if (_ci > hwci_perf.commutation_interval_max)                      \
-                hwci_perf.commutation_interval_max = _ci;                      \
-            if (_armed && !_hwci_prev_armed)                                   \
-                hwci_perf_reset_stats(); /* drop aliased arming-tune maxima */ \
-            _hwci_prev_armed = _armed;                                         \
-            /* phase-binning factor: one soft division per snapshot (~1 ms), \
-             * tracks variable-PWM tim1_arr changes automatically */          \
-            hwci_zc_phase_scale_q16 =                                          \
-                ((uint32_t)HWCI_ZC_PHASE_BINS << 16) / ((uint32_t)tim1_arr + 1u); \
-            hwci_perf.update_count++;                                          \
-            if (hwci_perf.host_cmd != HWCI_CMD_NONE) hwci_perf_apply_cmd();    \
-        }                                                                      \
-    } while (0)
+#	define HWCI_PERF_MAIN_LOOP()                                                                                                      \
+		do {                                                                                                                       \
+			uint16_t _n = HWCI_NOW_US();                                                                                       \
+			static uint16_t _hwci_main_last;                                                                                   \
+			static uint8_t _hwci_main_init;                                                                                    \
+			static uint8_t _hwci_prev_armed;                                                                                   \
+			if (_hwci_main_init) {                                                                                             \
+				uint16_t _d = (uint16_t)(_n - _hwci_main_last);                                                            \
+				hwci_perf.main_loop_us_last = _d;                                                                          \
+				if (_d > hwci_perf.main_loop_us_max)                                                                       \
+					hwci_perf.main_loop_us_max = _d;                                                                   \
+			}                                                                                                                  \
+			_hwci_main_last = _n;                                                                                              \
+			_hwci_main_init = 1;                                                                                               \
+			hwci_perf.loop_iters++;                                                                                            \
+			if ((hwci_perf.loop_iters & (HWCI_PERF_SNAPSHOT_DIV - 1u)) == 0u) {                                                \
+				uint32_t _ci = commutation_interval;                                                                       \
+				uint8_t _armed = (uint8_t)armed;                                                                           \
+				hwci_perf.input = input;                                                                                   \
+				hwci_perf.duty_cycle = duty_cycle;                                                                         \
+				hwci_perf.e_rpm = e_rpm;                                                                                   \
+				hwci_perf.voltage_cv = battery_voltage;                                                                    \
+				hwci_perf.current_ca = actual_current;                                                                     \
+				hwci_perf.temperature_c = degrees_celsius;                                                                 \
+				hwci_perf.bemf_timeout_state = (uint8_t)bemf_timeout_happened;                                             \
+				hwci_perf.armed = _armed;                                                                                  \
+				hwci_perf.running = (uint8_t)running;                                                                      \
+				hwci_perf.esc_state = (uint8_t)esc_state;                                                                  \
+				hwci_perf.esc_illegal_edge_count = esc_illegal_edge_count;                                                 \
+				hwci_perf.zero_cross_count = zero_crosses;                                                                 \
+				hwci_perf.commutation_interval = _ci;                                                                      \
+				if (_ci > hwci_perf.commutation_interval_max)                                                              \
+					hwci_perf.commutation_interval_max = _ci;                                                          \
+				if (_armed && !_hwci_prev_armed)                                                                           \
+					hwci_perf_reset_stats(); /* drop aliased arming-tune maxima */                                     \
+				_hwci_prev_armed = _armed;                                                                                 \
+				/* phase-binning factor: one soft division per snapshot (~1 ms), \
+             * tracks variable-PWM tim1_arr changes automatically */                                         \
+				hwci_zc_phase_scale_q16 = ((uint32_t)HWCI_ZC_PHASE_BINS << 16) / ((uint32_t)tim1_arr + 1u);                \
+				hwci_perf.update_count++;                                                                                  \
+				if (hwci_perf.host_cmd != HWCI_CMD_NONE)                                                                   \
+					hwci_perf_apply_cmd();                                                                             \
+			}                                                                                                                  \
+		} while (0)
 
 #else /* !HWCI_PERF - all hooks vanish, no struct, no code */
 
-#define HWCI_PERF_CTRL_ENTER()       do {} while (0)
-#define HWCI_PERF_CTRL_EXIT()        do {} while (0)
-#define HWCI_PERF_ZC()               do {} while (0)
-#define HWCI_PERF_MAIN_LOOP()        do {} while (0)
-#define HWCI_PERF_CONFIRM_REJECT()   do {} while (0)
-#define HWCI_PERF_ZC_PHASE_CAPTURE() do {} while (0)
-#define HWCI_PERF_ZC_PHASE_COMMIT()  do {} while (0)
+#	define HWCI_PERF_CTRL_ENTER()                                                                                                     \
+		do {                                                                                                                       \
+		} while (0)
+#	define HWCI_PERF_CTRL_EXIT()                                                                                                      \
+		do {                                                                                                                       \
+		} while (0)
+#	define HWCI_PERF_ZC()                                                                                                             \
+		do {                                                                                                                       \
+		} while (0)
+#	define HWCI_PERF_MAIN_LOOP()                                                                                                      \
+		do {                                                                                                                       \
+		} while (0)
+#	define HWCI_PERF_CONFIRM_REJECT()                                                                                                 \
+		do {                                                                                                                       \
+		} while (0)
+#	define HWCI_PERF_ZC_PHASE_CAPTURE()                                                                                               \
+		do {                                                                                                                       \
+		} while (0)
+#	define HWCI_PERF_ZC_PHASE_COMMIT()                                                                                                \
+		do {                                                                                                                       \
+		} while (0)
 
 #endif /* HWCI_PERF */
 

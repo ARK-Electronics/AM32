@@ -107,12 +107,9 @@ uint8_t getCompOutputLevel()
 void maskPhaseInterrupts()
 {
 	//Disable comparator interrupt
-	if (MAIN_COMP == CMP0)
-	{
+	if (MAIN_COMP == CMP0) {
 		__NVIC_DisableIRQ(CMP0_IRQn);
-	}
-	else
-	{
+	} else {
 		__NVIC_DisableIRQ(CMP1_IRQn);
 	}
 }
@@ -123,12 +120,9 @@ void maskPhaseInterrupts()
 void enableCompInterrupts()
 {
 	//Enable comparator interrupt
-	if (MAIN_COMP == CMP0)
-	{
+	if (MAIN_COMP == CMP0) {
 		__NVIC_EnableIRQ(CMP0_IRQn);
-	}
-	else
-	{
+	} else {
 		__NVIC_EnableIRQ(CMP1_IRQn);
 	}
 }
@@ -139,24 +133,18 @@ void enableCompInterrupts()
 void changeMainComp(LPCMP_Type *CMPx)
 {
 	//Get previous main comparator unit
-	LPCMP_Type *prev_MAIN_COMP 	= MAIN_COMP;
-	MAIN_COMP 					= CMPx;
+	LPCMP_Type *prev_MAIN_COMP = MAIN_COMP;
+	MAIN_COMP = CMPx;
 
-	if (MAIN_COMP != prev_MAIN_COMP)
-	{
+	if (MAIN_COMP != prev_MAIN_COMP) {
 		//Enable and disable correct comparator interrupt
-		if (MAIN_COMP == CMP0)
-		{
-			if (__NVIC_GetEnableIRQ(CMP1_IRQn))
-			{
+		if (MAIN_COMP == CMP0) {
+			if (__NVIC_GetEnableIRQ(CMP1_IRQn)) {
 				__NVIC_EnableIRQ(CMP0_IRQn);
 				__NVIC_DisableIRQ(CMP1_IRQn);
 			}
-		}
-		else
-		{
-			if (__NVIC_GetEnableIRQ(CMP0_IRQn))
-			{
+		} else {
+			if (__NVIC_GetEnableIRQ(CMP0_IRQn)) {
 				__NVIC_EnableIRQ(CMP1_IRQn);
 				__NVIC_DisableIRQ(CMP0_IRQn);
 			}
@@ -176,49 +164,34 @@ void changeCompInput()
 	disableComparators();
 
 	//Check commutation step
-	if (step == 1 || step == 4)
-	{
+	if (step == 1 || step == 4) {
 		//Set minus input to PHASE C, COMP0_IN1
 		modifyReg32(&PHASE_C_COMP_UNIT->CCR2, LPCMP_CCR2_MSEL_MASK, LPCMP_CCR2_MSEL(PHASE_C_COMP_INP));
 		changeMainComp(PHASE_C_COMP_UNIT);
 	}
-	if (step == 2 || step == 5)
-	{
+	if (step == 2 || step == 5) {
 		//Set minus input to PHASE A, COMP0_IN3
 		modifyReg32(&PHASE_A_COMP_UNIT->CCR2, LPCMP_CCR2_MSEL_MASK, LPCMP_CCR2_MSEL(PHASE_A_COMP_INP));
 		changeMainComp(PHASE_A_COMP_UNIT);
 	}
-	if (step == 3 || step == 6)
-	{
+	if (step == 3 || step == 6) {
 		//Set minus input to PHASE B, COMP1_IN3
 		modifyReg32(&PHASE_B_COMP_UNIT->CCR2, LPCMP_CCR2_MSEL_MASK, LPCMP_CCR2_MSEL(PHASE_B_COMP_INP));
 		changeMainComp(PHASE_B_COMP_UNIT);
 	}
 
-	modifyReg32(&CMP0->IER,
-			LPCMP_IER_CFF_IE_MASK | LPCMP_IER_CFR_IE_MASK,
-			0);
-	modifyReg32(&CMP1->IER,
-			LPCMP_IER_CFF_IE_MASK | LPCMP_IER_CFR_IE_MASK,
-			0);
+	modifyReg32(&CMP0->IER, LPCMP_IER_CFF_IE_MASK | LPCMP_IER_CFR_IE_MASK, 0);
+	modifyReg32(&CMP1->IER, LPCMP_IER_CFF_IE_MASK | LPCMP_IER_CFR_IE_MASK, 0);
 
 	//Enable main comparator unit after control register fields have been adjusted
 	enableComparator();
 
 	//Check if BEMF is rising or falling
-	if (rising)
-	{
+	if (rising) {
 		//Disable rising interrupt, enable falling interrupt
-		modifyReg32(&MAIN_COMP->IER,
-				LPCMP_IER_CFF_IE_MASK | LPCMP_IER_CFR_IE_MASK,
-				LPCMP_IER_CFF_IE(1) | LPCMP_IER_CFR_IE(0));
-	}
-	else
-	{
+		modifyReg32(&MAIN_COMP->IER, LPCMP_IER_CFF_IE_MASK | LPCMP_IER_CFR_IE_MASK, LPCMP_IER_CFF_IE(1) | LPCMP_IER_CFR_IE(0));
+	} else {
 		//Disable falling interrupt, enable rising interrupt
-		modifyReg32(&MAIN_COMP->IER,
-				LPCMP_IER_CFF_IE_MASK | LPCMP_IER_CFR_IE_MASK,
-				LPCMP_IER_CFF_IE(0) | LPCMP_IER_CFR_IE(1));
+		modifyReg32(&MAIN_COMP->IER, LPCMP_IER_CFF_IE_MASK | LPCMP_IER_CFR_IE_MASK, LPCMP_IER_CFF_IE(0) | LPCMP_IER_CFR_IE(1));
 	}
 }
-

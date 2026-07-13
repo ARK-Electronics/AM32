@@ -6,7 +6,7 @@
  */
 
 #ifndef COMPARATOR_H_
-#define COMPARATOR_H_
+#	define COMPARATOR_H_
 #endif /* COMPARATOR_H_ */
 
 // Medium speed comparator
@@ -25,13 +25,13 @@ void maskPhaseInterrupts();
 void changeCompInput();
 void enableCompInterrupts();
 
-extern COMP_TypeDef* active_COMP;
+extern COMP_TypeDef *active_COMP;
 
 // read the comparator output level inline, this is called up to
 // filter_level times per zero cross so call overhead matters
 static inline uint8_t getCompOutputLevel(void)
 {
-    return LL_COMP_ReadOutputLevel(active_COMP);
+	return LL_COMP_ReadOutputLevel(active_COMP);
 }
 
 extern volatile char rising;

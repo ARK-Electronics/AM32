@@ -10,9 +10,9 @@
 void initCorePeripherals(void)
 {
 	SystemInit();
-    SystemClock_Config();
+	SystemClock_Config();
 
-    initGPIO();
+	initGPIO();
 
 	initFlexPWM();
 
@@ -45,13 +45,12 @@ void initCorePeripherals(void)
 	init_apa102();
 #endif
 
-	NVIC_SetPriorityGrouping(NVIC_PRIORITYGROUP_4);	//TODO check if this is needed or what it does
-
+	NVIC_SetPriorityGrouping(NVIC_PRIORITYGROUP_4); //TODO check if this is needed or what it does
 }
 
 void initAfterJump()
 {
-    __enable_irq();
+	__enable_irq();
 }
 
 /*
@@ -59,11 +58,11 @@ void initAfterJump()
  */
 void SystemInit(void)
 {
-	SCB->CPACR |= ((3UL << 0*2) | (3UL << 1*2));    /* set CP0, CP1 Full Access in Secure mode (enable PowerQuad) */
-	SCB->NSACR |= ((3UL << 0) | (3UL << 10));   /* enable CP0, CP1, CP10, CP11 Non-secure Access */
+	SCB->CPACR |= ((3UL << 0 * 2) | (3UL << 1 * 2)); /* set CP0, CP1 Full Access in Secure mode (enable PowerQuad) */
+	SCB->NSACR |= ((3UL << 0) | (3UL << 10));	 /* enable CP0, CP1, CP10, CP11 Non-secure Access */
 
 	extern void *__Vectors;
-	SCB->VTOR = (uint32_t) &__Vectors;
+	SCB->VTOR = (uint32_t)&__Vectors;
 
 	/* Enable the LPCAC */
 	SYSCON->LPCAC_CTRL |= SYSCON_LPCAC_CTRL_LPCAC_MEM_REQ_MASK;
@@ -71,10 +70,8 @@ void SystemInit(void)
 
 	/* Enable flash RWX when FLASH_ACL in IFR0 is invalid */
 	if ((*((volatile const uint32_t *)(0x1000000)) == 0xFFFFFFFFU) ||
-		((*((volatile const uint32_t *)(0x1000000)) == 0x59630000U) &&
-		 (*((volatile const uint32_t *)(0x1000040)) == 0xFFFFFFFFU) &&
-		 (*((volatile const uint32_t *)(0x1000044)) == 0xFFFFFFFFU)))
-	{
+	    ((*((volatile const uint32_t *)(0x1000000)) == 0x59630000U) && (*((volatile const uint32_t *)(0x1000040)) == 0xFFFFFFFFU) &&
+	     (*((volatile const uint32_t *)(0x1000044)) == 0xFFFFFFFFU))) {
 		/* Enable MBC register written with GLIKEY index15 */
 		GLIKEY0->CTRL_0 = 0x00060000U;
 		GLIKEY0->CTRL_0 = 0x0002000FU;
@@ -88,8 +85,7 @@ void SystemInit(void)
 		MBC0->MBC_INDEX[0].MBC_MEMN_GLBAC[0] = 0x7700U;
 
 		/* Use GLBAC0 for all flash block */
-		for (uint8_t i = 0; i < 2U; i++)
-		{
+		for (uint8_t i = 0; i < 2U; i++) {
 			MBC0->MBC_INDEX[0].MBC_DOM0_MEM0_BLK_CFG_W[i] = 0x00000000U;
 		}
 
@@ -106,7 +102,7 @@ void SystemInit(void)
 	//Check if init went successful
 	status = FLASH_API->flash_init(&s_flashDriver);
 	if (status) {
-		__asm volatile ("nop");
+		__asm volatile("nop");
 	}
 
 	//Disable cache function
@@ -129,7 +125,7 @@ void SystemClock_Config(void)
 	//Wait for the SPC to finish its transition to 1.1V, i.e. SPC is not busy
 	while ((SPC0->SC & SPC_SC_BUSY_MASK) >> SPC_SC_BUSY_SHIFT) {
 		//Do nothing
-		__asm volatile ("nop");
+		__asm volatile("nop");
 	}
 
 	//Set flash memory to support higher voltage level and frequency
@@ -151,7 +147,7 @@ void SystemClock_Config(void)
 	//Wait for the SRAM voltage change to complete
 	while (!((SPC0->SRAMCTL & SPC_SRAMCTL_ACK_MASK) >> SPC_SRAMCTL_ACK_SHIFT)) {
 		//Do nothing
-		__asm volatile ("nop");
+		__asm volatile("nop");
 	}
 
 	//Clear the SRAM voltage update request
@@ -179,7 +175,7 @@ void SystemClock_Config(void)
 	//Wait for the FIRC clock source to be valid
 	while (!((SCG0->FIRCCSR & SCG_FIRCCSR_FIRCVLD_MASK) >> SCG_FIRCCSR_FIRCVLD_SHIFT)) {
 		//Do nothing
-		__asm volatile ("nop");
+		__asm volatile("nop");
 	}
 
 	//Select FIRC as MAIN_CLK clock source
@@ -188,7 +184,7 @@ void SystemClock_Config(void)
 	//Wait for the MAIN_CLK clock source mux to be set correctly
 	while (((SCG0->CSR & SCG_CSR_SCS_MASK) >> SCG_CSR_SCS_SHIFT) != 3) {
 		//Do nothing
-		__asm volatile ("nop");
+		__asm volatile("nop");
 	}
 
 	//Enable FIRC clock source
@@ -210,7 +206,7 @@ void SystemClock_Config(void)
 	//Wait for SIRC clock source to be valid
 	while (!((SCG0->SIRCCSR & SCG_SIRCCSR_SIRCVLD_MASK) >> SCG_SIRCCSR_SIRCVLD_SHIFT)) {
 		//Do nothing
-		__asm volatile ("nop");
+		__asm volatile("nop");
 	}
 
 	//Lock SIRC control status register
@@ -274,9 +270,8 @@ void initSPI(void)
 	modifyReg32(&MRCC0->MRCC_LPSPI0_CLKSEL, MRCC_MRCC_LPSPI0_CLKSEL_MUX_MASK, MRCC_MRCC_LPSPI0_CLKSEL_MUX(0));
 
 	//Enable LPSPI0 and set divider to 0, so clock frequency is 12MHz
-	modifyReg32(&MRCC0->MRCC_LPSPI0_CLKDIV,
-			MRCC_MRCC_LPSPI0_CLKDIV_HALT_MASK | MRCC_MRCC_LPSPI0_CLKDIV_DIV_MASK,
-			MRCC_MRCC_LPSPI0_CLKDIV_DIV(0));
+	modifyReg32(&MRCC0->MRCC_LPSPI0_CLKDIV, MRCC_MRCC_LPSPI0_CLKDIV_HALT_MASK | MRCC_MRCC_LPSPI0_CLKDIV_DIV_MASK,
+		    MRCC_MRCC_LPSPI0_CLKDIV_DIV(0));
 
 	//Enable peripheral clocks
 	MRCC0->MRCC_GLB_CC0_SET = MRCC_MRCC_GLB_CC0_LPSPI0(1);
@@ -293,9 +288,8 @@ void initSPI(void)
 	//Set that SIN is used for input and output data
 	//Set LPSPI master operating mode
 	//Set output data is 3-stated
-	modifyReg32(&LPSPI0->CFGR1,
-			LPSPI_CFGR1_PINCFG_MASK | LPSPI_CFGR1_MASTER_MASK | LPSPI_CFGR1_OUTCFG_MASK,
-			LPSPI_CFGR1_PINCFG(3) | LPSPI_CFGR1_MASTER(1) | LPSPI_CFGR1_OUTCFG(1));
+	modifyReg32(&LPSPI0->CFGR1, LPSPI_CFGR1_PINCFG_MASK | LPSPI_CFGR1_MASTER_MASK | LPSPI_CFGR1_OUTCFG_MASK,
+		    LPSPI_CFGR1_PINCFG(3) | LPSPI_CFGR1_MASTER(1) | LPSPI_CFGR1_OUTCFG(1));
 
 	//Set CCR
 	LPSPI0->CCR = 0;
@@ -307,15 +301,14 @@ void initSPI(void)
 	//Baud rate will be 750kbit/s at 12MHz functional clock
 	//Set frame size to 21.
 	//Mask RX so we do not receive any data.
-	modifyReg32(&LPSPI0->TCR,
-			LPSPI_TCR_PRESCALE_MASK | LPSPI_TCR_FRAMESZ_MASK,
-			LPSPI_TCR_PRESCALE(3) | LPSPI_TCR_FRAMESZ(20) | LPSPI_TCR_RXMSK(1));
+	modifyReg32(&LPSPI0->TCR, LPSPI_TCR_PRESCALE_MASK | LPSPI_TCR_FRAMESZ_MASK,
+		    LPSPI_TCR_PRESCALE(3) | LPSPI_TCR_FRAMESZ(20) | LPSPI_TCR_RXMSK(1));
 
 	//Enable SPI module
 	modifyReg32(&LPSPI0->CR, LPSPI_CR_MEN_MASK, LPSPI_CR_MEN(1));
 
 	//Enable interrupt
-	__NVIC_SetPriority(LPSPI0_IRQn, 1);	//set interrupt priority to 1
+	__NVIC_SetPriority(LPSPI0_IRQn, 1); //set interrupt priority to 1
 	__NVIC_EnableIRQ(LPSPI0_IRQn);
 }
 

@@ -19,11 +19,11 @@
  * Min/extreme accumulators are seeded so the first real sample replaces them.
  */
 volatile hwci_perf_t hwci_perf = {
-    .magic = HWCI_PERF_MAGIC,
-    .version = HWCI_PERF_VERSION,
-    .size = (uint16_t)sizeof(hwci_perf_t),
-    .ctrl_period_us_min = 0xFFFFu,
-    .host_cmd = HWCI_CMD_NONE,
+	.magic = HWCI_PERF_MAGIC,
+	.version = HWCI_PERF_VERSION,
+	.size = (uint16_t)sizeof(hwci_perf_t),
+	.ctrl_period_us_min = 0xFFFFu,
+	.host_cmd = HWCI_CMD_NONE,
 };
 
 /* Phase-binning factor for the v4 histogram; 0 = not yet computed (the
@@ -41,12 +41,12 @@ volatile uint32_t hwci_zc_phase_scale_q16 = 0;
  */
 void hwci_perf_reset_stats(void)
 {
-    hwci_perf.ctrl_exec_us_max = 0;
-    hwci_perf.ctrl_period_us_max = 0;
-    hwci_perf.ctrl_period_us_min = 0xFFFFu;
-    hwci_perf.main_loop_us_max = 0;
-    hwci_perf.commutation_interval_max = 0;
-    hwci_perf.zc_jitter_max = 0;
+	hwci_perf.ctrl_exec_us_max = 0;
+	hwci_perf.ctrl_period_us_max = 0;
+	hwci_perf.ctrl_period_us_min = 0xFFFFu;
+	hwci_perf.main_loop_us_max = 0;
+	hwci_perf.commutation_interval_max = 0;
+	hwci_perf.zc_jitter_max = 0;
 }
 
 /*
@@ -55,14 +55,14 @@ void hwci_perf_reset_stats(void)
  */
 void hwci_perf_apply_cmd(void)
 {
-    switch (hwci_perf.host_cmd) {
-    case HWCI_CMD_RESET_STATS:
-        hwci_perf_reset_stats();
-        break;
-    default:
-        break;
-    }
-    hwci_perf.host_cmd = HWCI_CMD_NONE;
+	switch (hwci_perf.host_cmd) {
+		case HWCI_CMD_RESET_STATS:
+			hwci_perf_reset_stats();
+			break;
+		default:
+			break;
+	}
+	hwci_perf.host_cmd = HWCI_CMD_NONE;
 }
 
 #endif /* HWCI_PERF */

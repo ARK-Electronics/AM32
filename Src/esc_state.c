@@ -24,74 +24,80 @@ volatile uint16_t esc_illegal_edge_count = 0;
  * do not duplicate the bitmasks in Python by hand.
  */
 static const uint16_t esc_allowed[ESC_STATE_COUNT] = {
-    /* DISARMED */
-    [ESC_DISARMED] = (1u << ESC_DISARMED) | (1u << ESC_ARMING)
-        | (1u << ESC_ARMED_IDLE) | (1u << ESC_FAULT_SIGNAL) | (1u << ESC_FAULT_LVC),
-    /* ARMING */
-    [ESC_ARMING] = (1u << ESC_ARMING) | (1u << ESC_DISARMED) | (1u << ESC_ARMED_IDLE)
-        | (1u << ESC_FAULT_SIGNAL) | (1u << ESC_FAULT_LVC),
-    /* ARMED_IDLE */
-    [ESC_ARMED_IDLE] = (1u << ESC_ARMED_IDLE) | (1u << ESC_SINE_START)
-        | (1u << ESC_OPEN_LOOP) | (1u << ESC_CLOSED_LOOP) | (1u << ESC_BRAKE)
-        | (1u << ESC_DISARMED) | (1u << ESC_FAULT_STUCK) | (1u << ESC_FAULT_SIGNAL)
-        | (1u << ESC_FAULT_LVC),
-    /* SINE_START */
-    [ESC_SINE_START] = (1u << ESC_SINE_START) | (1u << ESC_OPEN_LOOP)
-        | (1u << ESC_ARMED_IDLE) | (1u << ESC_BRAKE) | (1u << ESC_DISARMED)
-        | (1u << ESC_FAULT_STUCK) | (1u << ESC_FAULT_SIGNAL) | (1u << ESC_FAULT_LVC),
-    /* OPEN_LOOP */
-    [ESC_OPEN_LOOP] = (1u << ESC_OPEN_LOOP) | (1u << ESC_CLOSED_LOOP)
-        | (1u << ESC_ARMED_IDLE) | (1u << ESC_BRAKE) | (1u << ESC_SINE_START)
-        | (1u << ESC_DISARMED) | (1u << ESC_FAULT_STUCK) | (1u << ESC_FAULT_SIGNAL)
-        | (1u << ESC_FAULT_LVC),
-    /* CLOSED_LOOP */
-    [ESC_CLOSED_LOOP] = (1u << ESC_CLOSED_LOOP) | (1u << ESC_OPEN_LOOP)
-        | (1u << ESC_ARMED_IDLE) | (1u << ESC_BRAKE) | (1u << ESC_DISARMED)
-        | (1u << ESC_FAULT_STUCK) | (1u << ESC_FAULT_SIGNAL) | (1u << ESC_FAULT_LVC),
-    /* BRAKE */
-    [ESC_BRAKE] = (1u << ESC_BRAKE) | (1u << ESC_ARMED_IDLE) | (1u << ESC_OPEN_LOOP)
-        | (1u << ESC_SINE_START) | (1u << ESC_DISARMED) | (1u << ESC_FAULT_STUCK)
-        | (1u << ESC_FAULT_SIGNAL) | (1u << ESC_FAULT_LVC),
-    /* FAULT_STUCK: latch; clear only via reconcile when latch drops */
-    [ESC_FAULT_STUCK] = (1u << ESC_FAULT_STUCK) | (1u << ESC_ARMED_IDLE)
-        | (1u << ESC_DISARMED) | (1u << ESC_FAULT_SIGNAL) | (1u << ESC_FAULT_LVC),
-    /* FAULT_SIGNAL: expect reset */
-    [ESC_FAULT_SIGNAL] = (1u << ESC_FAULT_SIGNAL) | (1u << ESC_DISARMED),
-    /* FAULT_LVC: latched until power cycle */
-    [ESC_FAULT_LVC] = (1u << ESC_FAULT_LVC),
+	/* DISARMED */
+	[ESC_DISARMED] =
+		(1u << ESC_DISARMED) | (1u << ESC_ARMING) | (1u << ESC_ARMED_IDLE) | (1u << ESC_FAULT_SIGNAL) | (1u << ESC_FAULT_LVC),
+	/* ARMING */
+	[ESC_ARMING] =
+		(1u << ESC_ARMING) | (1u << ESC_DISARMED) | (1u << ESC_ARMED_IDLE) | (1u << ESC_FAULT_SIGNAL) | (1u << ESC_FAULT_LVC),
+	/* ARMED_IDLE */
+	[ESC_ARMED_IDLE] = (1u << ESC_ARMED_IDLE) | (1u << ESC_SINE_START) | (1u << ESC_OPEN_LOOP) | (1u << ESC_CLOSED_LOOP) |
+			   (1u << ESC_BRAKE) | (1u << ESC_DISARMED) | (1u << ESC_FAULT_STUCK) | (1u << ESC_FAULT_SIGNAL) |
+			   (1u << ESC_FAULT_LVC),
+	/* SINE_START */
+	[ESC_SINE_START] = (1u << ESC_SINE_START) | (1u << ESC_OPEN_LOOP) | (1u << ESC_ARMED_IDLE) | (1u << ESC_BRAKE) |
+			   (1u << ESC_DISARMED) | (1u << ESC_FAULT_STUCK) | (1u << ESC_FAULT_SIGNAL) | (1u << ESC_FAULT_LVC),
+	/* OPEN_LOOP */
+	[ESC_OPEN_LOOP] = (1u << ESC_OPEN_LOOP) | (1u << ESC_CLOSED_LOOP) | (1u << ESC_ARMED_IDLE) | (1u << ESC_BRAKE) |
+			  (1u << ESC_SINE_START) | (1u << ESC_DISARMED) | (1u << ESC_FAULT_STUCK) | (1u << ESC_FAULT_SIGNAL) |
+			  (1u << ESC_FAULT_LVC),
+	/* CLOSED_LOOP */
+	[ESC_CLOSED_LOOP] = (1u << ESC_CLOSED_LOOP) | (1u << ESC_OPEN_LOOP) | (1u << ESC_ARMED_IDLE) | (1u << ESC_BRAKE) |
+			    (1u << ESC_DISARMED) | (1u << ESC_FAULT_STUCK) | (1u << ESC_FAULT_SIGNAL) | (1u << ESC_FAULT_LVC),
+	/* BRAKE */
+	[ESC_BRAKE] = (1u << ESC_BRAKE) | (1u << ESC_ARMED_IDLE) | (1u << ESC_OPEN_LOOP) | (1u << ESC_SINE_START) | (1u << ESC_DISARMED) |
+		      (1u << ESC_FAULT_STUCK) | (1u << ESC_FAULT_SIGNAL) | (1u << ESC_FAULT_LVC),
+	/* FAULT_STUCK: latch; clear only via reconcile when latch drops */
+	[ESC_FAULT_STUCK] =
+		(1u << ESC_FAULT_STUCK) | (1u << ESC_ARMED_IDLE) | (1u << ESC_DISARMED) | (1u << ESC_FAULT_SIGNAL) | (1u << ESC_FAULT_LVC),
+	/* FAULT_SIGNAL: expect reset */
+	[ESC_FAULT_SIGNAL] = (1u << ESC_FAULT_SIGNAL) | (1u << ESC_DISARMED),
+	/* FAULT_LVC: latched until power cycle */
+	[ESC_FAULT_LVC] = (1u << ESC_FAULT_LVC),
 };
 
 const char *escStateName(esc_state_t s)
 {
-    switch (s) {
-    case ESC_DISARMED:     return "DISARMED";
-    case ESC_ARMING:       return "ARMING";
-    case ESC_ARMED_IDLE:   return "ARMED_IDLE";
-    case ESC_SINE_START:   return "SINE_START";
-    case ESC_OPEN_LOOP:    return "OPEN_LOOP";
-    case ESC_CLOSED_LOOP:  return "CLOSED_LOOP";
-    case ESC_BRAKE:        return "BRAKE";
-    case ESC_FAULT_STUCK:  return "FAULT_STUCK";
-    case ESC_FAULT_SIGNAL: return "FAULT_SIGNAL";
-    case ESC_FAULT_LVC:    return "FAULT_LVC";
-    default:               return "?";
-    }
+	switch (s) {
+		case ESC_DISARMED:
+			return "DISARMED";
+		case ESC_ARMING:
+			return "ARMING";
+		case ESC_ARMED_IDLE:
+			return "ARMED_IDLE";
+		case ESC_SINE_START:
+			return "SINE_START";
+		case ESC_OPEN_LOOP:
+			return "OPEN_LOOP";
+		case ESC_CLOSED_LOOP:
+			return "CLOSED_LOOP";
+		case ESC_BRAKE:
+			return "BRAKE";
+		case ESC_FAULT_STUCK:
+			return "FAULT_STUCK";
+		case ESC_FAULT_SIGNAL:
+			return "FAULT_SIGNAL";
+		case ESC_FAULT_LVC:
+			return "FAULT_LVC";
+		default:
+			return "?";
+	}
 }
 
 esc_state_t escGetState(void)
 {
-    return esc_state;
+	return esc_state;
 }
 
 uint8_t escTransitionAllowed(esc_state_t from, esc_state_t to)
 {
-    if ((unsigned)from >= ESC_STATE_COUNT || (unsigned)to >= ESC_STATE_COUNT) {
-        return 0;
-    }
-    if (from == to) {
-        return 1;
-    }
-    return (uint8_t)((esc_allowed[from] >> to) & 1u);
+	if ((unsigned)from >= ESC_STATE_COUNT || (unsigned)to >= ESC_STATE_COUNT) {
+		return 0;
+	}
+	if (from == to) {
+		return 1;
+	}
+	return (uint8_t)((esc_allowed[from] >> to) & 1u);
 }
 
 /*
@@ -101,179 +107,179 @@ uint8_t escTransitionAllowed(esc_state_t from, esc_state_t to)
  */
 static void escCommitState(esc_state_t next)
 {
-    esc_state_t from = esc_state;
-    if (from != next && !escTransitionAllowed(from, next)) {
-        if (esc_illegal_edge_count < 0xFFFFu) {
-            esc_illegal_edge_count++;
-        }
+	esc_state_t from = esc_state;
+	if (from != next && !escTransitionAllowed(from, next)) {
+		if (esc_illegal_edge_count < 0xFFFFu) {
+			esc_illegal_edge_count++;
+		}
 #ifdef ESC_STATE_STRICT
-        while (1) {
-            /* illegal edge: inspect from/next in debugger */
-        }
+		while (1) {
+			/* illegal edge: inspect from/next in debugger */
+		}
 #endif
-    }
-    esc_state = next;
+	}
+	esc_state = next;
 }
 
 /* Force without edge check (reconcile / recovery). */
 static void escForceState(esc_state_t next)
 {
-    esc_state = next;
+	esc_state = next;
 }
 
 void escReconcileFromFlags(void)
 {
-    /* Latched faults win over drive mode. */
-    if (bemf_timeout_happened == ESC_STUCK_LATCH) {
-        escForceState(ESC_FAULT_STUCK);
-        return;
-    }
-    if (LOW_VOLTAGE_CUTOFF) {
-        escForceState(ESC_FAULT_LVC);
-        return;
-    }
+	/* Latched faults win over drive mode. */
+	if (bemf_timeout_happened == ESC_STUCK_LATCH) {
+		escForceState(ESC_FAULT_STUCK);
+		return;
+	}
+	if (LOW_VOLTAGE_CUTOFF) {
+		escForceState(ESC_FAULT_LVC);
+		return;
+	}
 
-    if (!armed) {
-        if (inputSet) {
-            escForceState(ESC_ARMING);
-        } else {
-            escForceState(ESC_DISARMED);
-        }
-        return;
-    }
+	if (!armed) {
+		if (inputSet) {
+			escForceState(ESC_ARMING);
+		} else {
+			escForceState(ESC_DISARMED);
+		}
+		return;
+	}
 
-    /* Armed */
-    if (stepper_sine) {
-        escForceState(ESC_SINE_START);
-        return;
-    }
-    if (prop_brake_active && !running) {
-        escForceState(ESC_BRAKE);
-        return;
-    }
-    if (running) {
-        escForceState(old_routine ? ESC_OPEN_LOOP : ESC_CLOSED_LOOP);
-        return;
-    }
-    escForceState(ESC_ARMED_IDLE);
+	/* Armed */
+	if (stepper_sine) {
+		escForceState(ESC_SINE_START);
+		return;
+	}
+	if (prop_brake_active && !running) {
+		escForceState(ESC_BRAKE);
+		return;
+	}
+	if (running) {
+		escForceState(old_routine ? ESC_OPEN_LOOP : ESC_CLOSED_LOOP);
+		return;
+	}
+	escForceState(ESC_ARMED_IDLE);
 }
 
 void escToDisarmed(void)
 {
-    armed = 0;
-    running = 0;
-    stepper_sine = 0;
-    escCommitState(ESC_DISARMED);
+	armed = 0;
+	running = 0;
+	stepper_sine = 0;
+	escCommitState(ESC_DISARMED);
 }
 
 void escToArming(void)
 {
-    armed = 0;
-    escCommitState(ESC_ARMING);
+	armed = 0;
+	escCommitState(ESC_ARMING);
 }
 
 void escToArmedIdle(void)
 {
-    armed = 1;
-    running = 0;
-    stepper_sine = 0;
-    escCommitState(ESC_ARMED_IDLE);
+	armed = 1;
+	running = 0;
+	stepper_sine = 0;
+	escCommitState(ESC_ARMED_IDLE);
 }
 
 void escToSineStart(void)
 {
-    armed = 1;
-    stepper_sine = 1;
-    escCommitState(ESC_SINE_START);
+	armed = 1;
+	stepper_sine = 1;
+	escCommitState(ESC_SINE_START);
 }
 
 void escToOpenLoop(void)
 {
-    armed = 1;
-    running = 1;
-    old_routine = 1;
-    stepper_sine = 0;
-    escCommitState(ESC_OPEN_LOOP);
+	armed = 1;
+	running = 1;
+	old_routine = 1;
+	stepper_sine = 0;
+	escCommitState(ESC_OPEN_LOOP);
 }
 
 void escToClosedLoop(void)
 {
-    armed = 1;
-    running = 1;
-    old_routine = 0;
-    stepper_sine = 0;
-    escCommitState(ESC_CLOSED_LOOP);
+	armed = 1;
+	running = 1;
+	old_routine = 0;
+	stepper_sine = 0;
+	escCommitState(ESC_CLOSED_LOOP);
 }
 
 void escToBrake(void)
 {
-    armed = 1;
-    prop_brake_active = 1;
-    escCommitState(ESC_BRAKE);
+	armed = 1;
+	prop_brake_active = 1;
+	escCommitState(ESC_BRAKE);
 }
 
 void escToFaultStuck(void)
 {
-    input = 0;
-    bemf_timeout_happened = ESC_STUCK_LATCH;
-    running = 0;
-    stepper_sine = 0;
-    escCommitState(ESC_FAULT_STUCK);
+	input = 0;
+	bemf_timeout_happened = ESC_STUCK_LATCH;
+	running = 0;
+	stepper_sine = 0;
+	escCommitState(ESC_FAULT_STUCK);
 }
 
 void escToFaultSignal(void)
 {
-    armed = 0;
-    input = 0;
-    inputSet = 0;
-    running = 0;
-    stepper_sine = 0;
-    escCommitState(ESC_FAULT_SIGNAL);
+	armed = 0;
+	input = 0;
+	inputSet = 0;
+	running = 0;
+	stepper_sine = 0;
+	escCommitState(ESC_FAULT_SIGNAL);
 }
 
 void escToFaultLvc(void)
 {
-    LOW_VOLTAGE_CUTOFF = 1;
-    input = 0;
-    running = 0;
-    armed = 0;
-    stepper_sine = 0;
-    escCommitState(ESC_FAULT_LVC);
+	LOW_VOLTAGE_CUTOFF = 1;
+	input = 0;
+	running = 0;
+	armed = 0;
+	stepper_sine = 0;
+	escCommitState(ESC_FAULT_LVC);
 }
 
 void escEnterRunningOpenLoop(void)
 {
-    armed = 1;
-    running = 1;
-    stepper_sine = 0;
-    if (!old_routine) {
-        escCommitState(ESC_CLOSED_LOOP);
-    } else {
-        escCommitState(ESC_OPEN_LOOP);
-    }
+	armed = 1;
+	running = 1;
+	stepper_sine = 0;
+	if (!old_routine) {
+		escCommitState(ESC_CLOSED_LOOP);
+	} else {
+		escCommitState(ESC_OPEN_LOOP);
+	}
 }
 
 void escSineHandoffToOpenLoop(void)
 {
-    stepper_sine = 0;
-    running = 1;
-    old_routine = 1;
-    prop_brake_active = 0;
-    escCommitState(ESC_OPEN_LOOP);
+	stepper_sine = 0;
+	running = 1;
+	old_routine = 1;
+	prop_brake_active = 0;
+	escCommitState(ESC_OPEN_LOOP);
 }
 
 void escNoteStallOrDesync(uint8_t stop_if_low_throttle)
 {
-    old_routine = 1;
-    if (stop_if_low_throttle && input < 48) {
-        running = 0;
-        commutation_interval = 5000;
-        escCommitState(armed ? ESC_ARMED_IDLE : ESC_DISARMED);
-    } else if (running) {
-        escCommitState(ESC_OPEN_LOOP);
-    } else if (armed) {
-        escCommitState(ESC_ARMED_IDLE);
-    } else {
-        escCommitState(ESC_DISARMED);
-    }
+	old_routine = 1;
+	if (stop_if_low_throttle && input < 48) {
+		running = 0;
+		commutation_interval = 5000;
+		escCommitState(armed ? ESC_ARMED_IDLE : ESC_DISARMED);
+	} else if (running) {
+		escCommitState(ESC_OPEN_LOOP);
+	} else if (armed) {
+		escCommitState(ESC_ARMED_IDLE);
+	} else {
+		escCommitState(ESC_DISARMED);
+	}
 }

@@ -65,7 +65,19 @@ make -j$(nproc) ARK_4IN1_F051
 
 Firmware objects land under `obj/`. MCU families supported by the build system include F051, F031, G071, E230, F415, F421, L431, G431, V203, G031, A153, and SITL — exact product names live in `Inc/targets.h`.
 
-Optional static analysis / size helpers: `scripts/` and `make cppcheck` / related targets.
+Optional static analysis / size / format helpers:
+
+```bash
+make format            # apply clang-format (.clang-format) to app + MCU sources
+make check_format      # fail if sources need formatting (used in PR CI)
+make format_changed    # format only files changed vs origin/ark-release
+make cppcheck          # static analysis of the ARK F051 control path
+make size-check-ark    # ARK F051 + HWCI_PERF flash/RAM gate
+```
+
+Style is **PX4-inspired** via clang-format (Linux braces, tab indent width 8, `int *p`, column 140) — same `make format` / `check_format` workflow as PX4, not astyle itself. See `.clang-format`.
+
+`make format` skips vendor trees (`Mcu/**/Drivers`, CMSIS, DroneCAN `dsdl_generated` / `libcanard`). Install clang-format with `pip install --user 'clang-format==22.1.5'` (version pinned to match CI) or your distro package.
 
 ---
 

@@ -40,20 +40,20 @@
 #define SITL_INPUT_MAGIC 0x4453
 
 enum sitl_input_type {
-    SITL_INPUT_PWM = 0,
-    SITL_INPUT_DSHOT150 = 1,
-    SITL_INPUT_DSHOT300 = 2,
-    SITL_INPUT_DSHOT600 = 3,
+	SITL_INPUT_PWM = 0,
+	SITL_INPUT_DSHOT150 = 1,
+	SITL_INPUT_DSHOT300 = 2,
+	SITL_INPUT_DSHOT600 = 3,
 };
 
 #define SITL_INPUT_FLAG_IDLE_HIGH 0x0001
 
 struct __attribute__((packed)) input_pkt {
-    uint16_t magic;
-    uint8_t type;
-    uint8_t len;
-    uint16_t flags;
-    uint16_t data;
+	uint16_t magic;
+	uint8_t type;
+	uint8_t len;
+	uint16_t flags;
+	uint16_t data;
 };
 
 extern void transfercomplete(void);
@@ -70,134 +70,134 @@ static bool have_sender;
   timer count mod 65536 at each signal edge
  */
 static volatile bool cap_armed;
-static uint8_t cap_psc; // prescaler sampled at arm
+static uint8_t cap_psc;	   // prescaler sampled at arm
 static uint32_t cap_count; // DMA CNDTR equivalent
 static uint32_t cap_index;
 static uint64_t cap_base_ns; // sim time of CNT=0
 
 static volatile uint8_t pin_idle_level; // from the last packet flags
 static uint8_t last_type = SITL_INPUT_DSHOT300;
-static uint64_t tx_done_ns; // sim time the BDShot reply transmit completes
-static uint64_t dma_done_ns; // sim time RX capture DMA should complete (0 = idle)
+static uint64_t tx_done_ns;   // sim time the BDShot reply transmit completes
+static uint64_t dma_done_ns;  // sim time RX capture DMA should complete (0 = idle)
 static uint64_t last_edge_ns; // timestamp of the most recent synth edge
 
 // max UDP frames drained per poll so a flood cannot starve the sim thread
 #define SITL_INPUT_DRAIN_MAX 32
 
 static struct {
-    uint32_t frames;
-    uint32_t dropped;
-    uint32_t replies;
-    uint32_t bad_gcr;
+	uint32_t frames;
+	uint32_t dropped;
+	uint32_t replies;
+	uint32_t bad_gcr;
 } stats;
 
 void sitl_input_init(void)
 {
-    if (sitl_cfg.input_port <= 0) {
-        return;
-    }
-    fd = sitl_udp_socket();
-    if (fd < 0) {
-        perror("SITL: input socket");
-        return;
-    }
-    // no SO_REUSEADDR: a second instance on the same port must fail
-    // loudly instead of silently stealing datagrams
-    struct sockaddr_in addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons((uint16_t)sitl_cfg.input_port);
-    addr.sin_addr.s_addr = htonl(sitl_cfg.bind_any ? INADDR_ANY : INADDR_LOOPBACK);
-    if (bind(fd, (struct sockaddr*)&addr, sizeof(addr)) != 0) {
-        perror("SITL: input bind");
-        close(fd);
-        fd = -1;
-        return;
-    }
-    fprintf(stderr, "SITL: PWM/DShot input on udp port %d\n", sitl_cfg.input_port);
+	if (sitl_cfg.input_port <= 0) {
+		return;
+	}
+	fd = sitl_udp_socket();
+	if (fd < 0) {
+		perror("SITL: input socket");
+		return;
+	}
+	// no SO_REUSEADDR: a second instance on the same port must fail
+	// loudly instead of silently stealing datagrams
+	struct sockaddr_in addr;
+	memset(&addr, 0, sizeof(addr));
+	addr.sin_family = AF_INET;
+	addr.sin_port = htons((uint16_t)sitl_cfg.input_port);
+	addr.sin_addr.s_addr = htonl(sitl_cfg.bind_any ? INADDR_ANY : INADDR_LOOPBACK);
+	if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
+		perror("SITL: input bind");
+		close(fd);
+		fd = -1;
+		return;
+	}
+	fprintf(stderr, "SITL: PWM/DShot input on udp port %d\n", sitl_cfg.input_port);
 }
 
 // capture timer count at a simulated time, in ticks of 6.25ns*(psc+1)
 static uint32_t cap_cnt_at(uint64_t t_ns)
 {
-    const uint64_t elapsed = t_ns - cap_base_ns;
-    return (uint32_t)((elapsed * 4U) / (25ULL * (cap_psc + 1U))) & 0xffffU;
+	const uint64_t elapsed = t_ns - cap_base_ns;
+	return (uint32_t)((elapsed * 4U) / (25ULL * (cap_psc + 1U))) & 0xffffU;
 }
 
 void sitl_input_arm(void)
 {
-    cap_armed = false;
-    cap_psc = (uint8_t)ic_timer_prescaler;
-    cap_count = buffersize;
-    cap_index = 0;
-    cap_base_ns = sitl_time_ns();
-    cap_armed = true;
+	cap_armed = false;
+	cap_psc = (uint8_t)ic_timer_prescaler;
+	cap_count = buffersize;
+	cap_index = 0;
+	cap_base_ns = sitl_time_ns();
+	cap_armed = true;
 }
 
 void sitl_input_timer_reset(void)
 {
-    // resetInputCaptureTimer(): PSC=0, CNT=0, capture DMA untouched
-    cap_psc = 0;
-    cap_base_ns = sitl_time_ns();
+	// resetInputCaptureTimer(): PSC=0, CNT=0, capture DMA untouched
+	cap_psc = 0;
+	cap_base_ns = sitl_time_ns();
 }
 
 uint8_t sitl_input_pin_state(void)
 {
-    return pin_idle_level;
+	return pin_idle_level;
 }
 
 static void add_edge(uint64_t t_ns)
 {
-    if (cap_index < cap_count && cap_index < 64) {
-        dma_buffer[cap_index++] = cap_cnt_at(t_ns);
-        last_edge_ns = t_ns;
-    }
+	if (cap_index < cap_count && cap_index < 64) {
+		dma_buffer[cap_index++] = cap_cnt_at(t_ns);
+		last_edge_ns = t_ns;
+	}
 }
 
 static void synth_frame(uint8_t type, uint16_t data)
 {
-    const uint64_t now = sitl_time_ns();
-    if (type == SITL_INPUT_PWM) {
-        // one pulse: rising then falling edge
-        add_edge(now);
-        add_edge(now + data * 1000ULL);
-        return;
-    }
-    uint32_t bit_ns;
-    switch (type) {
-    case SITL_INPUT_DSHOT150:
-        bit_ns = 6667;
-        break;
-    case SITL_INPUT_DSHOT300:
-        bit_ns = 3333;
-        break;
-    case SITL_INPUT_DSHOT600:
-    default:
-        bit_ns = 1667;
-        break;
-    }
-    // 16 bits MSB first, T1H = 0.75T, T0H = 0.375T. Polarity does not
-    // change the captured values with both-edge capture
-    for (int i = 0; i < 16; i++) {
-        const uint64_t start = now + (uint64_t)i * bit_ns;
-        const uint32_t high_ns = (data & (0x8000U >> i)) ? (bit_ns * 3U) / 4U : (bit_ns * 3U) / 8U;
-        add_edge(start);
-        add_edge(start + high_ns);
-    }
+	const uint64_t now = sitl_time_ns();
+	if (type == SITL_INPUT_PWM) {
+		// one pulse: rising then falling edge
+		add_edge(now);
+		add_edge(now + data * 1000ULL);
+		return;
+	}
+	uint32_t bit_ns;
+	switch (type) {
+		case SITL_INPUT_DSHOT150:
+			bit_ns = 6667;
+			break;
+		case SITL_INPUT_DSHOT300:
+			bit_ns = 3333;
+			break;
+		case SITL_INPUT_DSHOT600:
+		default:
+			bit_ns = 1667;
+			break;
+	}
+	// 16 bits MSB first, T1H = 0.75T, T0H = 0.375T. Polarity does not
+	// change the captured values with both-edge capture
+	for (int i = 0; i < 16; i++) {
+		const uint64_t start = now + (uint64_t)i * bit_ns;
+		const uint32_t high_ns = (data & (0x8000U >> i)) ? (bit_ns * 3U) / 4U : (bit_ns * 3U) / 8U;
+		add_edge(start);
+		add_edge(start + high_ns);
+	}
 }
 
 // service deferred DMA completions (RX capture end / BDShot TX end)
 static void service_deferred_dma(void)
 {
-    const uint64_t now = sitl_time_ns();
-    if (out_put && tx_done_ns != 0 && now >= tx_done_ns) {
-        tx_done_ns = 0;
-        sitl_irq_pend(SITL_IRQ_DMA);
-    }
-    if (dma_done_ns != 0 && now >= dma_done_ns) {
-        dma_done_ns = 0;
-        sitl_irq_pend(SITL_IRQ_DMA);
-    }
+	const uint64_t now = sitl_time_ns();
+	if (out_put && tx_done_ns != 0 && now >= tx_done_ns) {
+		tx_done_ns = 0;
+		sitl_irq_pend(SITL_IRQ_DMA);
+	}
+	if (dma_done_ns != 0 && now >= dma_done_ns) {
+		dma_done_ns = 0;
+		sitl_irq_pend(SITL_IRQ_DMA);
+	}
 }
 
 /*
@@ -206,54 +206,54 @@ static void service_deferred_dma(void)
   gcr[bp+1..bp+21] (each entry 0 or 128, one output bit period each) and
   the 20 GCR bits are the transitions between adjacent periods
  */
-static bool decode_gcr(uint16_t* frame_out)
+static bool decode_gcr(uint16_t *frame_out)
 {
-    uint32_t gcrnum = 0;
-    for (int j = 2; j <= 21; j++) {
-        const uint8_t bit = (gcr[buffer_padding + j] != 0) != (gcr[buffer_padding + j - 1] != 0);
-        gcrnum = (gcrnum << 1) | bit;
-    }
-    uint16_t frame = 0;
-    for (int q = 3; q >= 0; q--) {
-        const uint8_t code = (gcrnum >> (q * 5)) & 0x1f;
-        int nibble = -1;
-        for (int i = 0; i < 16; i++) {
-            if ((uint8_t)gcr_encode_table[i] == code) {
-                nibble = i;
-                break;
-            }
-        }
-        if (nibble < 0) {
-            return false;
-        }
-        frame = (frame << 4) | (uint16_t)nibble;
-    }
-    *frame_out = frame;
-    return true;
+	uint32_t gcrnum = 0;
+	for (int j = 2; j <= 21; j++) {
+		const uint8_t bit = (gcr[buffer_padding + j] != 0) != (gcr[buffer_padding + j - 1] != 0);
+		gcrnum = (gcrnum << 1) | bit;
+	}
+	uint16_t frame = 0;
+	for (int q = 3; q >= 0; q--) {
+		const uint8_t code = (gcrnum >> (q * 5)) & 0x1f;
+		int nibble = -1;
+		for (int i = 0; i < 16; i++) {
+			if ((uint8_t)gcr_encode_table[i] == code) {
+				nibble = i;
+				break;
+			}
+		}
+		if (nibble < 0) {
+			return false;
+		}
+		frame = (frame << 4) | (uint16_t)nibble;
+	}
+	*frame_out = frame;
+	return true;
 }
 
 void sitl_input_send_reply(void)
 {
-    uint16_t frame;
-    if (!decode_gcr(&frame)) {
-        stats.bad_gcr++;
-        frame = 0;
-    } else if (fd >= 0 && have_sender) {
-        struct input_pkt pkt = {
-            .magic = SITL_INPUT_MAGIC,
-            .type = last_type,
-            .len = 4,
-            // the BDShot reply line idles high, pulses are active low
-            .flags = SITL_INPUT_FLAG_IDLE_HIGH,
-            .data = frame,
-        };
-        sendto(fd, &pkt, sizeof(pkt), 0, (struct sockaddr*)&last_sender, sizeof(last_sender));
-        stats.replies++;
-    }
-    // the reply DMA completes after (23+buffer_padding) bit periods of
-    // 109 ticks at 160MHz/(output_timer_prescaler+1)
-    const uint64_t bit_ns = (109ULL * 25ULL * (uint64_t)(output_timer_prescaler + 1)) / 4ULL;
-    tx_done_ns = sitl_time_ns() + (23ULL + buffer_padding) * bit_ns;
+	uint16_t frame;
+	if (!decode_gcr(&frame)) {
+		stats.bad_gcr++;
+		frame = 0;
+	} else if (fd >= 0 && have_sender) {
+		struct input_pkt pkt = {
+			.magic = SITL_INPUT_MAGIC,
+			.type = last_type,
+			.len = 4,
+			// the BDShot reply line idles high, pulses are active low
+			.flags = SITL_INPUT_FLAG_IDLE_HIGH,
+			.data = frame,
+		};
+		sendto(fd, &pkt, sizeof(pkt), 0, (struct sockaddr *)&last_sender, sizeof(last_sender));
+		stats.replies++;
+	}
+	// the reply DMA completes after (23+buffer_padding) bit periods of
+	// 109 ticks at 160MHz/(output_timer_prescaler+1)
+	const uint64_t bit_ns = (109ULL * 25ULL * (uint64_t)(output_timer_prescaler + 1)) / 4ULL;
+	tx_done_ns = sitl_time_ns() + (23ULL + buffer_padding) * bit_ns;
 }
 
 /*
@@ -263,19 +263,19 @@ void sitl_input_send_reply(void)
  */
 void sitl_input_dma_irq(void)
 {
-    if (armed && dshot_telemetry) {
-        if (out_put) {
-            receiveDshotDma();
-            compute_dshot_flag = 2;
-        } else {
-            sendDshotDma();
-            compute_dshot_flag = 1;
-        }
-        sitl_irq_pend(SITL_IRQ_EXTI15);
-        return;
-    }
-    transfercomplete();
-    sitl_irq_pend(SITL_IRQ_EXTI15);
+	if (armed && dshot_telemetry) {
+		if (out_put) {
+			receiveDshotDma();
+			compute_dshot_flag = 2;
+		} else {
+			sendDshotDma();
+			compute_dshot_flag = 1;
+		}
+		sitl_irq_pend(SITL_IRQ_EXTI15);
+		return;
+	}
+	transfercomplete();
+	sitl_irq_pend(SITL_IRQ_EXTI15);
 }
 
 /*
@@ -297,52 +297,50 @@ void sitl_input_dma_irq(void)
  */
 void sitl_input_poll(void)
 {
-    if (fd < 0) {
-        return;
-    }
-    service_deferred_dma();
+	if (fd < 0) {
+		return;
+	}
+	service_deferred_dma();
 
-    for (int n = 0; n < SITL_INPUT_DRAIN_MAX; n++) {
-        // short busy windows: keep UDP queued for the next free step
-        if (out_put || dma_done_ns != 0) {
-            break;
-        }
-        struct input_pkt pkt;
-        struct sockaddr_in src;
-        socklen_t srclen = sizeof(src);
-        const ssize_t ret = recvfrom(fd, &pkt, sizeof(pkt), MSG_DONTWAIT,
-            (struct sockaddr*)&src, &srclen);
-        if (ret < 0) {
-            break;
-        }
-        if (ret < (ssize_t)sizeof(pkt) || pkt.magic != SITL_INPUT_MAGIC
-            || pkt.type > SITL_INPUT_DSHOT600 || pkt.len != 4) {
-            continue;
-        }
-        last_sender = src;
-        have_sender = true;
-        last_type = pkt.type;
-        pin_idle_level = (pkt.flags & SITL_INPUT_FLAG_IDLE_HIGH) ? 1 : 0;
-        stats.frames++;
-        if (!cap_armed) {
-            stats.dropped++;
-            continue;
-        }
-        synth_frame(pkt.type, pkt.data);
-        if (cap_index >= cap_count) {
-            cap_armed = false;
-            // complete at the last edge (or immediately if already past)
-            dma_done_ns = last_edge_ns ? last_edge_ns : sitl_time_ns();
-            service_deferred_dma();
-            break;
-        }
-    }
+	for (int n = 0; n < SITL_INPUT_DRAIN_MAX; n++) {
+		// short busy windows: keep UDP queued for the next free step
+		if (out_put || dma_done_ns != 0) {
+			break;
+		}
+		struct input_pkt pkt;
+		struct sockaddr_in src;
+		socklen_t srclen = sizeof(src);
+		const ssize_t ret = recvfrom(fd, &pkt, sizeof(pkt), MSG_DONTWAIT, (struct sockaddr *)&src, &srclen);
+		if (ret < 0) {
+			break;
+		}
+		if (ret < (ssize_t)sizeof(pkt) || pkt.magic != SITL_INPUT_MAGIC || pkt.type > SITL_INPUT_DSHOT600 || pkt.len != 4) {
+			continue;
+		}
+		last_sender = src;
+		have_sender = true;
+		last_type = pkt.type;
+		pin_idle_level = (pkt.flags & SITL_INPUT_FLAG_IDLE_HIGH) ? 1 : 0;
+		stats.frames++;
+		if (!cap_armed) {
+			stats.dropped++;
+			continue;
+		}
+		synth_frame(pkt.type, pkt.data);
+		if (cap_index >= cap_count) {
+			cap_armed = false;
+			// complete at the last edge (or immediately if already past)
+			dma_done_ns = last_edge_ns ? last_edge_ns : sitl_time_ns();
+			service_deferred_dma();
+			break;
+		}
+	}
 }
 
 void sitl_input_stats(uint32_t out[4])
 {
-    out[0] = stats.frames;
-    out[1] = stats.dropped;
-    out[2] = stats.replies;
-    out[3] = stats.bad_gcr;
+	out[0] = stats.frames;
+	out[1] = stats.dropped;
+	out[2] = stats.replies;
+	out[3] = stats.bad_gcr;
 }

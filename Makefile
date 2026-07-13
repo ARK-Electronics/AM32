@@ -182,3 +182,18 @@ size-check-ark:
 	$(QUIET)$(MAKE) -B ARK_4IN1_F051 HWCI_PERF=1
 	$(QUIET)bash scripts/check-size-ark.sh
 
+# Code formatting (clang-format ≈ PX4 astyle/Linux look; see .clang-format).
+# Same target names as PX4:
+#   make format          — rewrite sources in place
+#   make check_format    — CI: fail if any file would change
+#   make format_changed  — rewrite only files changed vs origin/ark-release
+.PHONY : format check_format format_changed
+format:
+	$(QUIET)bash scripts/format.sh
+
+check_format:
+	$(QUIET)bash scripts/format.sh --check
+
+format_changed:
+	$(QUIET)bash scripts/format.sh --changed
+

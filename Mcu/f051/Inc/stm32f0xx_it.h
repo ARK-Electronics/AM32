@@ -21,11 +21,11 @@
 /* Define to prevent recursive inclusion
  * -------------------------------------*/
 #ifndef __STM32F0xx_IT_H
-#define __STM32F0xx_IT_H
+#	define __STM32F0xx_IT_H
 
-#ifdef __cplusplus
+#	ifdef __cplusplus
 extern "C" {
-#endif
+#	endif
 
 /* Private includes
  * ----------------------------------------------------------*/
@@ -75,9 +75,9 @@ void EXTI2_3_IRQHandler(void);
 void EXTI4_15_IRQHandler(void);
 /* USER CODE END EFP */
 
-#ifdef __cplusplus
+#	ifdef __cplusplus
 }
-#endif
+#	endif
 
 #endif /* __STM32F0xx_IT_H */
 

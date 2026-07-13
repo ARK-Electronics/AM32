@@ -1,0 +1,76 @@
+# AM32 / ARK C code style — used by `make format` and `make check_format`.
+#
+# Approximates PX4's astyle rules (Tools/astyle/astylerc on PX4-Autopilot) with
+# clang-format so we keep a single modern tool while matching the look of
+# Linux-style, tab-indented PX4 code:
+#   indent=force-tab=8, style=linux, align-pointer=name, max-code-length=140,
+#   pad-oper, pad-header, unpad-paren, indent-cases, indent-preprocessor
+#
+# Not a byte-for-byte astyle clone (different engine). Intentionally different
+# from PX4: SortIncludes off, comments not reflowed, no auto-insert of braces
+# (safer around embedded macros).
+---
+Language: Cpp
+BasedOnStyle: LLVM
+
+# PX4: indent=force-tab=8
+UseTab: Always
+IndentWidth: 8
+TabWidth: 8
+ContinuationIndentWidth: 8
+
+# PX4: style=linux  (Allman for functions, attach for if/for/while)
+BreakBeforeBraces: Linux
+BraceWrapping:
+  AfterFunction: true
+  AfterControlStatement: false
+  AfterEnum: false
+  AfterStruct: false
+  AfterUnion: false
+  BeforeElse: false
+  IndentBraces: false
+
+# PX4: align-pointer=name / align-reference=name
+PointerAlignment: Right
+ReferenceAlignment: Right
+
+# PX4: max-code-length=140
+ColumnLimit: 140
+
+# PX4: pad-header, unpad-paren, pad-oper (spaces around operators are default)
+SpaceBeforeParens: ControlStatements
+SpacesInParentheses: false
+SpaceBeforeAssignmentOperators: true
+SpaceAfterCStyleCast: false
+
+# PX4: indent-cases
+IndentCaseLabels: true
+
+# PX4: indent-preprocessor
+IndentPPDirectives: AfterHash
+
+# Short constructs — prefer explicit braces / multi-line control flow
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AllowShortFunctionsOnASingleLine: Empty
+AllowShortBlocksOnASingleLine: Empty
+AllowShortCaseLabelsOnASingleLine: false
+
+# Keep diffs focused: do not reorder includes or reflow long changelogs
+SortIncludes: Never
+IncludeBlocks: Preserve
+ReflowComments: false
+
+AlignAfterOpenBracket: Align
+AlignTrailingComments: true
+BinPackParameters: true
+BinPackArguments: true
+
+# Do not auto-insert braces (astyle add-brackets). Safer with firmware macros.
+InsertBraces: false
+
+MaxEmptyLinesToKeep: 1
+KeepEmptyLinesAtTheStartOfBlocks: false
+AlwaysBreakAfterDefinitionReturnType: None
+AlwaysBreakAfterReturnType: None
+...
