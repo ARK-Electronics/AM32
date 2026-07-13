@@ -121,6 +121,32 @@ def test_disqualified_candidate_never_wins(tmp_path):
     assert tuner._pick_winner(cands)["overrides"] == {"advance_level": 22}
 
 
+def test_multi_repeat_single_fluke_dq_does_not_kill_candidate(tmp_path):
+    """With repeats > 1, one disqualified leg must not erase a candidate that
+    still has clean scores; the median of the clean legs is used."""
+    tuner, _ = run_tune(tmp_path, small_spec(stages=[]), make_backend())
+    tuner.spec.objective.noise_floor_pct = 0.5
+    cands = [
+        {"overrides": {"advance_level": 30}, "order": 0, "value": 30,
+         "entries": [
+             {"score_raw": 6.2, "score_norm": 6.2, "disqualified": None,
+              "jitter_pct": 0.5, "fet_temp_c": 40.0},
+             {"score_raw": None, "score_norm": None,
+              "disqualified": ["demag events 1 > 0"],
+              "jitter_pct": 9.0, "fet_temp_c": 80.0},
+         ]},
+        {"overrides": {"advance_level": 22}, "order": 1, "value": 22,
+         "entries": [
+             {"score_raw": 5.0, "score_norm": 5.0, "disqualified": None,
+              "jitter_pct": 0.1, "fet_temp_c": 30.0},
+             {"score_raw": 5.1, "score_norm": 5.1, "disqualified": None,
+              "jitter_pct": 0.1, "fet_temp_c": 30.0},
+         ]},
+    ]
+    assert tuner._pick_winner(cands)["overrides"] == {"advance_level": 30}
+    assert tuner._pick_winner(cands)["score"] == pytest.approx(6.2)
+
+
 def test_all_disqualified_yields_no_winner(tmp_path):
     tuner, _ = run_tune(tmp_path, small_spec(stages=[]), make_backend())
     cands = [{"overrides": {}, "order": 0, "value": 0,
@@ -255,6 +281,105 @@ def test_outside_noise_floor_score_wins_regardless(tmp_path):
     cands = [_cand(0, {"advance_level": 30}, 6.50, jitter=9.9, fet=99.0),
              _cand(1, {"advance_level": 34}, 6.00, jitter=0.1, fet=20.0)]
     assert tuner._pick_winner(cands)["overrides"] == {"advance_level": 30}
+
+
+def test_stage_records_efficiency_argmax_when_tiebreak_differs(tmp_path):
+    """When noise-floor tie-break picks a non-max-g/W candidate, the stage
+    record must expose both the chosen winner and the pure efficiency argmax."""
+    from hwci.tuner import efficiency_argmax, pick_winner, winner_reason
+    cands = [
+        _cand(0, {"advance_level": 30}, 6.00, jitter=0.9, fet=40.0),
+        _cand(1, {"advance_level": 34}, 6.05, jitter=0.5, fet=60.0),
+    ]
+    w = pick_winner(cands, noise_floor_pct=3.0,
+                    distance_fn=lambda ov: 0.0)
+    a = efficiency_argmax(cands)
+    assert a["overrides"] == {"advance_level": 34}
+    assert w["overrides"] == {"advance_level": 34}  # jitter wins for 34
+    # Force a tie-break that diverges: same score band, worse jitter on max
+    cands2 = [
+        _cand(0, {"advance_level": 30}, 6.00, jitter=0.2, fet=40.0),
+        _cand(1, {"advance_level": 34}, 6.05, jitter=0.9, fet=40.0),
+    ]
+    w2 = pick_winner(cands2, noise_floor_pct=3.0,
+                     distance_fn=lambda ov: abs(ov["advance_level"] - 26))
+    a2 = efficiency_argmax(cands2)
+    assert a2["overrides"] == {"advance_level": 34}
+    assert w2["overrides"] == {"advance_level": 30}
+    assert winner_reason(w2, a2) == "noise_floor_tiebreak:jitter"
+
+
+def test_finals_min_delta_rejects_tiny_gain(tmp_path):
+    """A tiny positive paired delta below min_delta_pct must not confirm."""
+    # Optimum very close to default so ABBA Δ is tiny; min_delta_pct=5
+    # should refuse confirmation even if Δ > 0.
+    backend = make_backend(advance_optimum=27.0)  # default page is 26
+    spec_d = small_spec(
+        stages=[{"name": "advance", "sweep": "advance_level",
+                 "search": "climb"}],
+        finals={"profile": "tune_probe", "repeats": 1,
+                "startup_check": False, "min_delta_pct": 50.0,
+                "extra_repeats_if_close": 0})
+    _, result = run_tune(tmp_path, spec_d, backend)
+    # Either not confirmed, or if confirmed the delta cleared 50% (unlikely)
+    if result["median_paired_delta"] is not None:
+        thr = result["min_delta_threshold"]
+        if result["median_paired_delta"] <= thr:
+            assert not result["confirmed"]
+
+
+def test_pilot_card_written(tmp_path):
+    backend = make_backend(advance_optimum=33.0)
+    _, result = run_tune(tmp_path, small_spec(), backend)
+    out = tmp_path / "tune"
+    assert (out / "pilot_card.md").exists()
+    assert (out / "pilot_card.json").exists()
+    import json
+    card = json.loads((out / "pilot_card.json").read_text())
+    assert card["confirmed"] == result["confirmed"]
+    assert "winner_overrides" in card
+
+
+def test_campaign_table_aggregates_sessions(tmp_path):
+    from hwci.tuner import campaign_table_md, load_pilot_card
+    backend = make_backend(advance_optimum=33.0)
+    run_tune(tmp_path, small_spec(), backend)
+    # second session
+    run_tune(tmp_path / "b", small_spec(), make_backend(advance_optimum=26.0))
+    # first run lands in tmp_path/tune; second needs out dir
+    # re-run second properly
+    from hwci.tuner import Tuner, tune_spec_from_dict
+    import yaml
+    d = small_spec()
+    t = Tuner(tune_spec_from_dict(d), make_backend(advance_optimum=26.0),
+              tmp_path / "tune2", spec_text=yaml.safe_dump(d),
+              no_prompt=True, log=lambda s: None)
+    t.run()
+    c1 = load_pilot_card(tmp_path / "tune")
+    c2 = load_pilot_card(tmp_path / "tune2")
+    md = campaign_table_md([c1, c2])
+    assert "Tune campaign summary" in md
+    assert "Sessions: **2**" in md
+
+
+def test_polish_radius_limits_values_tested(tmp_path):
+    import json
+    # polish stage only: incumbent default advance 26, radius 4 -> [22,26,30]
+    # from the full grid (refine_step not applied on polish)
+    spec_d = small_spec(stages=[
+        {"name": "polish", "sweep": "advance_level", "search": "grid",
+         "polish_radius": 4},
+    ], finals={"profile": "tune_probe", "repeats": 1,
+               "startup_check": False, "extra_repeats_if_close": 0,
+               "min_delta_pct": 0.0})
+    run_tune(tmp_path, spec_d, make_backend(advance_optimum=26.0))
+    m = json.loads((tmp_path / "tune" / "manifest.json").read_text())
+    vals = {e["overrides"].get("advance_level")
+            for e in m["trials"]
+            if e["stage"] == "polish" and e["kind"] == "trial"}
+    assert vals  # at least incumbent
+    assert all(abs(v - 26) <= 4 for v in vals if v is not None)
+    assert 14 not in vals and 38 not in vals
 
 
 # --------------------------------------------------------------------------
@@ -651,10 +776,11 @@ def test_ramp_fallback_candidates_uses_median_across_repeats(tmp_path):
     assert cands == [{"advance_level": 26}, {"advance_level": 22}, {}]
 
 
-def test_ramp_fallback_candidates_excludes_value_with_any_disqualified_repeat(
+def test_ramp_fallback_candidates_keeps_value_with_single_fluke_dq(
         tmp_path):
-    """Matching _pick_winner: if ANY repeat of a value was disqualified, the
-    whole value is excluded from consideration, not just that one sample."""
+    """Softer multi-repeat DQ: a single fluke demag on one repeat must not
+    erase a value that still has a clean, scored leg. Score is the median of
+    clean entries only (here just 3.1). All-DQ values are still excluded."""
     import yaml
     spec_d = _spec_with_advance_and_ramp()
     spec = tune_spec_from_dict(spec_d)
@@ -667,9 +793,12 @@ def test_ramp_fallback_candidates_excludes_value_with_any_disqualified_repeat(
         _ledger_entry(1, "advance", "trial", {"advance_level": 26}, 3.1),
         _ledger_entry(2, "advance", "trial", {"advance_level": 26},
                       disqualified=["demag events 1 > 0"]),
+        # fully DQ'd value stays out
+        _ledger_entry(3, "advance", "trial", {"advance_level": 14},
+                      disqualified=["demag events 1 > 0"]),
     ]
     cands = t._ramp_fallback_candidates()
-    assert cands == [{}]   # 26 excluded despite one clean, high-scoring rep
+    assert cands == [{"advance_level": 26}, {}]
 
 
 def test_ramp_fallback_candidates_robust_to_fixed_on_advance_stage(
@@ -788,6 +917,66 @@ def test_measure_stage_fallback_verifies_exactly_what_it_adopts(tmp_path):
     assert seen_pwm_frequency_at_certify == [8]
     # ... and the SAME value the session adopts going forward.
     assert t.manifest["incumbent"]["pwm_frequency"] == 8
+
+
+def test_climb_uses_normalized_scores_under_drift(tmp_path):
+    """Climb direction must follow anchor-normalized scores, not raw: under
+    a strong efficiency drift, raw scores fall even for better settings, so
+    a raw-only climb would stop early or walk the wrong way."""
+    backend = make_backend(advance_optimum=33.0)
+
+    def drift(index, plan):
+        # Stronger than the e2e drift test: enough that a later better
+        # setting can still look worse in raw space than an early worse one.
+        backend.sim.params.motor_efficiency = 0.82 * (1.0 - 0.012 * index)
+
+    _, result = run_tune(
+        tmp_path, climb_spec(anchors_every=2), backend, before_trial=drift)
+    assert abs(result["winner_overrides"]["advance_level"] - 33) <= 2
+
+
+def test_high_throttle_failure_unconfirms_winner(tmp_path):
+    """A winner that desyncs on the optional high-throttle hold must not be
+    confirmed, even with a positive ABBA paired delta."""
+    import json
+    from hwci.tuner import high_throttle_profile
+
+    spec_d = small_spec(
+        stages=[{"name": "advance", "sweep": "advance_level",
+                 "search": "climb"}],
+        finals={"profile": "tune_probe", "repeats": 1,
+                "startup_check": False, "high_throttle": 0.70,
+                "high_throttle_dwell_s": 1.0})
+    backend = make_backend(advance_optimum=33.0)
+    # Inject: every high-throttle trial looks like a demag abort by
+    # lowering the safety current limit only for that profile. Easier:
+    # monkeypatch _trial to DQ final_high_throttle after a normal run.
+    spec = tune_spec_from_dict(spec_d)
+    t = Tuner(spec, backend, tmp_path / "tune",
+              spec_text=yaml.safe_dump(spec_d), no_prompt=True,
+              log=lambda s: None)
+    real_trial = t._trial
+
+    def wrap(plan):
+        e = real_trial(plan)
+        if plan.kind == "final_high_throttle":
+            e["disqualified"] = ["demag events 1 > 0"]
+            e["score_raw"] = None
+            e["score_norm"] = None
+        return e
+
+    t._trial = wrap
+    result = t.run()
+    assert result["high_throttle"] is not None
+    assert result["high_throttle"]["ok"] is False
+    assert result["confirmed"] is False
+    # device left on defaults
+    base = (tmp_path / "tune" / "base_settings.bin").read_bytes()
+    assert backend.read_page() == base
+    assert high_throttle_profile(spec, 0.70, 1.0).name == "tune_high_throttle"
+    m = json.loads((tmp_path / "tune" / "manifest.json").read_text())
+    kinds = [e["kind"] for e in m["trials"] if e["stage"] == "finals"]
+    assert "final_high_throttle" in kinds
 
 
 def test_measure_stage_resets_incumbent_to_default_when_nothing_certifies(

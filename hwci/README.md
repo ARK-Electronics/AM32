@@ -235,13 +235,21 @@ them best-first.
 **Noise handling**: same-firmware g/W spread reaches ~10 % on the bench and
 the pack sags within a session, so the incumbent is re-run every
 `anchors_every` trials and every score is reported raw *and* normalized to
-the interpolation between surrounding anchors (cancels drift). Candidates
-within `noise_floor_pct` of the best tie-break toward lower jitter, then
-lower FET temperature, then closest-to-default. The finals run winner vs
-default in interleaved ABBA blocks on the full efficiency sweep (plus a
-startup-reliability check); the winner is confirmed only with a positive
-median paired delta and zero constraint failures — otherwise
-`best_settings.bin` keeps the defaults.
+the interpolation between surrounding anchors (cancels drift). Hill-climb
+stages re-normalize after every trial so direction matches ranking.
+Multi-repeat candidates drop only fully-disqualified samples (a single
+fluke demag no longer kills the whole candidate). Candidates within
+`noise_floor_pct` of the best tie-break toward lower jitter, then lower
+FET temperature, then closest-to-default. The finals run winner vs default
+in interleaved ABBA blocks on the full efficiency sweep (plus a
+startup-reliability check and an optional `finals.high_throttle` hold
+through a known desync band); the winner is confirmed only when the median
+paired delta exceeds `finals.min_delta_pct` of the default-leg score (with
+optional extra ABBA blocks on close calls), with zero constraint failures
+and a passing high-throttle check when configured — otherwise
+`best_settings.bin` keeps the defaults. Close sessions also write a one-page
+`pilot_card.md` / `pilot_card.json`; roll several up with
+`hwci campaign runs/tune-*`.
 
 **Session dir / resume**: `runs/tune-1/` holds `manifest.json` (atomically
 rewritten after every trial), `spec.yaml`, `base_settings.bin`, one standard
