@@ -121,8 +121,8 @@ void TIM6_DAC_IRQHandler(void)
 #ifdef USE_TIMER_16_CHANNEL_1
 void TIM7_IRQHandler(void)
 {
-    PeriodElapsedCallback();
-    LL_TIM_ClearFlag_UPDATE(TIM7);
+	PeriodElapsedCallback();
+	LL_TIM_ClearFlag_UPDATE(TIM7);
 }
 #else
 void TIM1_UP_TIM16_IRQHandler(void)
