@@ -1,0 +1,46 @@
+name: noprop_smoke_100pct_1300kv
+description: >
+  No-prop free-run climb to 100% for ~1300KV motors on 6S (JS 2807 class).
+  Same staircase as noprop_smoke_100pct_3a; smoke min_rpm gates scaled by
+  1300/1800 so free-run expectations match the lower KV. ~55 s.
+sample_rate_hz: 100
+arm_settle_s: 3.0
+pole_pairs: 7
+demag_rpm_drop_fraction: 0.25
+demag_commutation_spike: 3.0
+steady_tail_fraction: 0.5
+
+safety:
+  max_current_a: 50.0
+  max_motor_temp_c: 90.0
+  max_rpm: 45000          # ~1300KV free-run on 6S is ~30–35k mech
+  max_thrust_n: 2.0
+
+smoke_gates:
+  enabled: true
+  min_throttle: 0.55
+  min_running_fraction: 0.90
+  max_bemf_latch_samples: 0
+  require_esc_drive_states: true
+  min_esc_drive_fraction: 0.90
+  max_illegal_edges: 0
+  # Scaled ~1300/1800 from the 1800KV gates (30k @ 100% → ~22k)
+  min_rpm:
+    0.6: 11000
+    0.8: 18000
+    1.0: 22000
+
+segments:
+  - {label: idle,    throttle: 0.00, duration_s: 2.0}
+  - {label: ramp20,  throttle: 0.20, duration_s: 3.0, ramp: true}
+  - {label: hold20,  throttle: 0.20, duration_s: 3.0, steady: true}
+  - {label: ramp40,  throttle: 0.40, duration_s: 4.0, ramp: true}
+  - {label: hold40,  throttle: 0.40, duration_s: 3.0, steady: true}
+  - {label: ramp60,  throttle: 0.60, duration_s: 4.0, ramp: true}
+  - {label: hold60,  throttle: 0.60, duration_s: 3.0, steady: true}
+  - {label: ramp80,  throttle: 0.80, duration_s: 4.0, ramp: true}
+  - {label: hold80,  throttle: 0.80, duration_s: 3.0, steady: true}
+  - {label: ramp100, throttle: 1.00, duration_s: 8.0, ramp: true}
+  - {label: hold100, throttle: 1.00, duration_s: 5.0, steady: true}
+  - {label: rampdn,  throttle: 0.00, duration_s: 5.0, ramp: true}
+  - {label: stop,    throttle: 0.00, duration_s: 2.0}
