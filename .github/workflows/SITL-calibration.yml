@@ -46,7 +46,8 @@ jobs:
         run: make AM32_SITL_CAN
 
       - name: Install python dependencies
-        run: python3 -m pip install dronecan plotly
+        # dronecan>=1.0.20 provides the UDP mcast: driver used by the cal tools
+        run: python3 -m pip install 'dronecan>=1.0.20' plotly
 
       - name: Run calibration tests
         run: |

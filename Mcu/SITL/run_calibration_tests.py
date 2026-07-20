@@ -77,7 +77,11 @@ DATASETS = [
     },
 ]
 
-URI = 'mcast:7:lo'
+# Bus index only. pydronecan (PyPI) parses the URL after "mcast:" as a single
+# bus number; "7:lo" is treated as bus 0, so SITL on 239.65.82.7 never sees
+# the tools and the tools never see NodeStatus/esc.Status. SITL still accepts
+# mcast:N:ifname for its own TX path when needed.
+URI = 'mcast:7'
 NODE_ID = 30
 INPUT_PORT = 57943
 STATE_PORT = 57944
@@ -106,6 +110,9 @@ class Sitl:
     def __init__(self, sitl, model, eeprom, log, physics_log=None):
         self.log = log
         self.logf = open(log, 'w')
+        # Do not pass --nosleep: the measure/square/chirp tools timestamp
+        # samples in wall time, so free-running sim compresses rise/fall
+        # times and warps the chirp frequency axis.
         cmd = [sitl, '--node-id', str(NODE_ID), '--can-uri', URI,
                '--eeprom', eeprom, '--config', model,
                '--input-port', str(INPUT_PORT),
