@@ -4,7 +4,7 @@
  */
 
 #ifndef PERIPHERALS_H_
-#	define PERIPHERALS_H_
+#define PERIPHERALS_H_
 #endif /* PERIPHERALS_H_ */
 
 #include "ADC.h"

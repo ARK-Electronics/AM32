@@ -13,28 +13,28 @@ volatile char out_put;
 char ic_timer_prescaler = CPU_FREQUENCY_MHZ / 6;
 uint8_t buffer_padding;
 
-void changeToOutput(void) {}
-void changeToInput(void) {}
+void changeToOutput(void) { }
+void changeToInput(void) { }
 
 void receiveDshotDma(void)
 {
-	out_put = 0;
-	sitl_input_arm();
+    out_put = 0;
+    sitl_input_arm();
 }
 
 void sendDshotDma(void)
 {
-	out_put = 1;
-	sitl_input_send_reply();
+    out_put = 1;
+    sitl_input_send_reply();
 }
 
 uint8_t getInputPinState(void)
 {
-	return sitl_input_pin_state();
+    return sitl_input_pin_state();
 }
 
-void setInputPolarityRising(void) {}
-void setInputPullDown(void) {}
-void setInputPullUp(void) {}
-void setInputPullNone(void) {}
-void enableHalfTransferInt(void) {}
+void setInputPolarityRising(void) { }
+void setInputPullDown(void) { }
+void setInputPullUp(void) { }
+void setInputPullNone(void) { }
+void enableHalfTransferInt(void) { }

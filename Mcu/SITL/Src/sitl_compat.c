@@ -15,17 +15,17 @@
 int sitl_udp_socket(void)
 {
 #ifdef __APPLE__
-	const int fd = socket(AF_INET, SOCK_DGRAM, 0);
-	if (fd >= 0) {
-		fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK);
-		fcntl(fd, F_SETFD, FD_CLOEXEC);
-		// Without this, a failed send() on a connected UDP socket raises
-		// SIGPIPE (process exit -13) instead of returning -1/EPIPE.
-		const int one = 1;
-		setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof(one));
-	}
-	return fd;
+    const int fd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (fd >= 0) {
+        fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK);
+        fcntl(fd, F_SETFD, FD_CLOEXEC);
+        // Without this, a failed send() on a connected UDP socket raises
+        // SIGPIPE (process exit -13) instead of returning -1/EPIPE.
+        const int one = 1;
+        setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof(one));
+    }
+    return fd;
 #else
-	return socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+    return socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
 #endif
 }

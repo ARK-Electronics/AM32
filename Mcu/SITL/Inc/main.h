@@ -22,14 +22,14 @@
 
 // minimal register structs so common.h externs compile
 typedef struct {
-	volatile uint32_t IDR;
-	volatile uint32_t ODR;
-	volatile uint32_t BSRR;
-	volatile uint32_t BRR;
+    volatile uint32_t IDR;
+    volatile uint32_t ODR;
+    volatile uint32_t BSRR;
+    volatile uint32_t BRR;
 } GPIO_TypeDef;
 
 typedef struct {
-	volatile uint32_t CSR;
+    volatile uint32_t CSR;
 } COMP_TypeDef;
 
 extern GPIO_TypeDef sitl_gpio_dummy;
@@ -43,10 +43,7 @@ extern COMP_TypeDef sitl_comp_dummy[2];
 // is a no-op and the "temperature calculation" is a pass through (the
 // simulation stores degrees C in ADC_raw_temp)
 #define ADC1 0
-#define LL_ADC_REG_StartConversion(adc)                                                                                                    \
-	do {                                                                                                                               \
-		(void)(adc);                                                                                                               \
-	} while (0)
+#define LL_ADC_REG_StartConversion(adc) do { (void)(adc); } while (0)
 #define LL_ADC_RESOLUTION_12B 0
 #define __LL_ADC_CALC_TEMPERATURE(vref, raw, res) ((int32_t)(raw))
 
@@ -55,7 +52,7 @@ extern COMP_TypeDef sitl_comp_dummy[2];
 #define LL_IWDG_ReloadCounter(wdg) sitl_watchdog_reload()
 
 #ifndef RESET
-#	define RESET 0
+#define RESET 0
 #endif
 
 void Error_Handler(void);

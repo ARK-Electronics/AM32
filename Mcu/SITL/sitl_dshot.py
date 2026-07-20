@@ -3,14 +3,20 @@ protocol library for AM32 SITL PWM/DShot input over UDP
 
 packet format (little endian):
   u16 magic 0x4453
-  u8  type: 0=PWM, 1=DSHOT150, 2=DSHOT300, 3=DSHOT600
-  u8  len: payload bytes after the 6 byte header (4)
-  u16 flags: bit0 = line idle level (1 = idle high, inverted/bidir DShot)
-  u16 data: PWM pulse width in microseconds, or the full 16 bit DShot
-            frame (11 bit value, telemetry bit, 4 bit CRC)
+  u8  type: 0=PWM, 1=DSHOT150, 2=DSHOT300, 3=DSHOT600,
+            4=SERIAL19200, 5=LINE_LEVEL
+  u8  len: payload bytes after the 6 byte header (4, or 1..200 for
+           type 4 serial data)
+  u16 flags: bit0 = line idle level (1 = idle high, inverted/bidir DShot;
+             for type 4 the level after the bytes; for type 5 the constant
+             level), bit1 = line floating (type 4/5)
+  payload: u16 data: PWM pulse width in microseconds, or the full 16 bit
+           DShot frame (11 bit value, telemetry bit, 4 bit CRC); for
+           type 4 N raw bytes framed as 19200 baud 8N1 on the wire
 
 replies (bidirectional DShot) use the same format with data being the 16
-bit GCR-decoded frame: 12 bit eRPM/EDT value plus 4 bit CRC
+bit GCR-decoded frame: 12 bit eRPM/EDT value plus 4 bit CRC. The
+bootloader SITL replies with type 4 packets carrying its serial output
 '''
 
 import socket
@@ -23,7 +29,12 @@ TYPE_PWM = 0
 TYPE_DSHOT150 = 1
 TYPE_DSHOT300 = 2
 TYPE_DSHOT600 = 3
+TYPE_SERIAL = 4
+TYPE_LINE = 5
 FLAG_IDLE_HIGH = 0x0001
+FLAG_FLOATING = 0x0002
+FLAG_GAP = 0x0004  # leading 1ms line idle (frame separator)
+SERIAL_MAX = 200  # max serial payload bytes per packet
 
 TYPE_NAMES = {
     'pwm': TYPE_PWM,
@@ -102,13 +113,26 @@ def pack(ptype, flags, data):
     return struct.pack('<HBBHH', MAGIC, ptype, 4, flags, data)
 
 
+def pack_serial(payload, flags=FLAG_IDLE_HIGH):
+    return struct.pack('<HBBH', MAGIC, TYPE_SERIAL, len(payload), flags) + payload
+
+
 def unpack(buf):
-    if len(buf) < 8:
+    '''unpack a packet: returns (ptype, flags, data) where data is a u16
+    for types 0-3/5 and raw bytes for type 4 serial'''
+    if len(buf) < 7:
+        # smallest valid packet is a type 4 with one payload byte
         return None
-    magic, ptype, length, flags, data = struct.unpack('<HBBHH', buf[:8])
-    if magic != MAGIC or length != 4:
+    magic, ptype, length, flags = struct.unpack('<HBBH', buf[:6])
+    if magic != MAGIC:
         return None
-    return (ptype, flags, data)
+    if ptype == TYPE_SERIAL:
+        if length < 1 or len(buf) != 6 + length:
+            return None
+        return (ptype, flags, buf[6:])
+    if length != 4 or len(buf) < 8:
+        return None
+    return (ptype, flags, struct.unpack('<H', buf[6:8])[0])
 
 
 class InputPort(object):
@@ -122,6 +146,7 @@ class InputPort(object):
         self.sock.settimeout(0.2)
         self.lock = threading.Lock()
         self.replies = []          # (time, type, flags, data)
+        self.serial_rx = b''       # reassembled type 4 serial bytes
         self.reply_count = 0
         self.sent_count = 0
         self.running = True
@@ -131,7 +156,7 @@ class InputPort(object):
     def _reader(self):
         while self.running:
             try:
-                buf = self.sock.recv(64)
+                buf = self.sock.recv(512)
             except socket.timeout:
                 continue
             except OSError:
@@ -140,10 +165,13 @@ class InputPort(object):
             if p is None:
                 continue
             with self.lock:
-                self.replies.append((time.time(),) + p)
-                self.reply_count += 1
-                if len(self.replies) > 1000:
-                    self.replies = self.replies[-500:]
+                if p[0] == TYPE_SERIAL:
+                    self.serial_rx += p[2]
+                else:
+                    self.replies.append((time.time(),) + p)
+                    self.reply_count += 1
+                    if len(self.replies) > 1000:
+                        self.replies = self.replies[-500:]
 
     def close(self):
         self.running = False
@@ -160,6 +188,43 @@ class InputPort(object):
         frame = dshot_frame(value11, telem=telem, bidir=bidir, corrupt=corrupt)
         self.sock.sendto(pack(ptype, flags, frame), self.addr)
         self.sent_count += 1
+
+    def send_serial(self, payload, idle_high=True, gap=False):
+        '''send raw serial bytes, split into <=200 byte packets which the
+        SITL queues gap free on the wire. gap=True inserts a leading
+        line-idle so the bytes start a new frame'''
+        flags = FLAG_IDLE_HIGH if idle_high else 0
+        if gap:
+            flags |= FLAG_GAP
+        for ofs in range(0, len(payload), SERIAL_MAX):
+            self.sock.sendto(pack_serial(payload[ofs:ofs + SERIAL_MAX], flags), self.addr)
+            flags &= ~FLAG_GAP
+        self.sent_count += 1
+
+    def send_level(self, level=None, floating=False):
+        '''set a constant line state: driven high/low, or floating'''
+        flags = FLAG_FLOATING if floating else (FLAG_IDLE_HIGH if level else 0)
+        self.sock.sendto(pack(TYPE_LINE, flags, 0), self.addr)
+        self.sent_count += 1
+
+    def read_serial(self, n, timeout=2.0):
+        '''wait for n reassembled serial reply bytes'''
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            with self.lock:
+                if len(self.serial_rx) >= n:
+                    out = self.serial_rx[:n]
+                    self.serial_rx = self.serial_rx[n:]
+                    return out
+            time.sleep(0.002)
+        with self.lock:
+            out = self.serial_rx
+            self.serial_rx = b''
+        return out
+
+    def flush_serial(self):
+        with self.lock:
+            self.serial_rx = b''
 
     def get_replies(self):
         with self.lock:

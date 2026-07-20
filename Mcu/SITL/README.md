@@ -12,12 +12,7 @@ make AM32_SITL_CAN
 ```
 
 produces `obj/AM32_AM32_SITL_CAN_<version>.elf`, a normal Linux
-executable. SITL is **not** part of `make all` (that target stays
-cross-firmware only); use `make sitl` or the product name above.
-
-Also note: RTC backup registers used by DroneCAN boot/FW-update handoff
-persist across SITL re-execs in a sibling file `<eeprom>.rtc` next to the
-eeprom backing file.
+executable.
 
 ## Running
 
@@ -45,12 +40,18 @@ Options:
   ports accept unauthenticated control, so only use on trusted networks
 - `--input-type N` force the eeprom INPUT_SIGNAL_TYPE setting (0=auto
   1=dshot 2=servo 5=dronecan)
-- `--speedup X` simulation speed relative to wall clock, 0 = free
-  running; clamped to `[0, 100]` (same as the GUI/state-port control)
+- `--speedup X` simulation speed relative to wall clock, 0 = free running
 - `--uid STR` string used to derive the 16 byte unique ID
 - `--verbose` 1Hz state line on stderr
 - `--nosleep` busy wait instead of sleeping. Uses two full CPU cores but
   avoids OS sleep/wakeup latency for the most accurate wall clock pacing
+- `--bootloader ELF` chain with the bootloader SITL from the
+  am32-bootloader repo: the process boots into the bootloader first
+  (as hardware does) and every reset lands back in it with the right
+  reset cause; the bootloader execs this firmware on jump. The two
+  share the eeprom file, the input/CAN ports, and `<eeprom>.bkup` (the
+  RTC backup registers carrying the DroneCAN firmware-update handoff).
+  The bootloader keeps its flash in `<eeprom>.blflash`. Default off
 
 The virtual ESC can then be controlled with the DroneCAN GUI tool or
 pydronecan on `mcast:0`. A test script is included:
@@ -86,14 +87,23 @@ packet format (little endian):
 | field | size | meaning |
 |-------|------|---------|
 | magic | u16  | 0x4453 |
-| type  | u8   | 0=PWM 1=DSHOT150 2=DSHOT300 3=DSHOT600 |
-| len   | u8   | payload bytes after the header (4) |
-| flags | u16  | bit0: line idle level (1 = idle high, bidir DShot) |
-| data  | u16  | PWM pulse width in us, or the full 16 bit DShot frame |
+| type  | u8   | 0=PWM 1=DSHOT150 2=DSHOT300 3=DSHOT600 4=SERIAL19200 5=LINE_LEVEL |
+| len   | u8   | payload bytes after the header (4; for type 4 the number of serial bytes, 1..200) |
+| flags | u16  | bit0: line idle level (1 = idle high, bidir DShot; for type 5 the constant level), bit1: line floating (types 4/5) |
+| data  | u16  | PWM pulse width in us, or the full 16 bit DShot frame; for type 4 replaced by the raw serial bytes |
 
 Bidirectional DShot replies (eRPM plus extended telemetry frames) are
 sent back to the most recent sender in the same format, with `data`
 carrying the 16 bit GCR-decoded reply frame.
+
+Type 4 carries raw bytes framed as 19200 baud 8N1 on the simulated
+signal wire and type 5 sets a constant line state (driven high, driven
+low, or floating). Both exist for the bootloader SITL (see the
+am32-bootloader repo), which bit-bangs the 4-way configuration protocol
+on the signal pin and detects the input type from the line state at
+boot; the main firmware ignores type 4 and uses type 5 only as the idle
+line level. The bootloader replies with type 4 packets carrying its
+serial output. `sitl_fourway.py` implements the 4-way client side.
 
 Tools in `Mcu/SITL/`:
 
@@ -186,23 +196,9 @@ requirements are:
 ```
 apt install gcc make python3 python3-venv \
     libgl1 libegl1 libfontconfig1 libxkbcommon0
-python3 -m venv sitl-venv && sitl-venv/bin/pip install -r Mcu/SITL/requirements-ci.txt
+pip install dronecan        # for the DroneCAN tests
 python3 Mcu/SITL/make_gui_env.py   # for GUI-driven tests
 ```
-
-Build and run the pytest suite (boot, DShot/BDShot/EDT, PWM, DroneCAN
-throttle + arming, parameter GetSet/save, motor model load):
-
-```
-make AM32_SITL_CAN
-sitl-venv/bin/python Mcu/SITL/run_ci_tests.py
-# or: sitl-venv/bin/pytest Mcu/SITL/tests -v --sitl obj/AM32_AM32_SITL_CAN_*.elf
-```
-
-`run_ci_tests.py` prefers pytest; pass `--legacy` for the smaller
-stdlib-only smoke suite. The GitHub Actions workflow
-`.github/workflows/SITL.yml` runs this on every push/PR to `main` and
-`ark-release` (plus a GUI offscreen job and a Windows build/smoke job).
 
 Multicast CAN over loopback works on a stock VM with no route
 configuration (the SITL self-tests its TX at startup). Timing notes for

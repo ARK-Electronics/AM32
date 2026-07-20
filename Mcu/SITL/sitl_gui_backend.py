@@ -9,6 +9,7 @@ import collections
 import queue
 import socket
 import struct
+import sys
 import threading
 import time
 
@@ -16,6 +17,8 @@ import sitl_dshot as sd
 
 try:
     import dronecan
+    import dronecan.app.node_monitor
+    import dronecan.app.dynamic_node_id
     HAVE_DRONECAN = True
 except ImportError:
     HAVE_DRONECAN = False
@@ -170,6 +173,7 @@ class CanPanel(object):
     def __init__(self, uri):
         self.uri = uri
         self.enabled = False
+        self.dna_server = False
         self.send_rawcommand = True
         self.armed = True
         self.throttle = 0.0     # 0..1
@@ -190,9 +194,15 @@ class CanPanel(object):
         self.thread = threading.Thread(target=self._can_thread, daemon=True)
         self.thread.start()
 
+    NODE_ID = 126
+
     def _can_thread(self):
         try:
-            node = dronecan.make_node(self.uri, node_id=126, bitrate=1000000)
+            # passive (anonymous) mode: sends nothing at all, telemetry
+            # RX still works. The node ID is only assigned while Enable
+            # is on, so an idle GUI leaves the bus completely quiet -
+            # the bootloader's no-CAN fallback needs a frame-free bus
+            node = dronecan.make_node(self.uri, bitrate=1000000)
         except Exception as ex:
             self.error = str(ex)
             self.started.set()
@@ -223,12 +233,30 @@ class CanPanel(object):
         node.add_handler(dronecan.uavcan.protocol.NodeStatus, on_node_status)
 
         next_send = time.time()
+        allocator = None
+        monitor = None
         while self.running:
             try:
                 node.spin(0.002)
             except Exception:
                 pass
             self._handle_param(node)
+            # the node only has an ID (and so only sends anything) while
+            # commanding or serving DNA
+            need_id = self.enabled or self.dna_server
+            if need_id and node.is_anonymous:
+                node.node_id = self.NODE_ID  # NodeStatus starts here
+            elif not need_id and not node.is_anonymous:
+                # no public API to return to passive mode; clearing the
+                # id silences the 1Hz NodeStatus broadcast again
+                node._node_id = None
+            if self.dna_server and allocator is None:
+                monitor = dronecan.app.node_monitor.NodeMonitor(node)
+                allocator = dronecan.app.dynamic_node_id.CentralizedServer(node, monitor)
+            elif not self.dna_server and allocator is not None:
+                allocator.close()
+                monitor.close()
+                allocator = monitor = None
             if not self.enabled:
                 next_send = time.time()
                 continue
@@ -255,6 +283,9 @@ class CanPanel(object):
             return
         if self.node_id is None:
             self.param_result.put('no node seen yet')
+            return
+        if node.is_anonymous:
+            self.param_result.put('enable CAN first (GUI node is passive)')
             return
         target = self.node_id
         result = {}
@@ -391,6 +422,229 @@ class SimStream(object):
             self.sock.sendto(pkt, self.addr)
         except OSError as ex:
             self.model_status = str(ex)
+
+    def close(self):
+        self.running = False
+        self.sock.close()
+
+
+class AudioStream(object):
+    """subscriber for the SITL physics audio stream (--state-port cmd 4):
+    what the motor radiates acoustically (torque ripple plus phase
+    current magnitude, high pass filtered), sampled at 48kHz of
+    simulated time. Pitch scales with speedup, as slow motion should
+    sound. Batches arrive as (t0_ns, samples) tuples"""
+
+    MAGIC_CMD = 0x5353
+    MAGIC_AUDIO = 0x5357
+
+    def __init__(self, host='127.0.0.1', port=57734, maxlen=2048):
+        self.addr = (host, port)
+        self.enabled = True
+        self.batches = collections.deque(maxlen=maxlen)
+        self.lock = threading.Lock()  # guards batches against the reader
+        self.rate = RateCounter()  # arriving samples/s, wall clock
+        self.last_rx = 0.0
+        self.running = True
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.sock.bind(('127.0.0.1', 0))
+        self.sock.settimeout(0.2)
+        threading.Thread(target=self._reader, daemon=True).start()
+        threading.Thread(target=self._subscriber, daemon=True).start()
+
+    def _subscriber(self):
+        # resubscribe quickly while stale so streams resume promptly
+        # after an emulated reset (re-exec drops the subscriber list)
+        pkt = struct.pack('<HBB', self.MAGIC_CMD, 4, 0)
+        while self.running:
+            if self.enabled:
+                try:
+                    self.sock.sendto(pkt, self.addr)
+                except OSError:
+                    pass
+            time.sleep(0.1 if self.stale() else 0.5)
+
+    def _reader(self):
+        while self.running:
+            try:
+                d = self.sock.recv(4096)
+            except socket.timeout:
+                continue
+            except OSError:
+                return
+            if len(d) < 16:
+                continue
+            magic, ver, count, t0, period = struct.unpack_from('<HBBQI', d)
+            if magic != self.MAGIC_AUDIO or ver != 1 \
+                    or len(d) < 16 + 4 * count:
+                continue
+            vals = struct.unpack_from('<%uf' % count, d, 16)
+            self.last_rx = time.time()
+            with self.lock:
+                self.batches.append((t0, vals))
+            self.rate.tick(count)
+
+    def take_batches(self):
+        """drain and return accumulated (t0_ns, samples) batches"""
+        with self.lock:
+            out = list(self.batches)
+            self.batches.clear()
+        return out
+
+    def stale(self):
+        return time.time() - self.last_rx > 0.5
+
+    def close(self):
+        self.running = False
+        self.sock.close()
+
+
+class CanFrameCounter(object):
+    """counts CAN frames on a multicast UDP bus (mcast:N), straight off
+    the UDP group and independent of the DroneCAN node: it sees every
+    node's traffic even with CAN control disabled and works without the
+    dronecan package. One datagram with a valid header is one CAN
+    frame"""
+
+    MAGIC = 0x2934  # mcast transport header magic
+    PORT = 57732
+
+    def __init__(self, uri):
+        self.rate = RateCounter()
+        self.available = False
+        self.error = ''
+        self.last_anon = 0.0
+        self.running = True
+        parts = uri.split(':')
+        if parts[0] != 'mcast':
+            self.error = 'not a mcast bus'
+            return
+        bus = int(parts[1]) if len(parts) > 1 and parts[1] else 0
+        group = '239.65.82.%u' % bus
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            # same scheme as the pydronecan mcast driver: windows cannot
+            # bind the group address
+            if sys.platform == 'win32':
+                sock.bind(('0.0.0.0', self.PORT))
+            else:
+                sock.bind((group, self.PORT))
+            mreq = struct.pack('4sl', socket.inet_aton(group), socket.INADDR_ANY)
+            sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+        except OSError as ex:
+            self.error = str(ex)
+            return
+        sock.settimeout(0.2)
+        self.sock = sock
+        self.available = True
+        threading.Thread(target=self._reader, daemon=True).start()
+
+    def _reader(self):
+        while self.running:
+            try:
+                d = self.sock.recv(128)
+            except socket.timeout:
+                continue
+            except OSError:
+                return
+            if len(d) >= 10 and struct.unpack_from('<H', d)[0] == self.MAGIC:
+                self.rate.tick()
+                (mid,) = struct.unpack_from('<I', d, 6)
+                if (mid & 0x7f) == 0:
+                    # anonymous frame: a DNA allocation request
+                    self.last_anon = time.time()
+
+    def dna_request_seen(self):
+        """an anonymous (DNA allocation request) frame arrived recently:
+        some node on the bus is waiting for a node ID allocator"""
+        return time.time() - self.last_anon < 1.5
+
+    def close(self):
+        self.running = False
+        if self.available:
+            self.sock.close()
+
+
+class ToneStream(object):
+    """subscriber for the SITL tone event stream (--state-port cmd 3).
+    Beeps the firmware plays through the motor windings arrive as
+    (freq_hz, amplitude) change events with simulated timestamps;
+    amplitude is the raw PWM duty fraction (~0.002 typical), 0 is
+    silence. Keepalive repeats are deduplicated and only refresh
+    staleness."""
+
+    MAGIC_CMD = 0x5353
+    MAGIC_TONE = 0x5356
+    EVENT = struct.Struct('<HBBQff')
+
+    def __init__(self, host='127.0.0.1', port=57734, maxlen=4096):
+        self.addr = (host, port)
+        self.enabled = True
+        self.events = collections.deque(maxlen=maxlen)  # (wall_t, t_ns, freq, amp, source)
+        self.lock = threading.Lock()  # guards events against the reader
+        self.last_rx = 0.0
+        self.running = True
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.sock.bind(('127.0.0.1', 0))
+        self.sock.settimeout(0.2)
+        threading.Thread(target=self._reader, daemon=True).start()
+        threading.Thread(target=self._subscriber, daemon=True).start()
+
+    def _subscriber(self):
+        # subscribe in a fast burst while the stream is stale, so the
+        # first notes of a boot tune are caught even after an emulated
+        # reset (which re-execs the SITL, dropping its subscriber list)
+        pkt = struct.pack('<HBB', self.MAGIC_CMD, 3, 0)
+        while self.running:
+            if self.enabled:
+                try:
+                    self.sock.sendto(pkt, self.addr)
+                except OSError:
+                    pass
+            time.sleep(0.02 if self.stale() else 0.5)
+
+    def _reader(self):
+        while self.running:
+            try:
+                d = self.sock.recv(64)
+            except socket.timeout:
+                continue
+            except OSError:
+                return
+            if len(d) != self.EVENT.size:
+                continue
+            magic, ver, source, t_ns, freq, amp = self.EVENT.unpack(d)
+            if magic != self.MAGIC_TONE or ver != 1:
+                continue
+            self.last_rx = time.time()
+            with self.lock:
+                if self.events and self.events[-1][2] == freq \
+                        and self.events[-1][3] == amp:
+                    continue  # keepalive repeat
+                self.events.append((self.last_rx, t_ns, freq, amp, source))
+
+    def stale(self):
+        """the SITL keepalive is 20Hz, so a long gap means the SITL is
+        gone, rebooting or we are not subscribed"""
+        return time.time() - self.last_rx > 0.3
+
+    def current(self):
+        """current (freq_hz, amplitude), silent when stale"""
+        if self.stale():
+            return (0.0, 0.0)
+        with self.lock:
+            if not self.events:
+                return (0.0, 0.0)
+            e = self.events[-1]
+        return (e[2], e[3])
+
+    def take_events(self):
+        """drain and return accumulated events"""
+        with self.lock:
+            out = list(self.events)
+            self.events.clear()
+        return out
 
     def close(self):
         self.running = False
