@@ -18,7 +18,8 @@ import threading
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from run_ci_tests import Sitl, check, failures, INPUT_PORT, STATE_PORT
+from run_ci_tests import check, failures
+from sitl_harness import Sitl
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CONTROL_PORT = 57899
@@ -36,11 +37,13 @@ def main():
     env = dict(os.environ)
     env['QT_QPA_PLATFORM'] = 'offscreen'
 
-    with Sitl(args.sitl, ['--can-uri', 'none', '--input-type', '1']):
+    # Free UDP ports from the harness so parallel SITL jobs do not clash.
+    with Sitl(args.sitl, ['--input-type', '1'], can_uri='none') as sitl:
         gui = subprocess.Popen(
             [args.gui_python, os.path.join(HERE, 'sitl_gui.py'),
              '--control-port', str(CONTROL_PORT),
-             '--port', str(INPUT_PORT), '--state-port', str(STATE_PORT),
+             '--port', str(sitl.input_port),
+             '--state-port', str(sitl.state_port),
              '--can-uri', 'mcast:7'],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env)
 
