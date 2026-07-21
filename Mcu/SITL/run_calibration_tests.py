@@ -149,17 +149,25 @@ def run_tool(args, timeout):
                           capture_output=True, text=True)
 
 
+def max_throttle(ds, exp):
+    '''esc_measure defaults --max-throttle 0.6; nano levels go to 0.90.'''
+    levels = [float(x) for x in exp['steady']['levels']]
+    return max(levels + [ds.get('max_throttle', 0.6)]) + 0.02
+
+
 def steady_test(ds, exp, out):
     # prespin separately so the sweep's level sequence matches the
     # real capture exactly (comparison plots align step for step)
     prespin(ds)
     levels = sorted(exp['steady']['levels'])
+    thr_cap = max_throttle(ds, exp)
     r = run_tool([sys.executable, os.path.join(SCRIPTS, 'esc_measure.py'),
                   '--uri', URI, '--node-id', str(NODE_ID), 'sweep',
                   '--arm-time', '0.5',
                   '--levels', (','.join(levels) if ds.get('prespin')
                                else ds.get('start_level', '0.1') + ',' + ','.join(levels)),
                   '--hold', '4', '--max-current', str(ds['max_current']),
+                  '--max-throttle', str(thr_cap),
                   '--log', out], timeout=400)
     rows = load_status(out)
     cmds = [(x['t'], x['throttle']) for x in rows if x['type'] == 'cmd']
