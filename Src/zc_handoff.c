@@ -4,6 +4,7 @@
 
 #include "zc_handoff.h"
 #include "motor_runtime.h"
+#include "targets.h"
 
 /* --- tunables (integer math only; no libm) --- */
 #define ZC_HANDOFF_RING 8
@@ -11,15 +12,10 @@
 #define ZC_HANDOFF_MIN_SAMPLES 6
 /* Enter when 100*sigma/mean < this (percent). */
 #define ZC_HANDOFF_CV_ENTER_PCT 12u
-/* Exit when 100*sigma/mean > this (percent). Hysteresis vs enter. */
-#define ZC_HANDOFF_CV_EXIT_PCT 28u
 /* Enter needs this many consecutive "good" poll intervals. */
 #define ZC_HANDOFF_ENTER_STREAK 4u
-/* Exit needs this many consecutive bad closed-loop samples. */
+/* Exit needs this many consecutive non-hold samples in the slow band. */
 #define ZC_HANDOFF_EXIT_STREAK 6u
-/* ISR confirm: exit if rejects exceed this fraction of (accept+reject) window. */
-#define ZC_HANDOFF_REJECT_WINDOW 16u
-#define ZC_HANDOFF_REJECT_EXIT_NUM 8u /* 8/16 = 50% */
 
 static uint16_t zc_ci_ring[ZC_HANDOFF_RING];
 static uint8_t zc_ci_n;
@@ -27,20 +23,19 @@ static uint8_t zc_ci_i;
 static uint8_t zc_enter_streak;
 static uint8_t zc_exit_streak;
 
-/* Saturating 0..window style counters for recent confirms. */
-static uint8_t zc_confirm_accepts;
-static uint8_t zc_confirm_rejects;
-
 void zcHandoffReset(void)
 {
 	zc_ci_n = 0;
 	zc_ci_i = 0;
 	zc_enter_streak = 0;
 	zc_exit_streak = 0;
-	zc_confirm_accepts = 0;
-	zc_confirm_rejects = 0;
 }
 
+/*
+ * Drop intervals that do not fit the ring (uint16). During a slow-down past
+ * ~32.7 ms/commutation the ring freezes at its last "fast" contents; entry
+ * is already gated by ZC_HANDOFF_CI_ABS_MAX before quality is consulted.
+ */
 static void zc_ci_push(uint32_t ci)
 {
 	if (ci == 0u || ci > 65535u) {
@@ -56,11 +51,6 @@ static void zc_ci_push(uint32_t ci)
 	}
 }
 
-/*
- * Return 100 * sigma / mean as percent, or 100 if not enough samples / mean 0.
- * Uses: 10000 * sum(d^2) < thr^2 * mean^2 * n  for comparisons elsewhere;
- * here returns approximate cv% via integer sqrt of (var).
- */
 static uint32_t zc_ci_mean(void)
 {
 	uint32_t sum = 0;
@@ -75,7 +65,7 @@ static uint32_t zc_ci_mean(void)
 	return sum / n;
 }
 
-/* Integer sqrt for 32-bit (enough for sum of squared 16-bit diffs). */
+/* Integer sqrt for 32-bit. */
 static uint32_t isqrt32(uint32_t x)
 {
 	uint32_t r = 0;
@@ -98,12 +88,17 @@ static uint32_t isqrt32(uint32_t x)
 	return r;
 }
 
+/*
+ * Return 100 * sigma / mean as percent, or 100 if not enough samples / mean 0.
+ * Sum of squared diffs can exceed 2^32 (8 * 65535^2), so accumulate in
+ * uint64_t; multiply via int64 to avoid signed-overflow UB on d*d.
+ */
 static uint32_t zc_ci_cv_pct(void)
 {
 	uint8_t n = zc_ci_n;
 	uint8_t k;
 	uint32_t mean;
-	uint32_t acc = 0;
+	uint64_t acc = 0;
 	if (n < ZC_HANDOFF_MIN_SAMPLES) {
 		return 100;
 	}
@@ -113,12 +108,12 @@ static uint32_t zc_ci_cv_pct(void)
 	}
 	for (k = 0; k < n; k++) {
 		int32_t d = (int32_t)zc_ci_ring[k] - (int32_t)mean;
-		acc += (uint32_t)(d * d);
+		acc += (uint64_t)((int64_t)d * (int64_t)d);
 	}
-	/* sigma ~= sqrt(sum d^2 / n) */
+	/* sigma ~= sqrt(sum d^2 / n); var may exceed 2^32 — saturate for isqrt. */
 	{
-		uint32_t var = acc / n;
-		uint32_t sigma = isqrt32(var);
+		uint64_t var = acc / n;
+		uint32_t sigma = isqrt32(var > 0xffffffffull ? 0xffffffffu : (uint32_t)var);
 		return (sigma * 100u) / mean;
 	}
 }
@@ -132,62 +127,30 @@ void zcHandoffNotePollInterval(uint32_t commutation_interval)
 	zc_ci_push(commutation_interval);
 }
 
-void zcHandoffNoteClosedInterval(uint32_t commutation_interval)
+RAM_FUNC void zcHandoffNoteClosedInterval(uint32_t commutation_interval)
 {
-	/* Keep the ring warm while closed-loop so exit CV is meaningful. */
+	/* Keep the ring warm while closed-loop so slow-band exit CV is meaningful. */
 	zc_ci_push(commutation_interval);
-}
-
-void zcHandoffNoteConfirmReject(void)
-{
-	if (zc_confirm_rejects < 255u) {
-		zc_confirm_rejects++;
-	}
-	/* Decay accepts so the window tracks recent behavior. */
-	if (zc_confirm_accepts > 0u) {
-		zc_confirm_accepts--;
-	}
-	if ((uint16_t)zc_confirm_accepts + (uint16_t)zc_confirm_rejects > ZC_HANDOFF_REJECT_WINDOW) {
-		if (zc_confirm_accepts > zc_confirm_rejects) {
-			zc_confirm_accepts = (uint8_t)(ZC_HANDOFF_REJECT_WINDOW - zc_confirm_rejects);
-		} else if (zc_confirm_rejects > 0u) {
-			zc_confirm_rejects--;
-		}
-	}
-}
-
-void zcHandoffNoteConfirmAccept(void)
-{
-	if (zc_confirm_accepts < 255u) {
-		zc_confirm_accepts++;
-	}
-	if (zc_confirm_rejects > 0u) {
-		zc_confirm_rejects--;
-	}
-	if ((uint16_t)zc_confirm_accepts + (uint16_t)zc_confirm_rejects > ZC_HANDOFF_REJECT_WINDOW) {
-		if (zc_confirm_rejects > 0u) {
-			zc_confirm_rejects--;
-		} else if (zc_confirm_accepts > ZC_HANDOFF_REJECT_WINDOW) {
-			zc_confirm_accepts = ZC_HANDOFF_REJECT_WINDOW;
-		}
-	}
 }
 
 uint8_t zcHandoffShouldEnterClosedLoop(uint32_t commutation_interval)
 {
 	uint32_t cv;
-	if (zero_crosses < ZC_HANDOFF_MIN_ZC) {
-		zc_enter_streak = 0;
-		return 0;
-	}
+
 	if (commutation_interval == 0u || commutation_interval > ZC_HANDOFF_CI_ABS_MAX) {
 		zc_enter_streak = 0;
 		return 0;
 	}
-	/* Fast path: already electrically quick (legacy threshold). */
+	/*
+	 * Fast path: legacy threshold — no zero_cross minimum (matches pre-handoff
+	 * enter). Quality path below still requires MIN_ZC.
+	 */
 	if (commutation_interval < polling_mode_changeover) {
-		zc_enter_streak = ZC_HANDOFF_ENTER_STREAK;
 		return 1;
+	}
+	if (zero_crosses < ZC_HANDOFF_MIN_ZC) {
+		zc_enter_streak = 0;
+		return 0;
 	}
 	cv = zc_ci_cv_pct();
 	if (cv <= ZC_HANDOFF_CV_ENTER_PCT && zc_ci_n >= ZC_HANDOFF_MIN_SAMPLES) {
@@ -200,11 +163,9 @@ uint8_t zcHandoffShouldEnterClosedLoop(uint32_t commutation_interval)
 	return (uint8_t)(zc_enter_streak >= ZC_HANDOFF_ENTER_STREAK);
 }
 
-uint8_t zcHandoffShouldExitClosedLoop(uint32_t average_interval)
+RAM_FUNC uint8_t zcHandoffShouldExitClosedLoop(uint32_t average_interval)
 {
 	uint32_t cv;
-	uint8_t bad = 0;
-	uint16_t conf_total;
 
 	/* Near-stop / lost BEMF: always drop to poll. */
 	if (average_interval > ZC_HANDOFF_CI_ABS_MAX) {
@@ -212,22 +173,32 @@ uint8_t zcHandoffShouldExitClosedLoop(uint32_t average_interval)
 		return 1;
 	}
 
-	cv = zc_ci_cv_pct();
-	if (zc_ci_n >= ZC_HANDOFF_MIN_SAMPLES && cv > ZC_HANDOFF_CV_EXIT_PCT) {
-		bad = 1;
-	}
-
-	conf_total = (uint16_t)zc_confirm_accepts + (uint16_t)zc_confirm_rejects;
-	if (conf_total >= (ZC_HANDOFF_REJECT_WINDOW / 2u) && zc_confirm_rejects >= ZC_HANDOFF_REJECT_EXIT_NUM) {
-		bad = 1;
-	}
-
-	if (bad) {
-		if (zc_exit_streak < 255u) {
-			zc_exit_streak++;
-		}
-	} else {
+	/*
+	 * Fast / hysteresis band (legacy guarantee): never quality-exit while
+	 * average_interval <= polling_mode_changeover + 500. This matches the
+	 * pre-handoff single-compare exit and avoids:
+	 *  - confirm-reject thrash under load noise
+	 *  - CV thrash during hard acceleration (slope looks like high sigma)
+	 *  - COM-timer ISR cost of zc_ci_cv_pct() (divides + isqrt) at high eRPM
+	 */
+	if (average_interval <= polling_mode_changeover + 500u) {
 		zc_exit_streak = 0;
+		return 0;
+	}
+
+	/*
+	 * Extended slow band (above legacy exit threshold): drop back unless
+	 * interval quality is still excellent — low-KV hold after quality enter.
+	 * High CV here means poll mode is safer.
+	 */
+	cv = zc_ci_cv_pct();
+	if (zc_ci_n >= ZC_HANDOFF_MIN_SAMPLES && cv <= ZC_HANDOFF_CV_ENTER_PCT) {
+		zc_exit_streak = 0;
+		return 0;
+	}
+
+	if (zc_exit_streak < 255u) {
+		zc_exit_streak++;
 	}
 	return (uint8_t)(zc_exit_streak >= ZC_HANDOFF_EXIT_STREAK);
 }

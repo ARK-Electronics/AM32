@@ -8,6 +8,7 @@
 #include "common.h"
 #include "signal.h"
 #include "eeprom.h"
+#include "zc_handoff.h"
 
 volatile esc_state_t esc_state = ESC_DISARMED;
 volatile uint16_t esc_illegal_edge_count = 0;
@@ -198,6 +199,7 @@ void escToOpenLoop(void)
 	armed = 1;
 	running = 1;
 	old_routine = 1;
+	zcHandoffReset();
 	stepper_sine = 0;
 	escCommitState(ESC_OPEN_LOOP);
 }
@@ -264,6 +266,7 @@ void escSineHandoffToOpenLoop(void)
 	stepper_sine = 0;
 	running = 1;
 	old_routine = 1;
+	zcHandoffReset();
 	prop_brake_active = 0;
 	escCommitState(ESC_OPEN_LOOP);
 }
@@ -271,6 +274,10 @@ void escSineHandoffToOpenLoop(void)
 void escNoteStallOrDesync(uint8_t stop_if_low_throttle)
 {
 	old_routine = 1;
+	/* Stall-protection enter never notes poll intervals / auto-resets the
+	 * handoff ring; clear stale CV and streaks so the next CL run does not
+	 * evaluate exit against the previous operating point. */
+	zcHandoffReset();
 	if (stop_if_low_throttle && input < 48) {
 		running = 0;
 		commutation_interval = 5000;

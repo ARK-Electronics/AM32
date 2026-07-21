@@ -1,14 +1,18 @@
 /*
  * zc_handoff.h - quality-based open-loop <-> closed-loop handoff
  *
- * Replaces sole reliance on a hard commutation_interval threshold for the
- * normal (non stall-protection) path. Poll mode notes intervals at each
- * found ZC; closed-loop notes intervals from the commutation ISR path and
- * confirm reject/accept from the comparator ISR.
+ * Extends the legacy hard commutation_interval vs polling_mode_changeover
+ * test for the normal (non stall-protection) path. Poll mode notes intervals
+ * at each found ZC; closed-loop notes intervals from the commutation path.
  *
- * Safety rails only: refuse CL when impossibly slow (CI_ABS_MAX), require a
- * minimum zero_cross count, and use CV / confirm-reject hysteresis so the
- * mode does not chatter.
+ * Enter: legacy fast CI (no ZC minimum), or stable poll-interval CV after
+ *        min ZC count (low-KV early enter).
+ * Exit:  CI_ABS_MAX rail; at/below legacy (changeover+500) never exit on
+ *        quality; above that, drop unless CV still excellent (low-KV hold).
+ * Confirm filter rejects are NOT used for exit — normal multi-sample noise.
+ *
+ * Call zcHandoffReset() on stall/desync/forced open-loop so the ring does
+ * not survive a restart (stall-protection enter never notes poll intervals).
  */
 #ifndef ZC_HANDOFF_H_
 #define ZC_HANDOFF_H_
@@ -27,10 +31,6 @@ void zcHandoffNotePollInterval(uint32_t commutation_interval);
 
 /* Call from closed-loop path when a new interval is known. */
 void zcHandoffNoteClosedInterval(uint32_t commutation_interval);
-
-/* Comparator confirm outcome (interrupt path). */
-void zcHandoffNoteConfirmReject(void);
-void zcHandoffNoteConfirmAccept(void);
 
 /* Non-zero => enter interrupt closed-loop (old_routine = 0). */
 uint8_t zcHandoffShouldEnterClosedLoop(uint32_t commutation_interval);
