@@ -5,6 +5,14 @@ the AM32 bootloader then never jumps to the app after a flash/power-cycle
 (observed on the ARK 4IN1 bench: perf magic reads 0x00000000, PC loops in the
 bootloader). The runner must drive zero throttle, reset, and wait for the
 app's magic instead of handing a dead perf channel to the run.
+
+A decodable magic alone is NOT liveness (both observed on the bench
+2026-07-21):
+- RAM persists across reset, so a stale perf struct still decodes while the
+  ESC is parked in the bootloader -> loop_iters frozen.
+- A half-booted app (vector-table force-boot) keeps the main loop spinning
+  but its timer ISRs/ADC never start -> loop_iters advances, voltage == 0,
+  and the ESC can never arm.
 """
 from __future__ import annotations
 
@@ -14,17 +22,33 @@ from hwci.perf import PerfDecodeError
 from hwci.runner import _ensure_app_alive
 
 
-class FakeReader:
-    """perf_reader.read() fails until the fake target has been reset."""
+class FakeSample:
+    def __init__(self, loop_iters: int, voltage: float):
+        self.loop_iters = loop_iters
+        self.voltage = voltage
 
-    def __init__(self, alive_after_resets: int):
+
+class FakeReader:
+    """Dead in a configurable way until the fake target has been reset."""
+
+    def __init__(self, alive_after_resets: int, dead_mode: str = "raise"):
         self.alive_after_resets = alive_after_resets
+        self.dead_mode = dead_mode
         self.resets = 0
+        self._iters = 0
 
     def read(self):
         if self.resets >= self.alive_after_resets:
-            return object()
-        raise PerfDecodeError("bad magic 0x00000000")
+            self._iters += 1
+            return FakeSample(self._iters, 25.2)
+        if self.dead_mode == "raise":
+            raise PerfDecodeError("bad magic 0x00000000")
+        if self.dead_mode == "frozen":
+            return FakeSample(0, 0.0)  # stale RAM: decodes, never advances
+        if self.dead_mode == "novolt":
+            self._iters += 1
+            return FakeSample(self._iters, 0.0)  # half-boot: ADC dead
+        raise AssertionError(self.dead_mode)
 
 
 class FakeDbg:
@@ -61,6 +85,26 @@ def test_stuck_in_bootloader_recovers_via_reset():
     assert reader.resets == 1
     # the signal must be DROPPED (not DShot-at-zero) before the reset so the
     # line is driven low and the bootloader jumps to the app
+    assert throttle.commands == ["quiesce"]
+
+
+def test_stale_magic_frozen_main_loop_recovers_via_reset():
+    # Bootloader resident with the previous app run's perf struct still in
+    # RAM: magic decodes but loop_iters never advances.
+    reader = FakeReader(alive_after_resets=1, dead_mode="frozen")
+    dbg, throttle = FakeDbg(reader), FakeThrottle()
+    _ensure_app_alive(dbg, reader, throttle)
+    assert reader.resets == 1
+    assert throttle.commands == ["quiesce"]
+
+
+def test_half_booted_app_zero_voltage_recovers_via_reset():
+    # Main loop advancing but ADC/20 kHz path dead (voltage exactly 0):
+    # the ESC would accept DShot yet never arm. Must be reset, not trusted.
+    reader = FakeReader(alive_after_resets=1, dead_mode="novolt")
+    dbg, throttle = FakeDbg(reader), FakeThrottle()
+    _ensure_app_alive(dbg, reader, throttle)
+    assert reader.resets == 1
     assert throttle.commands == ["quiesce"]
 
 
