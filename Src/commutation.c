@@ -83,7 +83,7 @@ RAM_FUNC void commutate()
 	/* Quality-based exit from closed-loop (replaces sole CI vs T+500 test). */
 	if (!old_routine && zcHandoffShouldExitClosedLoop(average_interval)) {
 		old_routine = 1;
-		zcHandoffReset();
+		zcHandoffOnExit();
 	}
 #endif
 	bemfcounter = 0;
@@ -185,9 +185,13 @@ void zcfoundroutine()
 	} else {
 		/* Quality handoff: stable poll intervals (and/or fast CI legacy path). */
 		zcHandoffNotePollInterval(commutation_interval);
-		if (zcHandoffShouldEnterClosedLoop(commutation_interval)) {
-			old_routine = 0;
-			enableCompInterrupts(); // enable interrupt
+		{
+			uint8_t enter = zcHandoffShouldEnterClosedLoop(commutation_interval);
+			if (enter != ZC_HANDOFF_ENTER_NONE) {
+				old_routine = 0;
+				zcHandoffOnEnter(enter);
+				enableCompInterrupts(); // enable interrupt
+			}
 		}
 	}
 #endif

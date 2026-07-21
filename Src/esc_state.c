@@ -199,7 +199,7 @@ void escToOpenLoop(void)
 	armed = 1;
 	running = 1;
 	old_routine = 1;
-	zcHandoffReset();
+	zcHandoffOnExit();
 	stepper_sine = 0;
 	escCommitState(ESC_OPEN_LOOP);
 }
@@ -266,7 +266,7 @@ void escSineHandoffToOpenLoop(void)
 	stepper_sine = 0;
 	running = 1;
 	old_routine = 1;
-	zcHandoffReset();
+	zcHandoffOnExit();
 	prop_brake_active = 0;
 	escCommitState(ESC_OPEN_LOOP);
 }
@@ -277,7 +277,7 @@ void escNoteStallOrDesync(uint8_t stop_if_low_throttle)
 	/* Stall-protection enter never notes poll intervals / auto-resets the
 	 * handoff ring; clear stale CV and streaks so the next CL run does not
 	 * evaluate exit against the previous operating point. */
-	zcHandoffReset();
+	zcHandoffOnExit();
 	if (stop_if_low_throttle && input < 48) {
 		running = 0;
 		commutation_interval = 5000;

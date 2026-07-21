@@ -125,7 +125,7 @@ void setInput()
 							forward = 1 - eepromBuffer.dir_reversed;
 							zero_crosses = 0;
 							old_routine = 1;
-							zcHandoffReset();
+							zcHandoffOnExit();
 							maskPhaseInterrupts();
 							brushed_direction_set = 0;
 						} else {
@@ -140,7 +140,7 @@ void setInput()
 						    escInSineStart()) {
 							zero_crosses = 0;
 							old_routine = 1;
-							zcHandoffReset();
+							zcHandoffOnExit();
 							forward = eepromBuffer.dir_reversed;
 							maskPhaseInterrupts();
 							brushed_direction_set = 0;
@@ -204,7 +204,7 @@ void setInput()
 							forward = 1 - eepromBuffer.dir_reversed;
 							zero_crosses = 0;
 							old_routine = 1;
-							zcHandoffReset();
+							zcHandoffOnExit();
 							maskPhaseInterrupts();
 							brushed_direction_set = 0;
 						} else {
@@ -219,7 +219,7 @@ void setInput()
 						    escInSineStart()) {
 							zero_crosses = 0;
 							old_routine = 1;
-							zcHandoffReset();
+							zcHandoffOnExit();
 							forward = eepromBuffer.dir_reversed;
 							maskPhaseInterrupts();
 							brushed_direction_set = 0;
@@ -351,7 +351,7 @@ void setInput()
 				if (!escIsDriving()) {
 					old_routine = 1;
 					zero_crosses = 0;
-					zcHandoffReset();
+					zcHandoffOnExit();
 					if (eepromBuffer.brake_on_stop) {
 						fullBrake();
 					} else {
@@ -382,7 +382,7 @@ void setInput()
 				if (!escIsDriving()) {
 					old_routine = 1;
 					zero_crosses = 0;
-					zcHandoffReset();
+					zcHandoffOnExit();
 					bad_count = 0;
 					if (eepromBuffer.brake_on_stop > 0) {
 						if (!eepromBuffer.use_sine_start) {
