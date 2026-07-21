@@ -26,6 +26,25 @@
  * is no fallback to poll mode at runtime.
  */
 #define ZC_BLIND_STEP_LIMIT 8 /* consecutive extrapolated steps before the stall rail takes over */
+/*
+ * Blind stepping requires an ESTABLISHED closed loop. At the poll->interrupt
+ * handoff commutation_interval is whatever the startup noise made of it -
+ * bench: noise-shrunk to ~1300 ticks while the true interval of the barely
+ * moving rotor is 5-10x longer - so a deadline at 1.5x the believed interval
+ * fires BEFORE the first real crossing can arrive, commutates blind, and
+ * drags the stator field away from the rotor. The result is a stable false
+ * lock: noise bursts get accepted as crossings, blind steps bridge the gaps
+ * between bursts (bench: ~40% of commutations blind, phantom ~15k eRPM,
+ * rotor stalled at 3 A), and the stall rail almost never fires because every
+ * blind step resets INTERVAL_TIMER. Below this zero-cross count the handler
+ * keeps legacy semantics (commutate once per accepted crossing, no re-arm):
+ * a noise chain then dies at the 45000-tick stall rail and the poll path
+ * kick-steps the rotor exactly as ark-release does. 100 matches the startup
+ * self-heal window in commutate() and the "stable running" gates elsewhere;
+ * zero_crosses resets on desync/stop, so every re-acquisition passes through
+ * the legacy path again before blind stepping re-arms.
+ */
+#define ZC_DEADLINE_MIN_ZC 100
 
 RAM_FUNC void PeriodElapsedCallback()
 {
@@ -94,16 +113,19 @@ RAM_FUNC void PeriodElapsedCallback()
 	waitTime = (commutation_interval >> 1) - advance;
 	if (!old_routine) {
 		enableCompInterrupts(); // enable comp interrupt
-		// Next crossing expected (commutation_interval - waitTime) from
-		// now; arm the blind-step deadline at expected + 50% grace. The
-		// 16-bit clamp shrinks the grace above CI ~40000, but the trust
-		// rail restarts long before a healthy loop runs that slow.
-		uint32_t deadline = (commutation_interval - waitTime) + (commutation_interval >> 1);
-		if (deadline > 65535u) {
-			deadline = 65535u;
+		if (zero_crosses >= ZC_DEADLINE_MIN_ZC) {
+			// Next crossing expected (commutation_interval - waitTime)
+			// from now; arm the blind-step deadline at expected + 50%
+			// grace. The 16-bit clamp shrinks the grace above CI ~40000,
+			// but the trust rail restarts long before a healthy loop
+			// runs that slow.
+			uint32_t deadline = (commutation_interval - waitTime) + (commutation_interval >> 1);
+			if (deadline > 65535u) {
+				deadline = 65535u;
+			}
+			zc_deadline_armed = 1;
+			SET_AND_ENABLE_COM_INT((uint16_t)deadline);
 		}
-		zc_deadline_armed = 1;
-		SET_AND_ENABLE_COM_INT((uint16_t)deadline);
 	}
 	if (!blind && zero_crosses < 10000) {
 		zero_crosses++;
