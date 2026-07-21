@@ -375,11 +375,27 @@ def _ensure_app_alive(dbg, perf_reader: PerfReader,
     def app_alive() -> bool:
         # Only a decode failure means "bootloader/no instrumentation";
         # a debugger error is a different fault and must propagate.
+        #
+        # A decodable magic is NOT enough: RAM persists across reset, so a
+        # stale perf struct still decodes when the ESC is parked in the
+        # bootloader (signal line floated high at its last reset), and it
+        # also decodes in a half-booted app whose timer ISRs never started
+        # (seen after a vector-table force-boot). Both states arm nothing
+        # and spin nothing while looking "alive". Require the main loop to
+        # actually be advancing before trusting the app.
+        # ... and the 20 kHz/ADC path to be live: a half-booted app keeps
+        # the main loop spinning but never reads the ADC, so its reported
+        # battery voltage stays exactly 0 on a powered ESC.
         try:
-            perf_reader.read()
-            return True
+            first = perf_reader.read()
         except PerfDecodeError:
             return False
+        time.sleep(0.05)
+        try:
+            second = perf_reader.read()
+        except PerfDecodeError:
+            return False
+        return second.loop_iters != first.loop_iters and second.voltage > 0.0
 
     if app_alive():
         return
