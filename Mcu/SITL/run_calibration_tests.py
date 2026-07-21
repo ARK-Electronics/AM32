@@ -11,10 +11,12 @@ that moves SITL away from the bench data fails here.
 Designed for CI:
 - tolerances in expected.json cover the documented model residuals
   plus run-to-run scatter (measured on an idle host)
-- the chirp is wall-clock paced by the test tool, so a starved runner
-  warps its frequency axis: the sim/wall ratio is monitored during
-  the chirp and the chirp comparison is SKIPPED (not failed) if the
-  ratio drops below --min-ratio
+- zero-throttle arming is gated in sim time (~1 s). The measure tools
+  poll FlexDebug.armed so a starved wall-paced SITL still arms
+- square t10-90 and the chirp are wall-clock paced, so a starved
+  runner warps their timing/frequency axes: both are SKIPPED (not
+  failed) if the sim/wall ratio drops below --min-ratio. Steady-state
+  RPM comparison is ratio-immune once the motor is armed
 - desyncs are compared against a per-model budget, never exact
   counts: the 1404 model reproduces the real hardware's marginality
   by design, and chirp cold starts retry
@@ -194,7 +196,7 @@ def prespin(ds):
               '--uri', URI, '--node-id', str(NODE_ID), 'hold',
               '--throttle', '0.3', '--hold', '5',
               '--max-current', str(ds['max_current']),
-              '--log', os.devnull], timeout=60)
+              '--log', os.devnull], timeout=120)
 
 
 def started(out):
@@ -202,7 +204,22 @@ def started(out):
     return max((x['rpm'] for x in st), default=0) > 2000
 
 
-def square_test(ds, exp, out):
+def ratio_too_slow(sitl, label):
+    '''timing-sensitive checks (square t10-90, chirp 3dB) use wall-clock
+    sample timestamps; a starved runner warps them. Skip rather than fail.'''
+    ratio = sitl.min_ratio()
+    if ratio >= ARGS.min_ratio:
+        return False
+    report(label[0], label[1], True,
+           'sim/wall ratio dropped to %.2f (< %.2f): runner too slow '
+           'for a wall-paced %s' % (ratio, ARGS.min_ratio, label[1]),
+           skipped=True)
+    return True
+
+
+def square_test(ds, exp, out, sitl):
+    if ratio_too_slow(sitl, (ds['name'], 'square down-curve')):
+        return
     for attempt in range(exp.get('square_start_retries', 0) + 1):
         prespin(ds)
         run_tool([sys.executable, os.path.join(SCRIPTS, 'esc_square.py'), 'run',
@@ -248,6 +265,7 @@ def chirp_test(ds, exp, sitl_args, out, raw):
     per retry so the physics log gets a fresh monotonic segment'''
     retries = exp.get('chirp_start_retries', 2)
     err = 10 ** 9
+    did_start = False
     sitl = None
     for attempt in range(retries + 1):
         if sitl:
@@ -262,16 +280,28 @@ def chirp_test(ds, exp, sitl_args, out, raw):
                  timeout=400)
         st = [x for x in load_status(out) if x['type'] == 'status']
         err = max((x['err'] for x in st), default=10 ** 9)
-        if err <= exp['desync_budget'] and started(out):
+        did_start = started(out)
+        if err <= exp['desync_budget'] and did_start:
             break
         print('  chirp attempt %d: err=%d, retrying' % (attempt + 1, err),
               flush=True)
     sitl.stop()
-    ok_err = err <= exp['desync_budget']
-    report(ds['name'], 'chirp desync budget', ok_err,
-           'err=%d budget=%d' % (err, exp['desync_budget']))
-
     ratio = sitl.min_ratio()
+    if not did_start and ratio < ARGS.min_ratio:
+        report(ds['name'], 'chirp desync budget', True,
+               'never started; sim/wall ratio %.2f (< %.2f)' % (
+                   ratio, ARGS.min_ratio),
+               skipped=True)
+        report(ds['name'], 'chirp 3dB', True,
+               'sim/wall ratio dropped to %.2f (< %.2f): runner too slow '
+               'for a wall-paced chirp' % (ratio, ARGS.min_ratio),
+               skipped=True)
+        return
+    ok_err = did_start and err <= exp['desync_budget']
+    report(ds['name'], 'chirp desync budget', ok_err,
+           'err=%d budget=%d started=%s' % (
+               err, exp['desync_budget'], did_start))
+
     if ratio < ARGS.min_ratio:
         report(ds['name'], 'chirp 3dB', True,
                'sim/wall ratio dropped to %.2f (< %.2f): runner too slow '
@@ -360,7 +390,7 @@ def main():
                     os.path.join(run_dir, 'sitl.log'))
         try:
             steady_test(ds, exp, os.path.join(run_dir, 'sweep.jsonl'))
-            square_test(ds, exp, os.path.join(run_dir, 'square.jsonl'))
+            square_test(ds, exp, os.path.join(run_dir, 'square.jsonl'), sitl)
             if not ARGS.skip_chirp:
                 # fresh instances with a physics log for the raw fit,
                 # and their own verbose log for the ratio guard

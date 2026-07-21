@@ -79,9 +79,14 @@ class EscMeasure(object):
         self.next_tx = 0.0
         self.aborted = None
         self.last_esc_status = None
+        self.last_armed = None  # None until FlexDebug debug1 v2 seen
         self.node.add_handler(dronecan.uavcan.equipment.esc.Status, self.on_esc_status)
         self.node.add_handler(dronecan.uavcan.protocol.NodeStatus, self.on_node_status)
-        self.node.add_handler(dronecan.dronecan.protocol.FlexDebug, self.on_flexdebug)
+        # FlexDebug DSDL landed in pydronecan 1.0.27; older installs lack it
+        flex = getattr(getattr(dronecan, 'dronecan', None), 'protocol', None)
+        flex = getattr(flex, 'FlexDebug', None) if flex is not None else None
+        if flex is not None:
+            self.node.add_handler(flex, self.on_flexdebug)
 
     def on_esc_status(self, e):
         if e.transfer.source_node_id != self.target:
@@ -111,6 +116,8 @@ class EscMeasure(object):
             return
         row = decode_debug1(data)
         if row:
+            if 'armed' in row:
+                self.last_armed = bool(row['armed'])
             self.rec.add('debug1', **row)
 
     def abort(self, reason):
@@ -162,7 +169,14 @@ class EscMeasure(object):
         return None
 
     def wait_ready(self):
-        '''stream zero throttle until esc.Status seen (boots through bootloader gate)'''
+        '''stream zero throttle until esc.Status seen, then until the
+        firmware zero-throttle arming window completes.
+
+        Arming is gated in sim time (~1 s of adjusted_input==0 at the
+        20 kHz control loop). Wall-paced SITL on a starved host can run
+        far below realtime, so a fixed --arm-time wall sleep is not
+        enough: poll FlexDebug.armed and keep streaming zero until it
+        latches (or --arm-timeout).'''
         print('waiting for ESC app (node %u)' % self.target)
         tstart = time.monotonic()
         while self.last_esc_status is None:
@@ -171,9 +185,27 @@ class EscMeasure(object):
                 raise SystemExit('no esc.Status from node %u' % self.target)
         print('ESC ready: %.2fV %.0fC' % (self.last_esc_status.voltage,
                                           self.last_esc_status.temperature - 273.15))
-        # keep streaming zero throttle so the ESC's zero-throttle arming
-        # latches before the profile applies throttle
-        self.spin_for(self.args.arm_time)
+        self.throttle = 0.0
+        arm_timeout = getattr(self.args, 'arm_timeout', 60.0)
+        tstart = time.monotonic()
+        while True:
+            self.spin_for(0.2)
+            elapsed = time.monotonic() - tstart
+            if self.last_armed:
+                if elapsed >= self.args.arm_time:
+                    print('ESC armed after %.1fs zero throttle' % elapsed)
+                    return
+                continue
+            if self.last_armed is None and elapsed >= self.args.arm_time:
+                # no debug1 v2 (DEBUG_RATE=0 or older firmware): keep the
+                # historical fixed wall-clock arm window
+                print('no armed telemetry after %.1fs, proceeding' % elapsed)
+                return
+            if elapsed >= arm_timeout:
+                raise SystemExit(
+                    'ESC never armed after %.1fs of zero throttle '
+                    '(need ~1 s of sim time; starved SITL may need a longer '
+                    '--arm-timeout)' % elapsed)
 
     def mark(self, label):
         self.rec.add('mark', label=label)
@@ -291,7 +323,10 @@ def main():
     parser.add_argument('--max-current', type=float, default=4.0, help='abort above this current')
     parser.add_argument('--max-temp', type=float, default=80.0, help='abort above this temperature C')
     parser.add_argument('--ready-timeout', type=float, default=15.0)
-    parser.add_argument('--arm-time', type=float, default=1.5, help='zero-throttle stream time after ESC ready')
+    parser.add_argument('--arm-time', type=float, default=1.5,
+                        help='minimum zero-throttle stream time after ESC ready')
+    parser.add_argument('--arm-timeout', type=float, default=60.0,
+                        help='max wall seconds to wait for FlexDebug.armed')
     parser.add_argument('--telem-rate', type=int, default=None, help='set TELEM_RATE before run')
     parser.add_argument('--debug-rate', type=int, default=None, help='set DEBUG_RATE before run')
     args = parser.parse_args()
