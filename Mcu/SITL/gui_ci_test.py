@@ -7,9 +7,8 @@ scopes, motor view) and asserts on the telemetry it reports.
 usage: gui_ci_test.py --gui-python Mcu/SITL/venv/bin/python3
 '''
 
-from __future__ import annotations
-
 import argparse
+import glob
 import os
 import re
 import socket
@@ -19,58 +18,42 @@ import threading
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from sitl_harness import Sitl, find_sitl_binary, free_udp_port  # noqa: E402
+from run_ci_tests import check, failures
+from sitl_harness import Sitl
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-failures = []
-
-
-def check(name, cond, detail):
-    status = 'PASS' if cond else 'FAIL'
-    print('%s: %s (%s)' % (status, name, detail))
-    sys.stdout.flush()
-    if not cond:
-        failures.append(name)
+CONTROL_PORT = 57899
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--gui-python', required=True)
-    ap.add_argument('--sitl', default=None)
+    # don't hardcode the firmware version in the default binary path
+    pat = os.path.join(HERE, '..', '..', 'obj', 'AM32_AM32_SITL_CAN_*.elf')
+    hits = sorted(glob.glob(pat))
+    ap.add_argument('--sitl', default=os.path.normpath(hits[0]) if hits else None)
     args = ap.parse_args()
-
-    sitl_path = find_sitl_binary(args.sitl)
-    if not sitl_path or not os.path.exists(sitl_path):
-        print('SITL binary not found: %s' % sitl_path)
-        sys.exit(2)
 
     env = dict(os.environ)
     env['QT_QPA_PLATFORM'] = 'offscreen'
-    control_port = free_udp_port()
-    # free_udp_port returns a UDP port; TCP control port needs its own bind.
-    # Re-bind via TCP to get a free TCP port.
-    sprobe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sprobe.bind(('127.0.0.1', 0))
-    control_port = sprobe.getsockname()[1]
-    sprobe.close()
 
-    # BDShot/EDT path only — keep CAN off so the GUI does not block on
-    # mcast/SocketCAN bring-up (DroneCAN is covered by other tests).
-    with Sitl(sitl_path, ['--input-type', '1'], can_uri='none') as sitl:
+    # Free UDP ports from the harness so parallel SITL jobs do not clash.
+    with Sitl(args.sitl, ['--input-type', '1'], can_uri='none') as sitl:
         gui = subprocess.Popen(
             [args.gui_python, os.path.join(HERE, 'sitl_gui.py'),
-             '--control-port', str(control_port),
+             '--control-port', str(CONTROL_PORT),
              '--port', str(sitl.input_port),
              '--state-port', str(sitl.state_port),
-             '--can-uri', 'none'],
+             '--can-uri', 'mcast:7'],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env)
 
         # first launch can be slow (Qt font cache); retry the connection
+        responses = []
         s = None
         deadline = time.time() + 45
         while time.time() < deadline:
             try:
-                s = socket.create_connection(('127.0.0.1', control_port), timeout=5)
+                s = socket.create_connection(('127.0.0.1', CONTROL_PORT), timeout=5)
                 break
             except OSError:
                 if gui.poll() is not None:
@@ -82,27 +65,18 @@ def main():
             gui.kill()
             print('control port never came up')
             sys.exit(1)
-        # connect() timeout must not apply to the long idle gaps between
-        # scripted commands (arm + EDT hold is several seconds).
-        s.settimeout(None)
         f = s.makefile('r')
-        responses = []
 
         def reader():
-            try:
-                for line in f:
-                    responses.append(line.rstrip())
-            except OSError:
-                pass
+            for line in f:
+                responses.append(line.rstrip())
 
         threading.Thread(target=reader, daemon=True).start()
 
-        # Hold zero throttle long enough for bidir auto-detect, arming, and
-        # EDT enable (firmware needs 6 identical DShot cmds while stopped).
         for delay, cmd in [
                 (0.1, 'ds_type dshot600'), (0.1, 'ds_bidir 1'),
-                (0.1, 'ds_enable 1'), (0.5, 'ds_edt 1'),
-                (4.0, 'ds_value 900'),
+                (0.1, 'ds_enable 1'), (0.3, 'ds_edt 1'),
+                (2.5, 'ds_value 900'),
                 (1.0, 'graph_i 1'), (0.2, 'graph_v 1'), (0.2, 'motorview 1'),
                 (4.0, 'status'),
                 (1.0, 'quit')]:

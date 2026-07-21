@@ -81,6 +81,14 @@ int main(int argc, char **argv)
 
 	sitl_saved_argv = argv;
 	sitl_config_init(argc, argv);
+	if (sitl_cfg.bootloader_path != NULL) {
+		if (getenv("AM32_SITL_FROM_BL") == NULL) {
+			// hardware boots into the bootloader first; it execs us
+			// back with the marker set
+			sitl_exec_bootloader("power");
+		}
+		unsetenv("AM32_SITL_FROM_BL");
+	}
 	lock_instance();
 	motor_init();
 	if (sitl_cfg.node_id >= 0 || sitl_cfg.input_type >= 0) {

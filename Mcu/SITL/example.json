@@ -12,10 +12,14 @@
   },
   "battery": {
     "voltage": 16.8,
-    "resistance": 0.012
+    "resistance": 0.012,
+    "capacitance": 0,
+    "sink_resistance": 0,
+    "sink_current_max": 0
   },
   "esc": {
     "rds_on": 0.004,
+    "commutation_transfer": 0,
     "diode_vf": 0.7,
     "temperature_c": 25
   },
@@ -25,6 +29,10 @@
     "isr_read_ns": 100,
     "comparator_noise_mv": 5,
     "comparator_hysteresis_mv": 15,
+    "comparator_phase_rc_ns": 0,
+    "comparator_neutral_rc_ns": 0,
+    "comparator_min_toggle_ns": 2000,
+    "fw_lag_max_ns": 20000,
     "watchdog_enabled": true
   }
 }

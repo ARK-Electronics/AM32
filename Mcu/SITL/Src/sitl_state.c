@@ -20,9 +20,26 @@
         coarse periods)
       cmd 1 LOAD_MODEL: JSON file path (rest of packet)
       cmd 2 SET_SPEEDUP: float speedup (0 = free run)
+      cmd 3 SUBSCRIBE_TONES: no payload. Streams tone events: the
+        firmware beeps by driving the motor PWM at an audible
+        frequency (sounds.c), which shows up here as TIM1 PSC > 0.
+        An event is sent on every tone change plus a 20Hz wall-clock
+        keepalive so a lost "off" event cannot leave a stuck tone.
+      cmd 4 SUBSCRIBE_AUDIO: no payload. Streams physics audio: what
+        the motor radiates acoustically, derived from torque ripple
+        plus phase current magnitude, high-pass filtered and sampled
+        at 48kHz of SIMULATED time (pitch scales with speedup, as
+        slow motion should sound)
   SITL -> client:
     u16 magic 0x5354, u8 version=1, u8 count, count * sample
     u16 magic 0x5355, u8 ok, u8 pad, message   (LOAD_MODEL reply)
+    u16 magic 0x5356, u8 version=1, u8 source, u64 t_ns (simulated),
+        float freq_hz, float amplitude   (tone event; amplitude is
+        the raw PWM duty fraction, 0 = silence; source 0 = TIM1
+        synthesized, source 1 = physics audio stream active)
+    u16 magic 0x5357, u8 version=1, u8 count, u64 t0_ns (simulated,
+        first sample), u32 sample_period_ns, count * float
+        (physics audio samples, arbitrary linear units)
 */
 
 #include "sitl.h"
@@ -33,6 +50,7 @@
 #include <netinet/in.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <time.h>
@@ -41,6 +59,8 @@
 #define STATE_MAGIC_CMD 0x5353
 #define STATE_MAGIC_DATA 0x5354
 #define STATE_MAGIC_REPLY 0x5355
+#define STATE_MAGIC_TONE 0x5356
+#define STATE_MAGIC_AUDIO 0x5357
 
 struct __attribute__((packed)) state_sample {
 	uint64_t t_ns;
@@ -77,6 +97,165 @@ static struct __attribute__((packed)) {
 	struct state_sample s[STATE_BATCH];
 } batch = {.magic = STATE_MAGIC_DATA, .version = 2};
 
+// tone event stream (cmd 3)
+static struct sockaddr_in tone_addr;
+static bool tone_have_sub;
+static time_t tone_expire;
+static uint32_t tone_raw[5]; // last seen psc, arr, ccr[3]
+static uint8_t tone_raw_modes[3];
+static float tone_freq, tone_amp; // last sent
+static uint64_t tone_last_tx_wall_ns;
+
+#define TONE_KEEPALIVE_NS 50000000ULL
+
+/*
+  physics audio stream (cmd 4): 48kHz of simulated time, batched.
+  Each sample is the mean over its period of the torque plus a
+  weighted phase current magnitude, both high-pass filtered to strip
+  the DC operating point and keep only the audible ripple
+ */
+#define AUDIO_RATE_HZ 48000
+#define AUDIO_PERIOD_NS (1000000000ULL / AUDIO_RATE_HZ)
+#define AUDIO_BATCH 64
+// N*m per A weighting of the current magnitude term: keeps beeps
+// audible when the rotor happens to sit at a zero-torque angle
+#define AUDIO_CURRENT_WEIGHT 0.02
+// one pole high pass at ~40Hz: a = 1 - 2*pi*fc/fs
+#define AUDIO_HPF_A 0.9948
+
+static struct sockaddr_in audio_addr;
+static bool audio_have_sub;
+static time_t audio_expire;
+static double audio_acc[2];
+static uint32_t audio_acc_n;
+static uint64_t audio_next_ns;
+static double audio_hp_y[2], audio_hp_x[2]; // HPF state per signal
+
+static struct __attribute__((packed)) {
+	uint16_t magic;
+	uint8_t version;
+	uint8_t count;
+	uint64_t t0_ns;
+	uint32_t period_ns;
+	float s[AUDIO_BATCH];
+} audio_batch = {.magic = STATE_MAGIC_AUDIO, .version = 1, .period_ns = (uint32_t)AUDIO_PERIOD_NS};
+
+static void audio_step(uint64_t now_ns)
+{
+	if (!audio_have_sub) {
+		return;
+	}
+	motor_add_audio(audio_acc);
+	audio_acc_n++;
+	if (now_ns < audio_next_ns) {
+		return;
+	}
+	audio_next_ns = now_ns + AUDIO_PERIOD_NS;
+
+	double s = 0;
+	for (int k = 0; k < 2; k++) {
+		const double x = audio_acc[k] / audio_acc_n;
+		audio_hp_y[k] = AUDIO_HPF_A * (audio_hp_y[k] + x - audio_hp_x[k]);
+		audio_hp_x[k] = x;
+		s += k == 0 ? audio_hp_y[k] : AUDIO_CURRENT_WEIGHT * audio_hp_y[k];
+	}
+	audio_acc[0] = audio_acc[1] = 0;
+	audio_acc_n = 0;
+
+	if (audio_batch.count == 0) {
+		audio_batch.t0_ns = now_ns;
+	}
+	audio_batch.s[audio_batch.count++] = (float)s;
+	if (audio_batch.count >= AUDIO_BATCH) {
+		sendto(fd, &audio_batch, sizeof(audio_batch), 0, (struct sockaddr *)&audio_addr, sizeof(audio_addr));
+		audio_batch.count = 0;
+	}
+}
+
+/*
+  tone/audio subscribers are preserved across an emulated reset (which
+  re-execs the process) via the environment, so the boot tune after a
+  reset is delivered from its first note. The expiry still applies if
+  the subscriber is gone
+ */
+#define TONE_SUB_ENV "AM32_SITL_TONE_SUB"
+#define AUDIO_SUB_ENV "AM32_SITL_AUDIO_SUB"
+
+static void sub_save_env(const char *env, const struct sockaddr_in *a)
+{
+	char buf[32];
+	snprintf(buf, sizeof(buf), "%s:%u", inet_ntoa(a->sin_addr), ntohs(a->sin_port));
+	setenv(env, buf, 1);
+}
+
+static bool sub_restore_env(const char *env, struct sockaddr_in *a)
+{
+	const char *val = getenv(env);
+	char ip[24];
+	unsigned port;
+	if (val == NULL || sscanf(val, "%23[0-9.]:%u", ip, &port) != 2) {
+		return false;
+	}
+	memset(a, 0, sizeof(*a));
+	a->sin_family = AF_INET;
+	a->sin_addr.s_addr = inet_addr(ip);
+	a->sin_port = htons((uint16_t)port);
+	return true;
+}
+
+static void tone_send(uint64_t now_ns)
+{
+	struct __attribute__((packed)) {
+		uint16_t magic;
+		uint8_t version;
+		uint8_t source;
+		uint64_t t_ns;
+		float freq_hz;
+		float amplitude;
+	} ev = {STATE_MAGIC_TONE, 1, 0, now_ns, tone_freq, tone_amp};
+	sendto(fd, &ev, sizeof(ev), 0, (struct sockaddr *)&tone_addr, sizeof(tone_addr));
+	tone_last_tx_wall_ns = sitl_wallclock_ns();
+}
+
+/*
+  detect an audible tone from the latched TIM1 state. Only sounds.c
+  ever sets a non-zero PWM prescaler, so PSC > 0 with a driven phase
+  is a beep; running motor code changes ARR/CCR only
+ */
+static void tone_step(uint64_t now_ns)
+{
+	if (!tone_have_sub) {
+		return;
+	}
+	uint32_t raw[5];
+	sitl_tim1_get_active(&raw[0], &raw[1], &raw[2]);
+	if (memcmp(raw, tone_raw, sizeof(raw)) == 0 && memcmp((const void *)sitl_phase_mode, tone_raw_modes, 3) == 0) {
+		return;
+	}
+	memcpy(tone_raw, raw, sizeof(raw));
+	memcpy(tone_raw_modes, (const void *)sitl_phase_mode, 3);
+
+	const uint32_t psc = raw[0], arr = raw[1];
+	uint32_t ccr = 0;
+	for (int p = 0; p < 3; p++) {
+		const uint8_t mode = tone_raw_modes[p];
+		if ((mode == SITL_PHASE_PWM || mode == SITL_PHASE_PWM_NOCOMP) && raw[2 + p] > ccr) {
+			ccr = raw[2 + p];
+		}
+	}
+	const float freq = 160e6f / (float)((psc + 1) * (arr + 1));
+	float new_freq = 0, new_amp = 0;
+	if (psc > 0 && ccr > 0 && freq < 20000) {
+		new_freq = freq;
+		new_amp = (float)ccr / (float)(arr + 1);
+	}
+	if (new_freq != tone_freq || new_amp != tone_amp) {
+		tone_freq = new_freq;
+		tone_amp = new_amp;
+		tone_send(now_ns);
+	}
+}
+
 void sitl_state_init(void)
 {
 	if (sitl_cfg.state_port <= 0) {
@@ -101,6 +280,14 @@ void sitl_state_init(void)
 		return;
 	}
 	fprintf(stderr, "SITL: state/model port udp %d\n", sitl_cfg.state_port);
+	if (sub_restore_env(TONE_SUB_ENV, &tone_addr)) {
+		tone_have_sub = true;
+		tone_expire = time(NULL) + 2;
+	}
+	if (sub_restore_env(AUDIO_SUB_ENV, &audio_addr)) {
+		audio_have_sub = true;
+		audio_expire = time(NULL) + 2;
+	}
 }
 
 static void load_model(const char *path, struct sockaddr_in *src)
@@ -154,6 +341,18 @@ void sitl_state_poll(void)
 	if (have_sub && time(NULL) > sub_expire) {
 		have_sub = false;
 	}
+	if (tone_have_sub) {
+		if (time(NULL) > tone_expire) {
+			tone_have_sub = false;
+			unsetenv(TONE_SUB_ENV);
+		} else if (sitl_wallclock_ns() - tone_last_tx_wall_ns > TONE_KEEPALIVE_NS) {
+			tone_send(sitl_time_ns());
+		}
+	}
+	if (audio_have_sub && time(NULL) > audio_expire) {
+		audio_have_sub = false;
+		unsetenv(AUDIO_SUB_ENV);
+	}
 	uint8_t pkt[512];
 	struct sockaddr_in src;
 	socklen_t srclen = sizeof(src);
@@ -194,12 +393,33 @@ void sitl_state_poll(void)
 			apply_period();
 			fprintf(stderr, "SITL: speedup %.3f\n", (double)speedup);
 		}
+	} else if (cmd == 3) {
+		tone_addr = src;
+		tone_have_sub = true;
+		tone_expire = time(NULL) + 2;
+		sub_save_env(TONE_SUB_ENV, &tone_addr);
+		memset(tone_raw, 0xff, sizeof(tone_raw)); // force recompute
+		tone_step(sitl_time_ns());
+		tone_send(sitl_time_ns()); // snapshot for the (re)subscriber
+	} else if (cmd == 4) {
+		if (!audio_have_sub || src.sin_addr.s_addr != audio_addr.sin_addr.s_addr || src.sin_port != audio_addr.sin_port) {
+			audio_batch.count = 0;
+			audio_acc[0] = audio_acc[1] = 0;
+			audio_acc_n = 0;
+			audio_next_ns = 0;
+		}
+		audio_addr = src;
+		audio_have_sub = true;
+		audio_expire = time(NULL) + 2;
+		sub_save_env(AUDIO_SUB_ENV, &audio_addr);
 	}
 }
 
 // called from the sim thread on every physics step
 void sitl_state_step(uint64_t now_ns)
 {
+	tone_step(now_ns);
+	audio_step(now_ns);
 	if (!have_sub) {
 		return;
 	}

@@ -1,0 +1,71 @@
+name: SITL Calibration Tests
+
+# Compares the SITL physics against the real-hardware bench captures:
+# steady sweep, square amplitude sweep and 120s chirp per calibrated
+# model, checked against Mcu/SITL/data/*/expected.json. Heavier than
+# the functional SITL tests (~25 min), so it runs only when the
+# physics, models or measurement tools change, plus nightly.
+#
+# The chirp comparison self-skips if the runner is too starved to
+# hold the sim/wall ratio (the chirp is wall-clock paced); all other
+# checks are ratio-immune. Comparison graphs are uploaded as
+# artifacts on every run.
+
+on:
+  push:
+    branches: ["main", "ark-release"]
+    paths:
+      - "Mcu/SITL/**"
+      - "scripts/esc_*.py"
+      - "Src/main.c"
+      - "Src/DroneCAN/**"
+      - "Src/motor_runtime.c"
+      - "Src/runtime_loop.c"
+      - "Src/settings.c"
+  pull_request:
+    branches: ["main", "ark-release"]
+    paths:
+      - "Mcu/SITL/**"
+      - "scripts/esc_*.py"
+      - "Src/main.c"
+      - "Src/DroneCAN/**"
+      - "Src/motor_runtime.c"
+      - "Src/runtime_loop.c"
+      - "Src/settings.c"
+  schedule:
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+
+jobs:
+  calibration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build SITL
+        run: make AM32_SITL_CAN
+
+      - name: Install python dependencies
+        # mcast: driver needs >=1.0.20; FlexDebug (armed telemetry) needs >=1.0.27
+        run: python3 -m pip install 'dronecan>=1.0.27' plotly
+
+      - name: Run calibration tests
+        run: |
+          mkdir calibration_run && cd calibration_run
+          python3 ../Mcu/SITL/run_calibration_tests.py \
+            --sitl ../obj/AM32_AM32_SITL_CAN_*.elf \
+            --artifacts ../calibration_artifacts
+
+      - name: Upload comparison graphs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: calibration-graphs
+          path: calibration_artifacts/
+
+      - name: Upload run logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: calibration-logs
+          path: calibration_run/calrun_*/

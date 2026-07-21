@@ -90,6 +90,13 @@ static struct PACKED {
 	uint16_t rxframe_error;
 	int32_t rx_ecode;
 	uint8_t auto_advance_level;
+	// version 2 fields
+	uint16_t duty_cycle;	     // demanded duty, 0..2000
+	uint16_t duty_cycle_maximum; // low-rpm/temperature duty clamp
+	uint16_t adjusted_input;     // input after mode mapping, 0..2047
+	uint16_t adc_raw_current;    // current sense ADC counts
+	uint16_t adc_raw_volts;	     // voltage sense ADC counts
+	uint8_t flags;		     // bit0 armed, bit1 running, bit2 stepper_sine
 } debug1;
 
 static void can_printf(const char *fmt, ...);
@@ -108,6 +115,11 @@ extern volatile uint32_t commutation_interval;
 extern uint8_t auto_advance_level;
 extern uint16_t low_cell_volt_cutoff;
 extern uint32_t desync_happened;
+extern volatile uint16_t duty_cycle;
+extern volatile uint16_t duty_cycle_maximum;
+extern uint16_t ADC_raw_current;
+extern uint16_t ADC_raw_volts;
+extern volatile char stepper_sine;
 
 static uint16_t last_can_input;
 static uint64_t last_heartbeat_us;
@@ -1040,9 +1052,9 @@ static void send_FlexDebug(void)
 		uint32_t num_input;
 	} last;
 	/*
-      popupate debug1
+      populate debug1
      */
-	debug1.version = 1;
+	debug1.version = 2;
 	debug1.commutation_interval = commutation_interval;
 	debug1.auto_advance_level = auto_advance_level;
 	debug1.num_commands = canstats.total_commands - last.total_commands;
@@ -1050,6 +1062,12 @@ static void send_FlexDebug(void)
 	debug1.rx_errors = canstats.rx_errors;
 	debug1.rxframe_error = canstats.rxframe_error;
 	debug1.rx_ecode = canstats.rx_ecode;
+	debug1.duty_cycle = duty_cycle;
+	debug1.duty_cycle_maximum = duty_cycle_maximum;
+	debug1.adjusted_input = adjusted_input;
+	debug1.adc_raw_current = ADC_raw_current;
+	debug1.adc_raw_volts = ADC_raw_volts;
+	debug1.flags = (armed ? 1 : 0) | (running ? 2 : 0) | (stepper_sine ? 4 : 0);
 
 	last.num_input = canstats.num_input;
 	last.total_commands = canstats.total_commands;

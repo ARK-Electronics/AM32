@@ -27,6 +27,9 @@ void motor_config_changed(void);
 // accumulate iu,iv,iw,vu,vv,vw,vbus,ibus for averaged state sampling
 void motor_add_signals(double acc[8]);
 
+// accumulate audio signals (torque, summed |i|) for the audio stream
+void motor_add_audio(double acc[2]);
+
 // called from the firmware main loop for debug tracing
 void motor_log_mainloop(void);
 

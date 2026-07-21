@@ -79,7 +79,10 @@ import glob
 import math
 
 import sitl_dshot as sd
-from sitl_gui_backend import DshotPanel, CanPanel, SimStream, HAVE_DRONECAN
+import sitl_tones
+from sitl_gui_backend import (DshotPanel, CanPanel, CanFrameCounter,
+                              SimStream, ToneStream, AudioStream,
+                              HAVE_DRONECAN)
 
 
 def main():
@@ -288,6 +291,19 @@ def main():
     g2 = QGridLayout(f2)
     top.addWidget(f2, 0, 1)
 
+    # raw bus frame rate, counted straight off the multicast group so it
+    # works with CAN control disabled and without the dronecan package
+    can_fps = CanFrameCounter(args.can_uri)
+    can_fps_label = QLabel('FPS: -')
+    can_fps_label.setToolTip(
+        'CAN frames per second seen on the bus, from every node: the\n'
+        'ESC\'s own traffic, this GUI and anything else on the same\n'
+        'multicast group. Counted independently of the Enable switch.\n'
+        'Useful to check the bus really is quiet, e.g. the bootloader\'s\n'
+        'no-CAN fallback (DShot/PWM boot) only arms when no frame at all\n'
+        'arrives in its first 250ms.')
+    g2.addWidget(can_fps_label, 0, 3)
+
     if can is not None:
         can_enable = QCheckBox('Enable')
 
@@ -304,6 +320,28 @@ def main():
             'RawCommand box instead to cut only the command stream.')
         can_enable.toggled.connect(can_enable_changed)
         g2.addWidget(can_enable, 0, 0)
+
+        can_dna = QCheckBox('DNA server')
+        can_dna.setToolTip(
+            'Serve dynamic node ID allocation, as an autopilot would. An\n'
+            'ESC whose eeprom has no static node ID broadcasts anonymous\n'
+            'allocation requests and stays off the bus (and the CAN\n'
+            'bootloader stays put) until some allocator answers. The DNA\n'
+            'label flashes while such requests are seen. While serving,\n'
+            'the GUI node is on the bus even with Enable unchecked.')
+
+        def can_dna_changed():
+            can.dna_server = can_dna.isChecked()
+            log_action('can_dna %d' % int(can.dna_server))
+
+        can_dna.toggled.connect(can_dna_changed)
+        g2.addWidget(can_dna, 0, 1)
+        can_dna_label = QLabel('')
+        can_dna_label.setToolTip(
+            'Flashes while anonymous DNA allocation requests are seen on\n'
+            'the bus: a node is waiting for an allocator. Tick DNA server\n'
+            '(or run another allocator) to give it a node ID.')
+        g2.addWidget(can_dna_label, 0, 2)
 
         can_rawcmd = QCheckBox('RawCommand')
         can_rawcmd.setChecked(True)
@@ -518,6 +556,81 @@ def main():
     speed_1x.setToolTip('Back to real time.')
     speed_1x.clicked.connect(lambda: speed_slider.setValue(150))
     g4.addWidget(speed_1x, 2, 4)
+
+    # audio: play the ESC beeps (startup tune, DShot beacons) through
+    # the host sound output, from the tone event stream on the state
+    # port. Stream and synth are created lazily on first enable
+    audio_check = QCheckBox('Audio')
+    audio_check.setToolTip(
+        'Play the beeps the ESC firmware makes (startup tune, arm beeps,\n'
+        'DShot beacons) through the sound output. On a real ESC these are\n'
+        'the motor windings driven with PWM at an audible frequency; here\n'
+        'the same PWM is synthesized as a sine. Pitch is unaffected by\n'
+        'the speedup slider, duration scales with it.')
+    g4.addWidget(audio_check, 4, 0)
+    audio_slider = QSlider(Qt.Horizontal)
+    audio_slider.setRange(0, 100)
+    audio_slider.setValue(50)
+    audio_slider.setToolTip('Playback volume, shared by both audio sources.')
+    g4.addWidget(audio_slider, 4, 1, 1, 2)
+    motor_audio_check = QCheckBox('Motor audio')
+    motor_audio_check.setToolTip(
+        'Play what the motor itself radiates, from the physics model:\n'
+        'torque ripple and phase current magnitude, so commutation\n'
+        'noise, PWM whine and beeps sound as a real motor would (Audio\n'
+        'plays clean synthesized tones instead). Pitch follows the\n'
+        'speedup slider - slow motion sounds lower, as physics should.')
+    g4.addWidget(motor_audio_check, 4, 3)
+    tones = None
+    tone_synth = None
+    phys_stream = None
+    phys_player = None
+
+    def audio_toggled(*a):
+        nonlocal tones, tone_synth
+        log_action('audio %d' % int(audio_check.isChecked()))
+        if audio_check.isChecked() and tone_synth is None:
+            tones = ToneStream(args.host, args.state_port)
+            tone_synth = sitl_tones.ToneSynth(tones,
+                                              volume=audio_slider.value() / 100.0)
+            if not tone_synth.active:
+                sys.stderr.write('audio: %s\n' % tone_synth.error)
+                audio_check.setToolTip('Not available: %s' % tone_synth.error)
+                tones.close()
+                tones, tone_synth = None, None
+                audio_check.setChecked(False)
+                return
+        if tones is not None:
+            tones.enabled = audio_check.isChecked()
+
+    def motor_audio_toggled(*a):
+        nonlocal phys_stream, phys_player
+        log_action('motor_audio %d' % int(motor_audio_check.isChecked()))
+        if motor_audio_check.isChecked() and phys_player is None:
+            phys_stream = AudioStream(args.host, args.state_port)
+            phys_player = sitl_tones.PhysicsAudio(
+                phys_stream, volume=audio_slider.value() / 100.0)
+            if not phys_player.active:
+                sys.stderr.write('motor audio: %s\n' % phys_player.error)
+                motor_audio_check.setToolTip('Not available: %s'
+                                             % phys_player.error)
+                phys_stream.close()
+                phys_stream, phys_player = None, None
+                motor_audio_check.setChecked(False)
+                return
+        if phys_stream is not None:
+            phys_stream.enabled = motor_audio_check.isChecked()
+
+    def audio_volume_changed(*a):
+        log_action('audio_volume %d' % audio_slider.value())
+        if tone_synth is not None:
+            tone_synth.set_volume(audio_slider.value() / 100.0)
+        if phys_player is not None:
+            phys_player.set_volume(audio_slider.value() / 100.0)
+
+    audio_check.toggled.connect(audio_toggled)
+    motor_audio_check.toggled.connect(motor_audio_toggled)
+    audio_slider.valueChanged.connect(audio_volume_changed)
 
     # scope controls: sample period and window, shared by both graph
     # windows. Fine sample periods (down to the 500ns physics step,
@@ -813,6 +926,8 @@ def main():
             ds_edt.setChecked(False)
         elif cmd == 'can_enable' and can is not None:
             can_enable.setChecked(bool(int(cargs[0])))
+        elif cmd == 'can_dna' and can is not None:
+            can_dna.setChecked(bool(int(cargs[0])))
         elif cmd == 'can_rawcmd' and can is not None:
             can_rawcmd.setChecked(bool(int(cargs[0])))
         elif cmd == 'can_armed' and can is not None:
@@ -852,11 +967,33 @@ def main():
                 speed_changed()
             else:
                 speed_slider.setValue(pos)
+        elif cmd == 'audio':
+            audio_check.setChecked(bool(int(cargs[0])))
+        elif cmd == 'motor_audio':
+            motor_audio_check.setChecked(bool(int(cargs[0])))
+        elif cmd == 'audio_volume':
+            audio_slider.setValue(int(cargs[0]))
         elif cmd == 'status':
             reply('STATUS %s' % bds_label.text())
             reply('STATUS %s' % can_label.text())
             reply('STATUS ds: %s' % (ds.status or '-'))
             reply('STATUS sim: %s rate=%.0f/s' % (sim.model_status or '-', sim.rate.hz()))
+            reply('STATUS canbus: %s%s' %
+                  ('%.0f fps' % can_fps.rate.hz() if can_fps.available
+                   else can_fps.error,
+                   ' dna-request' if can_fps.available
+                   and can_fps.dna_request_seen() else ''))
+            if tones is not None:
+                freq, amp = tones.current()
+                reply('STATUS audio: on vol=%d freq=%.1f amp=%.5f'
+                      % (audio_slider.value(), freq, amp))
+            else:
+                reply('STATUS audio: off')
+            if phys_stream is not None:
+                reply('STATUS motor_audio: on rate=%.0f/s'
+                      % phys_stream.rate.hz())
+            else:
+                reply('STATUS motor_audio: off')
             return
         elif cmd == 'quit':
             app.quit()
@@ -929,11 +1066,24 @@ def main():
                 param_status.setText(can.param_result.get_nowait())
             except queue.Empty:
                 pass
+            if can_fps.available and can_fps.dna_request_seen():
+                # flash: a node on the bus is asking for an allocation
+                if int(time.time() * 2.5) % 2:
+                    can_dna_label.setText('DNA request')
+                    can_dna_label.setStyleSheet('color: red; font-weight: bold')
+                else:
+                    can_dna_label.setText('DNA request')
+                    can_dna_label.setStyleSheet('color: gray')
+            else:
+                can_dna_label.setText('')
+                can_dna_label.setStyleSheet('')
         model_status.setText(sim.model_status)
         if sim.enabled:
             sim_rate_label.setText('%.0f samples/s' % sim.rate.hz())
         else:
             sim_rate_label.setText('')
+        if can_fps.available:
+            can_fps_label.setText('FPS: %.0f' % can_fps.rate.hz())
 
     update_timer = QTimer()
     update_timer.timeout.connect(update)

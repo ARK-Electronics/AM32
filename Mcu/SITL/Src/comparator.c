@@ -25,6 +25,9 @@ uint8_t getCompOutputLevel(void)
 		// called from interrupt context (filter loop in interruptRoutine):
 		// account for the read time so consecutive reads see fresh samples
 		sitl_isr_read_tick();
+	} else {
+		// mainline polling (old_routine commutation) is progress
+		sitl_fw_progress();
 	}
 	return sitl_comp_out;
 }

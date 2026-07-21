@@ -132,6 +132,16 @@ void sitl_tim1_set_arr(uint16_t arr)
 	tim1.arr_pre = arr;
 }
 
+// latched (active) TIM1 state, for tone detection in sitl_state.c
+void sitl_tim1_get_active(uint32_t *psc, uint32_t *arr, uint32_t ccr[3])
+{
+	*psc = tim1.psc_act;
+	*arr = tim1.arr_act;
+	for (int i = 0; i < 3; i++) {
+		ccr[i] = tim1.ccr_act[i];
+	}
+}
+
 void sitl_tim1_force_update(void)
 {
 	tim1_latch();

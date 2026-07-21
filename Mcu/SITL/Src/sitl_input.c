@@ -44,9 +44,12 @@ enum sitl_input_type {
 	SITL_INPUT_DSHOT150 = 1,
 	SITL_INPUT_DSHOT300 = 2,
 	SITL_INPUT_DSHOT600 = 3,
+	SITL_INPUT_SERIAL19200 = 4, // len = N raw serial bytes (bootloader only)
+	SITL_INPUT_LINE_LEVEL = 5,  // constant line state, no data
 };
 
 #define SITL_INPUT_FLAG_IDLE_HIGH 0x0001
+#define SITL_INPUT_FLAG_FLOATING 0x0002
 
 struct __attribute__((packed)) input_pkt {
 	uint16_t magic;
@@ -76,19 +79,16 @@ static uint32_t cap_index;
 static uint64_t cap_base_ns; // sim time of CNT=0
 
 static volatile uint8_t pin_idle_level; // from the last packet flags
+static volatile bool pin_floating;	// line explicitly floating (LINE_LEVEL flag)
 static uint8_t last_type = SITL_INPUT_DSHOT300;
-static uint64_t tx_done_ns;   // sim time the BDShot reply transmit completes
-static uint64_t dma_done_ns;  // sim time RX capture DMA should complete (0 = idle)
-static uint64_t last_edge_ns; // timestamp of the most recent synth edge
-
-// max UDP frames drained per poll so a flood cannot starve the sim thread
-#define SITL_INPUT_DRAIN_MAX 32
+static uint64_t tx_done_ns; // sim time the BDShot reply transmit completes
 
 static struct {
 	uint32_t frames;
 	uint32_t dropped;
 	uint32_t replies;
 	uint32_t bad_gcr;
+	uint32_t serial_ignored;
 } stats;
 
 void sitl_input_init(void)
@@ -150,7 +150,6 @@ static void add_edge(uint64_t t_ns)
 {
 	if (cap_index < cap_count && cap_index < 64) {
 		dma_buffer[cap_index++] = cap_cnt_at(t_ns);
-		last_edge_ns = t_ns;
 	}
 }
 
@@ -183,20 +182,6 @@ static void synth_frame(uint8_t type, uint16_t data)
 		const uint32_t high_ns = (data & (0x8000U >> i)) ? (bit_ns * 3U) / 4U : (bit_ns * 3U) / 8U;
 		add_edge(start);
 		add_edge(start + high_ns);
-	}
-}
-
-// service deferred DMA completions (RX capture end / BDShot TX end)
-static void service_deferred_dma(void)
-{
-	const uint64_t now = sitl_time_ns();
-	if (out_put && tx_done_ns != 0 && now >= tx_done_ns) {
-		tx_done_ns = 0;
-		sitl_irq_pend(SITL_IRQ_DMA);
-	}
-	if (dma_done_ns != 0 && now >= dma_done_ns) {
-		dma_done_ns = 0;
-		sitl_irq_pend(SITL_IRQ_DMA);
 	}
 }
 
@@ -278,62 +263,66 @@ void sitl_input_dma_irq(void)
 	sitl_irq_pend(SITL_IRQ_EXTI15);
 }
 
-/*
-  called from the sim thread every physics step: service deferred DMA
-  IRQs, then pull UDP frames. DMA complete for a received frame is
-  deferred until the last synthesized edge time so frame duration is
-  visible in sim time.
-
-  Wire-busy policy:
-  - BDShot TX or RX DMA still waiting for the last edge: stop receiving
-    and leave remaining datagrams queued. Consuming them would destroy
-    DShot command bursts (firmware needs 6 identical commands) that
-    GUI/catch-up senders place in the socket at once.
-  - Capture not armed: drain and drop (same as a real wire with no
-    DMA arm) so the socket does not accumulate stale zero-throttle
-    frames that would delay a later throttle change.
-  - After accepting a full capture: stop this poll so the rest of a
-    burst stays queued for the next free window.
- */
+// called from the sim thread every 100us
 void sitl_input_poll(void)
 {
 	if (fd < 0) {
 		return;
 	}
-	service_deferred_dma();
-
-	for (int n = 0; n < SITL_INPUT_DRAIN_MAX; n++) {
-		// short busy windows: keep UDP queued for the next free step
-		if (out_put || dma_done_ns != 0) {
-			break;
+	// complete a pending BDShot reply transmit
+	if (out_put && tx_done_ns != 0 && sitl_time_ns() >= tx_done_ns) {
+		tx_done_ns = 0;
+		sitl_irq_pend(SITL_IRQ_DMA);
+		return;
+	}
+	// header (6 bytes) plus up to 200 payload bytes (type 4)
+	uint8_t buf[6 + 200];
+	struct input_pkt pkt;
+	struct sockaddr_in src;
+	socklen_t srclen = sizeof(src);
+	const ssize_t ret = recvfrom(fd, buf, sizeof(buf), MSG_DONTWAIT, (struct sockaddr *)&src, &srclen);
+	if (ret < (ssize_t)sizeof(pkt)) {
+		return;
+	}
+	memcpy(&pkt, buf, sizeof(pkt));
+	if (pkt.magic != SITL_INPUT_MAGIC || pkt.type > SITL_INPUT_LINE_LEVEL) {
+		return;
+	}
+	if (pkt.type == SITL_INPUT_SERIAL19200) {
+		if (pkt.len < 1 || pkt.len > 200 || ret != 6 + pkt.len) {
+			return;
 		}
-		struct input_pkt pkt;
-		struct sockaddr_in src;
-		socklen_t srclen = sizeof(src);
-		const ssize_t ret = recvfrom(fd, &pkt, sizeof(pkt), MSG_DONTWAIT, (struct sockaddr *)&src, &srclen);
-		if (ret < 0) {
-			break;
-		}
-		if (ret < (ssize_t)sizeof(pkt) || pkt.magic != SITL_INPUT_MAGIC || pkt.type > SITL_INPUT_DSHOT600 || pkt.len != 4) {
-			continue;
-		}
-		last_sender = src;
-		have_sender = true;
-		last_type = pkt.type;
-		pin_idle_level = (pkt.flags & SITL_INPUT_FLAG_IDLE_HIGH) ? 1 : 0;
-		stats.frames++;
-		if (!cap_armed) {
-			stats.dropped++;
-			continue;
-		}
-		synth_frame(pkt.type, pkt.data);
-		if (cap_index >= cap_count) {
-			cap_armed = false;
-			// complete at the last edge (or immediately if already past)
-			dma_done_ns = last_edge_ns ? last_edge_ns : sitl_time_ns();
-			service_deferred_dma();
-			break;
-		}
+		// 19200 serial is for the bootloader; the main firmware has no
+		// uart on the signal pin so the bytes are ignored
+		stats.serial_ignored++;
+		return;
+	}
+	if (pkt.len != 4) {
+		return;
+	}
+	if (pkt.type == SITL_INPUT_LINE_LEVEL) {
+		// constant line state, e.g. an FC holding the wire. A floating
+		// line reads low here (no pull on the fw input by default)
+		pin_floating = (pkt.flags & SITL_INPUT_FLAG_FLOATING) != 0;
+		pin_idle_level = (!pin_floating && (pkt.flags & SITL_INPUT_FLAG_IDLE_HIGH)) ? 1 : 0;
+		return;
+	}
+	last_sender = src;
+	have_sender = true;
+	last_type = pkt.type;
+	pin_floating = false;
+	pin_idle_level = (pkt.flags & SITL_INPUT_FLAG_IDLE_HIGH) ? 1 : 0;
+	stats.frames++;
+	if (!cap_armed || out_put) {
+		// capture not armed (or the wire is driven by the reply): the
+		// frame is lost, as on the real signal wire
+		stats.dropped++;
+		return;
+	}
+	synth_frame(pkt.type, pkt.data);
+	if (cap_index >= cap_count) {
+		cap_armed = false;
+		sitl_irq_pend(SITL_IRQ_DMA);
 	}
 }
 

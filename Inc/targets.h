@@ -372,6 +372,7 @@
 #	define TARGET_VOLTAGE_DIVIDER 110
 #	define MILLIVOLT_PER_AMP 20
 #	define CURRENT_OFFSET 0
+#	define CURRENT_AUTO_OFFSET
 #endif
 
 #ifdef REF_G431

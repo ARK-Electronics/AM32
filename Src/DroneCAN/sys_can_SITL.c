@@ -46,6 +46,10 @@ struct __attribute__((packed)) mcast_pkt {
 
 static int fd_in = -1;
 static int fd_out = -1;
+// our TX socket source address: multicast loopback delivers our own
+// datagrams back to fd_in, but a real CAN controller never receives
+// its own frames, so RX must drop them
+static struct sockaddr_in tx_addr;
 
 static uint16_t crc16_CCITT(const uint8_t *buf, uint32_t len)
 {
@@ -234,6 +238,10 @@ void sys_can_init(void)
 	}
 #	endif
 
+	// after the self test, which may have rebound fd_out
+	socklen_t alen = sizeof(tx_addr);
+	getsockname(fd_out, (struct sockaddr *)&tx_addr, &alen);
+
 	fprintf(stderr, "SITL: CAN on %s (%s:%d)\n", name, address, MCAST_PORT);
 }
 
@@ -266,9 +274,14 @@ int16_t sys_can_receive(CanardCANFrame *rx_frame)
 		return -1;
 	}
 	struct mcast_pkt pkt;
-	const ssize_t ret = recv(fd_in, &pkt, sizeof(pkt), MSG_DONTWAIT);
+	struct sockaddr_in src;
+	socklen_t srclen = sizeof(src);
+	const ssize_t ret = recvfrom(fd_in, &pkt, sizeof(pkt), MSG_DONTWAIT, (struct sockaddr *)&src, &srclen);
 	if (ret < 0) {
 		return (errno == EAGAIN || errno == EWOULDBLOCK) ? 0 : -1;
+	}
+	if (src.sin_port == tx_addr.sin_port && src.sin_addr.s_addr == tx_addr.sin_addr.s_addr) {
+		return 0; // own frame looped back
 	}
 	if (ret < MCAST_HDR_LEN || pkt.magic != MCAST_MAGIC) {
 		canstats.rxframe_error++;
@@ -360,62 +373,45 @@ void sys_can_getUniqueID(uint8_t id[16])
 }
 
 /*
-  RTC backup survives hardware reset. SITL reboots via execv, so keep the
-  eight words next to the eeprom file (`<eeprom>.rtc`) for warm-boot /
-  FW-update handoff (RTC_BKUP0_BOOTED / SIGNAL / FWUPDATE).
+  RTC backup registers, file backed in <eeprom>.bkup so they survive the
+  execve reset chain like the battery backed domain survives a reset.
+  Carries the DroneCAN firmware-update handoff to the bootloader
  */
-static uint32_t rtc_backup[8];
-static bool rtc_loaded;
-
-static void rtc_backup_path(char *path, size_t pathlen)
+static void bkup_file_path(char *path, size_t len)
 {
-	snprintf(path, pathlen, "%s.rtc", sitl_cfg.eeprom_path);
-}
-
-static void rtc_backup_load(void)
-{
-	if (rtc_loaded) {
-		return;
-	}
-	rtc_loaded = true;
-	char path[512];
-	rtc_backup_path(path, sizeof(path));
-	FILE *f = fopen(path, "rb");
-	if (!f) {
-		return;
-	}
-	if (fread(rtc_backup, 1, sizeof(rtc_backup), f) != sizeof(rtc_backup)) {
-		memset(rtc_backup, 0, sizeof(rtc_backup));
-	}
-	fclose(f);
-}
-
-static void rtc_backup_save(void)
-{
-	char path[512];
-	rtc_backup_path(path, sizeof(path));
-	FILE *f = fopen(path, "wb");
-	if (!f) {
-		perror("SITL: rtc backup open");
-		return;
-	}
-	if (fwrite(rtc_backup, 1, sizeof(rtc_backup), f) != sizeof(rtc_backup)) {
-		perror("SITL: rtc backup write");
-	}
-	fclose(f);
+	snprintf(path, len, "%s.bkup", sitl_cfg.eeprom_path);
 }
 
 uint32_t get_rtc_backup_register(uint8_t idx)
 {
-	rtc_backup_load();
-	return rtc_backup[idx & 7];
+	char path[512];
+	bkup_file_path(path, sizeof(path));
+	uint32_t v = 0;
+	FILE *f = fopen(path, "rb");
+	if (f != NULL) {
+		fseek(f, idx * 4, SEEK_SET);
+		if (fread(&v, 4, 1, f) != 1) {
+			v = 0;
+		}
+		fclose(f);
+	}
+	return v;
 }
 
 void set_rtc_backup_register(uint8_t idx, uint32_t value)
 {
-	rtc_backup_load();
-	rtc_backup[idx & 7] = value;
-	rtc_backup_save();
+	char path[512];
+	bkup_file_path(path, sizeof(path));
+	FILE *f = fopen(path, "r+b");
+	if (f == NULL) {
+		f = fopen(path, "w+b");
+	}
+	if (f == NULL) {
+		return;
+	}
+	fseek(f, idx * 4, SEEK_SET);
+	fwrite(&value, 4, 1, f);
+	fclose(f);
 }
 
 void setup_portpin(uint16_t portpin, bool enable)

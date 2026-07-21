@@ -31,7 +31,7 @@ enum sitl_irq {
 
 // PWM/DShot input over UDP (sitl_input.c)
 void sitl_input_init(void);
-void sitl_input_poll(void);	    // sim thread, every physics step
+void sitl_input_poll(void);	    // sim thread, every 100us
 void sitl_input_arm(void);	    // receiveDshotDma()
 void sitl_input_timer_reset(void);  // resetInputCaptureTimer()
 void sitl_input_send_reply(void);   // sendDshotDma()
@@ -46,6 +46,9 @@ void sitl_state_step(uint64_t now_ns); // sim thread, every physics step
 
 // simulated monotonic time since start
 uint64_t sitl_time_ns(void);
+
+// host monotonic wall clock
+uint64_t sitl_wallclock_ns(void);
 
 // a non blocking close-on-exec UDP socket (sitl_compat.c)
 int sitl_udp_socket(void);
@@ -66,12 +69,17 @@ void sitl_isr_read_tick(void);
 // account for a register read from the firmware thread; grants simulated
 // time while the firmware holds PRIMASK
 void sitl_fw_read_tick(void);
+// renew the firmware mainline progress lease (fw thread interception
+// points); see sitl_sched.c
+void sitl_fw_progress(void);
 
 // NVIC emulation
 void sitl_nvic_set_priority(int irq, uint32_t prio);
 void sitl_nvic_enable_irq(int irq);
 void sitl_nvic_disable_irq(int irq);
 void sitl_irq_pend(int irq);
+void sitl_exec_bootloader(const char *cause) __attribute__((noreturn));
+void sitl_reset_with_cause(const char *cause) __attribute__((noreturn));
 void sitl_primask_set(void);	 // __disable_irq
 void sitl_primask_clear(void);	 // __enable_irq
 uint32_t sitl_primask_get(void); // __get_PRIMASK
@@ -116,6 +124,7 @@ void sitl_tim1_set_duty(int chan, uint16_t duty);
 void sitl_tim1_set_psc(uint16_t psc);
 void sitl_tim1_set_arr(uint16_t arr);
 void sitl_tim1_force_update(void);
+void sitl_tim1_get_active(uint32_t *psc, uint32_t *arr, uint32_t ccr[3]);
 void sitl_tenkhz_enable(void);
 
 // called by the sim thread each physics step to check timer events
