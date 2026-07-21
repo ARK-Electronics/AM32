@@ -13,6 +13,7 @@
 #include "peripherals.h"
 #include "functions.h"
 #include "eeprom.h"
+#include "zc_handoff.h"
 
 RAM_FUNC void getBemfState()
 {
@@ -79,8 +80,10 @@ RAM_FUNC void commutate()
 	__enable_irq();
 	changeCompInput();
 #ifndef NO_POLLING_START
-	if (average_interval > polling_mode_changeover + 500) {
+	/* Quality-based exit from closed-loop (replaces sole CI vs T+500 test). */
+	if (!old_routine && zcHandoffShouldExitClosedLoop(average_interval)) {
 		old_routine = 1;
+		zcHandoffReset();
 	}
 #endif
 	bemfcounter = 0;
@@ -180,7 +183,9 @@ void zcfoundroutine()
 			enableCompInterrupts(); // enable interrupt
 		}
 	} else {
-		if (commutation_interval < polling_mode_changeover) {
+		/* Quality handoff: stable poll intervals (and/or fast CI legacy path). */
+		zcHandoffNotePollInterval(commutation_interval);
+		if (zcHandoffShouldEnterClosedLoop(commutation_interval)) {
 			old_routine = 0;
 			enableCompInterrupts(); // enable interrupt
 		}

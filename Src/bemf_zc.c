@@ -15,6 +15,7 @@
 #include "functions.h"
 #include "eeprom.h"
 #include "hwci_perf.h"
+#include "zc_handoff.h"
 
 RAM_FUNC void PeriodElapsedCallback()
 {
@@ -29,6 +30,7 @@ RAM_FUNC void PeriodElapsedCallback()
 	waitTime = (commutation_interval >> 1) - advance;
 	if (!old_routine) {
 		enableCompInterrupts(); // enable comp interrupt
+		zcHandoffNoteClosedInterval(commutation_interval);
 	}
 	if (zero_crosses < 10000) {
 		zero_crosses++;
@@ -82,6 +84,7 @@ RAM_FUNC void interruptRoutine()
 			if (getCompOutputLevel() == rising) {
 				if (++bad > tolerance) {
 					HWCI_PERF_CONFIRM_REJECT();
+					zcHandoffNoteConfirmReject();
 					return;
 				}
 			}
@@ -95,10 +98,12 @@ RAM_FUNC void interruptRoutine()
 		if (getCompOutputLevel() == rising) {
 #	endif
 			HWCI_PERF_CONFIRM_REJECT();
+			zcHandoffNoteConfirmReject();
 			return;
 		}
 	}
 #endif
+	zcHandoffNoteConfirmAccept();
 #ifdef MCU_F051
 	// Turn-on-pileup timestamp compensation. A zero-cross that physically
 	// occurs during the PWM off-window (freewheel) is invisible to the
