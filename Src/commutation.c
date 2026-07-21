@@ -78,11 +78,9 @@ RAM_FUNC void commutate()
 	}
 	__enable_irq();
 	changeCompInput();
-#ifndef NO_POLLING_START
-	if (average_interval > polling_mode_changeover + 500) {
-		old_routine = 1;
-	}
-#endif
+	// No fallback to poll mode at runtime: a missed crossing is handled
+	// per-step by the blind-step deadline in PeriodElapsedCallback, and a
+	// genuinely lost rotor restarts via the stall / desync machinery.
 	bemfcounter = 0;
 	zcfound = 0;
 	commutation_intervals[step - 1] = commutation_interval; // just used to calulate average
@@ -168,6 +166,10 @@ void zcfoundroutine()
 	bad_count = 0;
 
 	zero_crosses++;
+	// Poll mode is startup-only: these enter thresholds are unchanged, but
+	// once in interrupt mode there is no re-entry (see commutate) - the
+	// blind-step deadline in PeriodElapsedCallback rides through missed
+	// crossings and a genuinely lost rotor restarts through this ramp.
 #ifdef NO_POLLING_START // changes to interrupt mode after 2 zero crosses, does not re-enter
 	if (zero_crosses > 2) {
 		old_routine = 0;

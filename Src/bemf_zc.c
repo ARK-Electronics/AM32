@@ -16,9 +16,51 @@
 #include "eeprom.h"
 #include "hwci_perf.h"
 
+/*
+ * Missed-ZC fallback (BLHeli-style timeout commutation). After each
+ * commutation COM_TIMER is re-armed as a deadline for the next crossing:
+ * expected arrival plus 50% grace. An accepted crossing re-arms COM_TIMER
+ * for the commutation schedule (cancelling the deadline); if the deadline
+ * fires instead, commutate blind at extrapolated timing and keep watching.
+ * A missed crossing costs one extrapolated step, not a mode change - there
+ * is no fallback to poll mode at runtime.
+ */
+#define ZC_BLIND_STEP_LIMIT 8 /* consecutive extrapolated steps before the stall rail takes over */
+
 RAM_FUNC void PeriodElapsedCallback()
 {
+	uint8_t blind = 0;
 	DISABLE_COM_TIMER_INT(); // disable interrupt
+	if (zc_deadline_armed) {
+		// Deadline firing, not a commutation scheduled by an accepted
+		// zero-cross (interruptRoutine cancels the deadline first).
+		zc_deadline_armed = 0;
+		if (!running || old_routine) {
+			return; // stale deadline after a stop or forced restart
+		}
+		if (zc_blind_steps >= ZC_BLIND_STEP_LIMIT) {
+			// Position unknown for too long: stop stepping blind and let
+			// the INTERVAL_TIMER stall rail / desync machinery restart
+			// through the normal startup path.
+			maskPhaseInterrupts();
+			return;
+		}
+		blind = 1;
+		zc_blind_steps++;
+		zc_blind_steps_total++;
+		// Take the full elapsed time as the (late) crossing measurement
+		// and commutate now. The inflated interval feeds the average so
+		// timing hunts slower - the safe direction for a decelerating
+		// rotor - and the next accepted crossing resyncs immediately.
+		maskPhaseInterrupts();
+		uint32_t elapsed = INTERVAL_TIMER_COUNT;
+		if (elapsed > 65535u) {
+			elapsed = 65535u;
+		}
+		lastzctime = thiszctime;
+		thiszctime = (uint16_t)elapsed;
+		SET_INTERVAL_TIMER_COUNT(0);
+	}
 	commutate();
 	commutation_interval = ((commutation_interval) + ((lastzctime + thiszctime) >> 1)) >> 1;
 	if (!eepromBuffer.auto_advance) {
@@ -29,8 +71,16 @@ RAM_FUNC void PeriodElapsedCallback()
 	waitTime = (commutation_interval >> 1) - advance;
 	if (!old_routine) {
 		enableCompInterrupts(); // enable comp interrupt
+		// Next crossing expected (commutation_interval - waitTime) from
+		// now; arm the blind-step deadline at expected + 50% grace.
+		uint32_t deadline = (commutation_interval - waitTime) + (commutation_interval >> 1);
+		if (deadline > 65535u) {
+			deadline = 65535u;
+		}
+		zc_deadline_armed = 1;
+		SET_AND_ENABLE_COM_INT((uint16_t)deadline);
 	}
-	if (zero_crosses < 10000) {
+	if (!blind && zero_crosses < 10000) {
 		zero_crosses++;
 	}
 	HWCI_PERF_ZC();
@@ -154,6 +204,8 @@ RAM_FUNC void interruptRoutine()
 #endif
 	__disable_irq();
 	maskPhaseInterrupts();
+	zc_deadline_armed = 0; // COM_TIMER now times commutation, not the missed-ZC deadline
+	zc_blind_steps = 0;
 	lastzctime = thiszctime;
 #ifdef MCU_F051
 	thiszctime = (uint16_t)(INTERVAL_TIMER_COUNT - zc_grid_comp);
@@ -174,5 +226,8 @@ void startMotor()
 		SET_INTERVAL_TIMER_COUNT(5000);
 		running = 1;
 	}
+	DISABLE_COM_TIMER_INT(); // a stale blind-step deadline must not commutate the restart
+	zc_deadline_armed = 0;
+	zc_blind_steps = 0;
 	enableCompInterrupts();
 }
