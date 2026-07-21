@@ -95,7 +95,10 @@ void runtimeProcessDesyncCheck(void)
 		if (!old_routine && running) {
 			if (average_interval > polling_mode_changeover + 500) {
 				slow_avg_revs++;
-				if (slow_avg_revs >= 4) {
+				// High duty into an untrusted lock is the damage vector
+				// (wrong-phase drive; some boards have no VDS trip): bail
+				// after 2 revs instead of 4 when driving hard.
+				if (slow_avg_revs >= ((duty_cycle > 500) ? 2 : 4)) {
 					slow_avg_revs = 0;
 					old_routine = 1;
 				}

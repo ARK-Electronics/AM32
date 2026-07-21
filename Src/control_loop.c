@@ -611,6 +611,22 @@ RAM_FUNC void tenKhzRoutine()
 			duty_cycle = last_duty_cycle;
 		}
 
+		// Missed-ZC power cut (BLHeli-style): while commutating blind the
+		// rotor position is unknown, so bound the energy driven into a
+		// possibly wrong phase - on boards without a VDS trip (DRV8328)
+		// nothing else limits a wrong-phase current ramp. Cut is immediate
+		// (applied after the slew); recovery ramps back up through the
+		// normal slew once real crossings return and clear zc_blind_steps.
+		if (!old_routine && running && zc_blind_steps >= 2) {
+			uint16_t blind_cap = (zc_blind_steps >= 4) ? 250 : 500;
+			if (blind_cap < min_startup_duty) {
+				blind_cap = min_startup_duty;
+			}
+			if (duty_cycle > blind_cap) {
+				duty_cycle = blind_cap;
+			}
+		}
+
 		/* Inside !escInSineStart(): escIsDriving() ≡ running. */
 		if (escIsDriving() && input > 47) {
 			if (eepromBuffer.variable_pwm) {}
