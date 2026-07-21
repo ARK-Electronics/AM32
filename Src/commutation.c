@@ -80,7 +80,7 @@ RAM_FUNC void commutate()
 	__enable_irq();
 	changeCompInput();
 #ifndef NO_POLLING_START
-	/* Quality-based exit from closed-loop (replaces sole CI vs T+500 test). */
+	/* Prefer staying closed-loop; exit only near-stop / slow-band desync. */
 	if (!old_routine && zcHandoffShouldExitClosedLoop(average_interval)) {
 		old_routine = 1;
 		zcHandoffOnExit();

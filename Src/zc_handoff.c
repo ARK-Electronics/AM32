@@ -1,56 +1,38 @@
 /*
- * zc_handoff.c - quality-based open-loop <-> closed-loop handoff
+ * zc_handoff.c - open-loop <-> closed-loop handoff
+ *
+ * Policy: once closed-loop is entered, stay there as long as possible.
+ * Mode thrash (CL→poll→CL) is audible and costs sync. Exit only near-stop;
+ * stop/stall/reverse/signal-loss force open-loop outside this module.
  */
 
 #include "zc_handoff.h"
 #include "motor_runtime.h"
 #include "targets.h"
 
-/* --- tunables (integer math only; no libm) --- */
-#define ZC_HANDOFF_RING 8
-/* Quality enter only (legacy fast path ignores this). Poll-mode CV can look
- * excellent almost immediately because open-loop is self-timed — need enough
- * ZCs that BEMF is real, not just a stable forced cadence. */
-#define ZC_HANDOFF_MIN_ZC 40
-#define ZC_HANDOFF_MIN_SAMPLES 6
-/* Enter when 100*sigma/mean < this (percent). */
-#define ZC_HANDOFF_CV_ENTER_PCT 12u
-/* Hold in extended band when CV <= this (looser than enter → hysteresis). */
-#define ZC_HANDOFF_CV_HOLD_PCT 18u
-/* Enter needs this many consecutive "good" poll intervals. */
-#define ZC_HANDOFF_ENTER_STREAK 8u
-/* Exit needs this many consecutive non-hold samples in the slow band. */
-#define ZC_HANDOFF_EXIT_STREAK 6u
 /*
- * Quality enter only once CI is near the legacy band: changeover*2 + slack.
- * Open-loop can report low CV near stall without being interrupt-CL ready.
+ * 0 = legacy enter only (CI < changeover). Quality early-enter is off until
+ * thrust-stand validation: with sticky CL, a premature quality enter can
+ * trap a desynced loop until CI_ABS_MAX (SITL racer ~250 rpm).
+ * Set to 1 to re-enable CV-based early enter for low-KV crawl.
  */
-#define ZC_HANDOFF_QUALITY_CI_SLACK 1000u
+#ifndef ZC_HANDOFF_QUALITY_ENTER
+#	define ZC_HANDOFF_QUALITY_ENTER 0
+#endif
+
+#if ZC_HANDOFF_QUALITY_ENTER
+#	define ZC_HANDOFF_RING 8
+#	define ZC_HANDOFF_MIN_ZC 40
+#	define ZC_HANDOFF_MIN_SAMPLES 6
+#	define ZC_HANDOFF_CV_ENTER_PCT 12u
+#	define ZC_HANDOFF_ENTER_STREAK 8u
+#	define ZC_HANDOFF_QUALITY_CI_SLACK 1000u
 
 static uint16_t zc_ci_ring[ZC_HANDOFF_RING];
 static uint8_t zc_ci_n;
 static uint8_t zc_ci_i;
 static uint8_t zc_enter_streak;
-static uint8_t zc_exit_streak;
-/* Non-zero only after a quality (not legacy) enter — enables extended-band hold.
- * OnEnter() calls Reset() then sets this; any other Reset() must clear it so a
- * direct caller cannot inherit a stale hold. */
-static uint8_t zc_quality_hold;
 
-void zcHandoffReset(void)
-{
-	zc_ci_n = 0;
-	zc_ci_i = 0;
-	zc_enter_streak = 0;
-	zc_exit_streak = 0;
-	zc_quality_hold = 0;
-}
-
-/*
- * Drop intervals that do not fit the ring (uint16). During a slow-down past
- * ~32.7 ms/commutation the ring freezes at its last "fast" contents; entry
- * is already gated by ZC_HANDOFF_CI_ABS_MAX before quality is consulted.
- */
 static void zc_ci_push(uint32_t ci)
 {
 	if (ci == 0u || ci > 65535u) {
@@ -80,7 +62,6 @@ static uint32_t zc_ci_mean(void)
 	return sum / n;
 }
 
-/* Integer sqrt for 32-bit. */
 static uint32_t isqrt32(uint32_t x)
 {
 	uint32_t r = 0;
@@ -103,11 +84,6 @@ static uint32_t isqrt32(uint32_t x)
 	return r;
 }
 
-/*
- * Return 100 * sigma / mean as percent, or 100 if not enough samples / mean 0.
- * Sum of squared diffs can exceed 2^32 (8 * 65535^2), so accumulate in
- * uint64_t; multiply via int64 to avoid signed-overflow UB on d*d.
- */
 static uint32_t zc_ci_cv_pct(void)
 {
 	uint8_t n = zc_ci_n;
@@ -125,122 +101,96 @@ static uint32_t zc_ci_cv_pct(void)
 		int32_t d = (int32_t)zc_ci_ring[k] - (int32_t)mean;
 		acc += (uint64_t)((int64_t)d * (int64_t)d);
 	}
-	/* sigma ~= sqrt(sum d^2 / n); var may exceed 2^32 — saturate for isqrt. */
 	{
 		uint64_t var = acc / n;
 		uint32_t sigma = isqrt32(var > 0xffffffffull ? 0xffffffffu : (uint32_t)var);
 		return (sigma * 100u) / mean;
 	}
 }
+#endif /* ZC_HANDOFF_QUALITY_ENTER */
+
+void zcHandoffReset(void)
+{
+#if ZC_HANDOFF_QUALITY_ENTER
+	zc_ci_n = 0;
+	zc_ci_i = 0;
+	zc_enter_streak = 0;
+#endif
+}
 
 void zcHandoffNotePollInterval(uint32_t commutation_interval)
 {
+#if ZC_HANDOFF_QUALITY_ENTER
 	if (zero_crosses < 3u) {
 		zcHandoffReset();
 		return;
 	}
 	zc_ci_push(commutation_interval);
+#else
+	(void)commutation_interval;
+#endif
 }
 
 RAM_FUNC void zcHandoffNoteClosedInterval(uint32_t commutation_interval)
 {
-	/* Keep the ring warm while closed-loop so quality-hold CV is meaningful. */
+#if ZC_HANDOFF_QUALITY_ENTER
 	zc_ci_push(commutation_interval);
+#else
+	(void)commutation_interval;
+#endif
 }
 
 uint8_t zcHandoffShouldEnterClosedLoop(uint32_t commutation_interval)
 {
-	uint32_t cv;
-	uint32_t quality_ci_max;
-
 	if (commutation_interval == 0u || commutation_interval > ZC_HANDOFF_CI_ABS_MAX) {
-		zc_enter_streak = 0;
 		return ZC_HANDOFF_ENTER_NONE;
 	}
-	/*
-	 * Fast path: legacy threshold — no zero_cross minimum (matches pre-handoff
-	 * enter). Caller must treat this as non-quality (no extended-band hold).
-	 */
+	/* Legacy: same as pre-handoff. Once in, stay until CI_ABS_MAX. */
 	if (commutation_interval < polling_mode_changeover) {
 		return ZC_HANDOFF_ENTER_LEGACY;
 	}
-	/* Not yet near the legacy band: poll CV is not a CL-readiness signal. */
-	quality_ci_max = polling_mode_changeover * 2u + ZC_HANDOFF_QUALITY_CI_SLACK;
-	if (commutation_interval > quality_ci_max) {
-		zc_enter_streak = 0;
-		return ZC_HANDOFF_ENTER_NONE;
-	}
-	if (zero_crosses < ZC_HANDOFF_MIN_ZC) {
-		zc_enter_streak = 0;
-		return ZC_HANDOFF_ENTER_NONE;
-	}
-	cv = zc_ci_cv_pct();
-	if (cv <= ZC_HANDOFF_CV_ENTER_PCT && zc_ci_n >= ZC_HANDOFF_MIN_SAMPLES) {
-		if (zc_enter_streak < 255u) {
-			zc_enter_streak++;
+
+#if ZC_HANDOFF_QUALITY_ENTER
+	{
+		uint32_t cv;
+		uint32_t quality_ci_max = polling_mode_changeover * 2u + ZC_HANDOFF_QUALITY_CI_SLACK;
+		if (commutation_interval > quality_ci_max) {
+			zc_enter_streak = 0;
+			return ZC_HANDOFF_ENTER_NONE;
 		}
-	} else {
-		zc_enter_streak = 0;
+		if (zero_crosses < ZC_HANDOFF_MIN_ZC) {
+			zc_enter_streak = 0;
+			return ZC_HANDOFF_ENTER_NONE;
+		}
+		cv = zc_ci_cv_pct();
+		if (cv <= ZC_HANDOFF_CV_ENTER_PCT && zc_ci_n >= ZC_HANDOFF_MIN_SAMPLES) {
+			if (zc_enter_streak < 255u) {
+				zc_enter_streak++;
+			}
+		} else {
+			zc_enter_streak = 0;
+		}
+		if (zc_enter_streak >= ZC_HANDOFF_ENTER_STREAK) {
+			return ZC_HANDOFF_ENTER_QUALITY;
+		}
 	}
-	if (zc_enter_streak >= ZC_HANDOFF_ENTER_STREAK) {
-		return ZC_HANDOFF_ENTER_QUALITY;
-	}
+#endif
 	return ZC_HANDOFF_ENTER_NONE;
 }
 
 RAM_FUNC uint8_t zcHandoffShouldExitClosedLoop(uint32_t average_interval)
 {
-	uint32_t cv;
-
-	/* Near-stop / lost BEMF: always drop to poll. */
-	if (average_interval > ZC_HANDOFF_CI_ABS_MAX) {
-		zc_exit_streak = ZC_HANDOFF_EXIT_STREAK;
-		return 1;
-	}
-
 	/*
-	 * Fast / hysteresis band (legacy guarantee): never exit while
-	 * average_interval <= polling_mode_changeover + 500.
+	 * Stay in closed-loop until near-stop. Do not exit on changeover+500 or
+	 * CV — those thrash OL↔CL during spool-up (lagging average / accel slope).
 	 */
-	if (average_interval <= polling_mode_changeover + 500u) {
-		zc_exit_streak = 0;
-		return 0;
-	}
-
-	/*
-	 * Extended band (average still above legacy exit threshold).
-	 *
-	 * After *legacy* enter, average lags CI during spool-up — so we can be
-	 * here with a healthy interrupt loop. Pre-handoff always exited on this
-	 * compare alone; do the same unless this run was a quality enter that is
-	 * allowed to hold on good CV (low-KV early CL).
-	 */
-	if (!zc_quality_hold) {
-		return 1;
-	}
-
-	/* Quality hold: underfilled ring after enter-reset is not "bad". */
-	if (zc_ci_n < ZC_HANDOFF_MIN_SAMPLES) {
-		zc_exit_streak = 0;
-		return 0;
-	}
-	cv = zc_ci_cv_pct();
-	if (cv <= ZC_HANDOFF_CV_HOLD_PCT) {
-		zc_exit_streak = 0;
-		return 0;
-	}
-
-	if (zc_exit_streak < 255u) {
-		zc_exit_streak++;
-	}
-	return (uint8_t)(zc_exit_streak >= ZC_HANDOFF_EXIT_STREAK);
+	return (uint8_t)(average_interval > ZC_HANDOFF_CI_ABS_MAX);
 }
 
 void zcHandoffOnEnter(uint8_t enter_kind)
 {
+	(void)enter_kind;
 	zcHandoffReset();
-	/* Arm after Reset so quality hold is never left set by a bare Reset(). */
-	zc_quality_hold = (enter_kind == ZC_HANDOFF_ENTER_QUALITY) ? 1u : 0u;
 }
 
 void zcHandoffOnExit(void)
