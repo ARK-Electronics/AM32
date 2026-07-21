@@ -442,6 +442,21 @@ void setInput()
 			}
 		}
 	}
+	// Missed-ZC power cut (BLHeli-style): while commutating blind the
+	// rotor position is unknown - bound the energy driven into a possibly
+	// wrong phase (DRV8328 boards have no VDS trip). Applied here in the
+	// main loop rather than inside the O3 RAM_FUNC 20 kHz body (bench
+	// bisect showed adding code there disturbs F051 startup); the 20 kHz
+	// loop picks the capped setpoint up on its next tick.
+	if (!old_routine && running && zc_blind_steps >= 2) {
+		uint16_t blind_cap = (zc_blind_steps >= 4) ? 250 : 500;
+		if (blind_cap < min_startup_duty) {
+			blind_cap = min_startup_duty;
+		}
+		if (duty_cycle_setpoint > blind_cap) {
+			duty_cycle_setpoint = blind_cap;
+		}
+	}
 #endif
 }
 
@@ -609,22 +624,6 @@ RAM_FUNC void tenKhzRoutine()
 			}
 		} else {
 			duty_cycle = last_duty_cycle;
-		}
-
-		// Missed-ZC power cut (BLHeli-style): while commutating blind the
-		// rotor position is unknown, so bound the energy driven into a
-		// possibly wrong phase - on boards without a VDS trip (DRV8328)
-		// nothing else limits a wrong-phase current ramp. Cut is immediate
-		// (applied after the slew); recovery ramps back up through the
-		// normal slew once real crossings return and clear zc_blind_steps.
-		if (!old_routine && running && zc_blind_steps >= 2) {
-			uint16_t blind_cap = (zc_blind_steps >= 4) ? 250 : 500;
-			if (blind_cap < min_startup_duty) {
-				blind_cap = min_startup_duty;
-			}
-			if (duty_cycle > blind_cap) {
-				duty_cycle = blind_cap;
-			}
 		}
 
 		/* Inside !escInSineStart(): escIsDriving() ≡ running. */

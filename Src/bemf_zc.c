@@ -31,13 +31,21 @@ RAM_FUNC void PeriodElapsedCallback()
 {
 	uint8_t blind = 0;
 	DISABLE_COM_TIMER_INT(); // disable interrupt
+	if (!running || old_routine) {
+		// COM events are meaningless outside interrupt closed-loop: a
+		// stale blind-step deadline after a stop or forced restart, or a
+		// poll-mode COM_TIMER ARR write landing while the deadline's
+		// interrupt enable was still set. Legacy never ran this handler
+		// in poll mode (the enable stayed off); keep that invariant, or
+		// the cancel-race guard below re-arms COM against the poll
+		// startup and spurious commutations fight zcfoundroutine.
+		zc_deadline_armed = 0;
+		return;
+	}
 	if (zc_deadline_armed) {
 		// Deadline firing, not a commutation scheduled by an accepted
 		// zero-cross (interruptRoutine cancels the deadline first).
 		zc_deadline_armed = 0;
-		if (!running || old_routine) {
-			return; // stale deadline after a stop or forced restart
-		}
 		if (zc_blind_steps >= ZC_BLIND_STEP_LIMIT) {
 			// Position unknown for too long: stop stepping blind. Kick
 			// the INTERVAL_TIMER past the 45000 stall threshold so the

@@ -78,9 +78,23 @@ RAM_FUNC void commutate()
 	}
 	__enable_irq();
 	changeCompInput();
-	// No fallback to poll mode at runtime: a missed crossing is handled
-	// per-step by the blind-step deadline in PeriodElapsedCallback, and a
-	// genuinely lost rotor restarts via the stall / desync machinery.
+#ifndef NO_POLLING_START
+	// Poll re-entry, startup window only. On real hardware, PWM /
+	// comparator noise during the first start kicks can shrink
+	// commutation_interval below the changeover and hand off to interrupt
+	// mode with no usable BEMF; once old_routine is 0 the 20 kHz poll
+	// drive stops sampling entirely and the motor never starts (bench:
+	// FAULT_STUCK with zero crossings, CI pinned ~19.6k from the stall
+	// rail's restart cycle). Legacy healed that by re-asserting poll mode
+	// on every slow-average commutation; keep the self-heal while
+	// starting (zero_crosses resets on desync/stop, so recovery paths get
+	// it too). Established closed loop never exits here - a missed
+	// crossing is one blind step (PeriodElapsedCallback) and false locks
+	// are the trust rail's job (runtimeProcessDesyncCheck).
+	if (zero_crosses < 100 && average_interval > polling_mode_changeover + 500) {
+		old_routine = 1;
+	}
+#endif
 	bemfcounter = 0;
 	zcfound = 0;
 	commutation_intervals[step - 1] = commutation_interval; // just used to calulate average
