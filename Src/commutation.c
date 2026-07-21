@@ -81,7 +81,7 @@ RAM_FUNC void commutate()
 	changeCompInput();
 #ifndef NO_POLLING_START
 	/* Prefer staying closed-loop; exit only near-stop / slow-band desync. */
-	if (!old_routine && zcHandoffShouldExitClosedLoop(average_interval)) {
+	if (!old_routine && zcHandoffShouldExitClosedLoop(average_interval, commutation_interval)) {
 		old_routine = 1;
 		zcHandoffOnExit();
 	}

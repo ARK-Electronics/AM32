@@ -1,37 +1,52 @@
 /*
  * zc_handoff.c - open-loop <-> closed-loop handoff
  *
- * Policy: once closed-loop is entered, stay there as long as possible.
- * Mode thrash (CL→poll→CL) is audible and costs sync. Exit only near-stop;
- * stop/stall/reverse/signal-loss force open-loop outside this module.
+ * Asymmetric hysteresis: once closed-loop is commutating on real ZCs, stay
+ * there. The mode transition is the disruptive event. Exit only on positive
+ * evidence of failure (near-stop; optional CV desync). Forced open-loop on
+ * stop/stall/reverse/signal-loss is outside this module.
  */
 
 #include "zc_handoff.h"
 #include "motor_runtime.h"
 #include "targets.h"
 
-/*
- * 0 = legacy enter only (CI < changeover). Quality early-enter is off until
- * thrust-stand validation: with sticky CL, a premature quality enter can
- * trap a desynced loop until CI_ABS_MAX (SITL racer ~250 rpm).
- * Set to 1 to re-enable CV-based early enter for low-KV crawl.
- */
+#define ZC_HANDOFF_RING 8
+#define ZC_HANDOFF_MIN_ZC 40
+#define ZC_HANDOFF_MIN_SAMPLES 6
+#define ZC_HANDOFF_CV_ENTER_PCT 12u
+#define ZC_HANDOFF_CV_EXIT_PCT 40u
+#define ZC_HANDOFF_ENTER_STREAK 8u
+#define ZC_HANDOFF_EXIT_STREAK 10u
+#define ZC_HANDOFF_QUALITY_CI_SLACK 1000u
+
+/* Quality early-enter: off until thrust-stand validation with sticky CL. */
 #ifndef ZC_HANDOFF_QUALITY_ENTER
 #	define ZC_HANDOFF_QUALITY_ENTER 0
 #endif
 
-#if ZC_HANDOFF_QUALITY_ENTER
-#	define ZC_HANDOFF_RING 8
-#	define ZC_HANDOFF_MIN_ZC 40
-#	define ZC_HANDOFF_MIN_SAMPLES 6
-#	define ZC_HANDOFF_CV_ENTER_PCT 12u
-#	define ZC_HANDOFF_ENTER_STREAK 8u
-#	define ZC_HANDOFF_QUALITY_CI_SLACK 1000u
+/*
+ * CV exit in the extended band. Off by default — stay in CL until CI_ABS_MAX
+ * (preferred for sound: no thrash on 50%→5%). Set 1 to enable loose CV desync
+ * drop once lagging-CI guard is proven on the stand.
+ */
+#ifndef ZC_HANDOFF_CV_EXIT
+#	define ZC_HANDOFF_CV_EXIT 0
+#endif
 
 static uint16_t zc_ci_ring[ZC_HANDOFF_RING];
 static uint8_t zc_ci_n;
 static uint8_t zc_ci_i;
 static uint8_t zc_enter_streak;
+static uint8_t zc_exit_streak;
+
+void zcHandoffReset(void)
+{
+	zc_ci_n = 0;
+	zc_ci_i = 0;
+	zc_enter_streak = 0;
+	zc_exit_streak = 0;
+}
 
 static void zc_ci_push(uint32_t ci)
 {
@@ -48,6 +63,7 @@ static void zc_ci_push(uint32_t ci)
 	}
 }
 
+#if ZC_HANDOFF_QUALITY_ENTER || ZC_HANDOFF_CV_EXIT
 static uint32_t zc_ci_mean(void)
 {
 	uint32_t sum = 0;
@@ -107,45 +123,29 @@ static uint32_t zc_ci_cv_pct(void)
 		return (sigma * 100u) / mean;
 	}
 }
-#endif /* ZC_HANDOFF_QUALITY_ENTER */
-
-void zcHandoffReset(void)
-{
-#if ZC_HANDOFF_QUALITY_ENTER
-	zc_ci_n = 0;
-	zc_ci_i = 0;
-	zc_enter_streak = 0;
 #endif
-}
 
 void zcHandoffNotePollInterval(uint32_t commutation_interval)
 {
-#if ZC_HANDOFF_QUALITY_ENTER
 	if (zero_crosses < 3u) {
 		zcHandoffReset();
 		return;
 	}
 	zc_ci_push(commutation_interval);
-#else
-	(void)commutation_interval;
-#endif
 }
 
 RAM_FUNC void zcHandoffNoteClosedInterval(uint32_t commutation_interval)
 {
-#if ZC_HANDOFF_QUALITY_ENTER
 	zc_ci_push(commutation_interval);
-#else
-	(void)commutation_interval;
-#endif
 }
 
 uint8_t zcHandoffShouldEnterClosedLoop(uint32_t commutation_interval)
 {
 	if (commutation_interval == 0u || commutation_interval > ZC_HANDOFF_CI_ABS_MAX) {
+		zc_enter_streak = 0;
 		return ZC_HANDOFF_ENTER_NONE;
 	}
-	/* Legacy: same as pre-handoff. Once in, stay until CI_ABS_MAX. */
+	/* Legacy enter (pre-handoff). */
 	if (commutation_interval < polling_mode_changeover) {
 		return ZC_HANDOFF_ENTER_LEGACY;
 	}
@@ -154,11 +154,7 @@ uint8_t zcHandoffShouldEnterClosedLoop(uint32_t commutation_interval)
 	{
 		uint32_t cv;
 		uint32_t quality_ci_max = polling_mode_changeover * 2u + ZC_HANDOFF_QUALITY_CI_SLACK;
-		if (commutation_interval > quality_ci_max) {
-			zc_enter_streak = 0;
-			return ZC_HANDOFF_ENTER_NONE;
-		}
-		if (zero_crosses < ZC_HANDOFF_MIN_ZC) {
+		if (commutation_interval > quality_ci_max || zero_crosses < ZC_HANDOFF_MIN_ZC) {
 			zc_enter_streak = 0;
 			return ZC_HANDOFF_ENTER_NONE;
 		}
@@ -174,17 +170,55 @@ uint8_t zcHandoffShouldEnterClosedLoop(uint32_t commutation_interval)
 			return ZC_HANDOFF_ENTER_QUALITY;
 		}
 	}
+#else
+	zc_enter_streak = 0;
 #endif
 	return ZC_HANDOFF_ENTER_NONE;
 }
 
-RAM_FUNC uint8_t zcHandoffShouldExitClosedLoop(uint32_t average_interval)
+/*
+ * Exit for every closed-loop run (no quality_hold asymmetry).
+ * 1) CI_ABS_MAX  2) lagging-CI guard  3) average fast band  4) optional CV
+ */
+RAM_FUNC uint8_t zcHandoffShouldExitClosedLoop(uint32_t average_interval, uint32_t commutation_interval)
 {
-	/*
-	 * Stay in closed-loop until near-stop. Do not exit on changeover+500 or
-	 * CV — those thrash OL↔CL during spool-up (lagging average / accel slope).
-	 */
-	return (uint8_t)(average_interval > ZC_HANDOFF_CI_ABS_MAX);
+	if (average_interval > ZC_HANDOFF_CI_ABS_MAX || commutation_interval > ZC_HANDOFF_CI_ABS_MAX) {
+		zc_exit_streak = ZC_HANDOFF_EXIT_STREAK;
+		return 1;
+	}
+
+	/* Instant CI already fast → avg is stale (spool-up). Hold, no CV. */
+	if (commutation_interval < polling_mode_changeover) {
+		zc_exit_streak = 0;
+		return 0;
+	}
+
+	if (average_interval <= polling_mode_changeover + 500u) {
+		zc_exit_streak = 0;
+		return 0;
+	}
+
+#if ZC_HANDOFF_CV_EXIT
+	if (zc_ci_n < ZC_HANDOFF_MIN_SAMPLES) {
+		zc_exit_streak = 0;
+		return 0;
+	}
+	{
+		uint32_t cv = zc_ci_cv_pct();
+		if (cv <= ZC_HANDOFF_CV_EXIT_PCT) {
+			zc_exit_streak = 0;
+			return 0;
+		}
+	}
+	if (zc_exit_streak < 255u) {
+		zc_exit_streak++;
+	}
+	return (uint8_t)(zc_exit_streak >= ZC_HANDOFF_EXIT_STREAK);
+#else
+	/* Sticky CL through crawl until near-stop (50%→5% stays closed-loop). */
+	zc_exit_streak = 0;
+	return 0;
+#endif
 }
 
 void zcHandoffOnEnter(uint8_t enter_kind)

@@ -1,30 +1,31 @@
 /*
  * zc_handoff.h - open-loop <-> closed-loop handoff
  *
- * Enter (normal path, not stall-protection):
- *   - Legacy: CI < polling_mode_changeover (same as pre-handoff).
- *   - Optional quality early-enter (ZC_HANDOFF_QUALITY_ENTER=1): near-legacy
- *     CI + stable poll CV after enough ZCs — for low-KV crawl; off by default
- *     because sticky CL + premature enter can trap a desynced loop.
+ * Asymmetric hysteresis for the normal (non stall-protection) path:
+ * closed-loop on real ZCs is the best signal; mode transitions are disruptive.
+ * Exit only on positive evidence of failure.
  *
- * Exit: only CI_ABS_MAX (near stop / lost BEMF). Prefer staying in closed-loop
- * once entered — no OL↔CL thrash on changeover+500 or CV. Forced open-loop on
- * stop / stall / reverse / signal loss is outside this module.
+ * Enter: legacy CI < changeover; optional quality early-enter
+ *        (ZC_HANDOFF_QUALITY_ENTER, default 0).
  *
- * Call zcHandoffOnEnter() after enter, zcHandoffOnExit() on drop to poll or
- * forced open-loop.
+ * Exit (every CL run — no enter-kind asymmetry):
+ *   1. CI_ABS_MAX (average or instant CI)
+ *   2. Hold if instant CI < changeover (lagging-average guard)
+ *   3. Hold if average <= changeover+500
+ *   4. Optional CV desync (ZC_HANDOFF_CV_EXIT, default 0) → sticky CL until
+ *      near-stop so 50%→5% does not thrash OL↔CL
+ *
+ * Forced open-loop on stop/stall/reverse/signal-loss is outside this module.
  */
 #ifndef ZC_HANDOFF_H_
 #define ZC_HANDOFF_H_
 
 #include <stdint.h>
 
-/* 0.5 us INTERVAL_TIMER ticks: refuse closed-loop if this slow (near stop). */
 #ifndef ZC_HANDOFF_CI_ABS_MAX
 #	define ZC_HANDOFF_CI_ABS_MAX 12000u
 #endif
 
-/* zcHandoffShouldEnterClosedLoop() return values */
 #define ZC_HANDOFF_ENTER_NONE 0u
 #define ZC_HANDOFF_ENTER_LEGACY 1u
 #define ZC_HANDOFF_ENTER_QUALITY 2u
@@ -37,6 +38,6 @@ void zcHandoffNotePollInterval(uint32_t commutation_interval);
 void zcHandoffNoteClosedInterval(uint32_t commutation_interval);
 
 uint8_t zcHandoffShouldEnterClosedLoop(uint32_t commutation_interval);
-uint8_t zcHandoffShouldExitClosedLoop(uint32_t average_interval);
+uint8_t zcHandoffShouldExitClosedLoop(uint32_t average_interval, uint32_t commutation_interval);
 
 #endif /* ZC_HANDOFF_H_ */
