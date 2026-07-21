@@ -33,7 +33,8 @@ static uint8_t zc_ci_i;
 static uint8_t zc_enter_streak;
 static uint8_t zc_exit_streak;
 /* Non-zero only after a quality (not legacy) enter — enables extended-band hold.
- * Must survive zcHandoffReset() so enter→reset→arm ordering works. */
+ * OnEnter() calls Reset() then sets this; any other Reset() must clear it so a
+ * direct caller cannot inherit a stale hold. */
 static uint8_t zc_quality_hold;
 
 void zcHandoffReset(void)
@@ -42,7 +43,7 @@ void zcHandoffReset(void)
 	zc_ci_i = 0;
 	zc_enter_streak = 0;
 	zc_exit_streak = 0;
-	/* intentionally leave zc_quality_hold: set/cleared by enter/exit paths */
+	zc_quality_hold = 0;
 }
 
 /*
@@ -136,7 +137,6 @@ void zcHandoffNotePollInterval(uint32_t commutation_interval)
 {
 	if (zero_crosses < 3u) {
 		zcHandoffReset();
-		zc_quality_hold = 0;
 		return;
 	}
 	zc_ci_push(commutation_interval);
@@ -195,7 +195,6 @@ RAM_FUNC uint8_t zcHandoffShouldExitClosedLoop(uint32_t average_interval)
 	/* Near-stop / lost BEMF: always drop to poll. */
 	if (average_interval > ZC_HANDOFF_CI_ABS_MAX) {
 		zc_exit_streak = ZC_HANDOFF_EXIT_STREAK;
-		zc_quality_hold = 0;
 		return 1;
 	}
 
@@ -234,21 +233,17 @@ RAM_FUNC uint8_t zcHandoffShouldExitClosedLoop(uint32_t average_interval)
 	if (zc_exit_streak < 255u) {
 		zc_exit_streak++;
 	}
-	if (zc_exit_streak >= ZC_HANDOFF_EXIT_STREAK) {
-		zc_quality_hold = 0;
-		return 1;
-	}
-	return 0;
+	return (uint8_t)(zc_exit_streak >= ZC_HANDOFF_EXIT_STREAK);
 }
 
 void zcHandoffOnEnter(uint8_t enter_kind)
 {
 	zcHandoffReset();
+	/* Arm after Reset so quality hold is never left set by a bare Reset(). */
 	zc_quality_hold = (enter_kind == ZC_HANDOFF_ENTER_QUALITY) ? 1u : 0u;
 }
 
 void zcHandoffOnExit(void)
 {
 	zcHandoffReset();
-	zc_quality_hold = 0;
 }
