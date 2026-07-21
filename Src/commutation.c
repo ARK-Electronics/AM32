@@ -188,4 +188,11 @@ void zcfoundroutine()
 		}
 	}
 #endif
+	if (!old_routine) {
+		// Fresh closed-loop run: a blind-step budget left over from a
+		// previous run must not shorten this one, and a stale deadline
+		// flag must not misread the first scheduled commutation.
+		zc_deadline_armed = 0;
+		zc_blind_steps = 0;
+	}
 }

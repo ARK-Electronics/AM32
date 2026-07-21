@@ -39,10 +39,13 @@ RAM_FUNC void PeriodElapsedCallback()
 			return; // stale deadline after a stop or forced restart
 		}
 		if (zc_blind_steps >= ZC_BLIND_STEP_LIMIT) {
-			// Position unknown for too long: stop stepping blind and let
-			// the INTERVAL_TIMER stall rail / desync machinery restart
-			// through the normal startup path.
+			// Position unknown for too long: stop stepping blind. Kick
+			// the INTERVAL_TIMER past the 45000 stall threshold so the
+			// main-loop rail (faultHandleBemfIntervalStall) restarts
+			// through the startup path on its next pass instead of
+			// 22 ms from now.
 			maskPhaseInterrupts();
+			SET_INTERVAL_TIMER_COUNT(46000);
 			return;
 		}
 		blind = 1;
@@ -60,6 +63,18 @@ RAM_FUNC void PeriodElapsedCallback()
 		lastzctime = thiszctime;
 		thiszctime = (uint16_t)elapsed;
 		SET_INTERVAL_TIMER_COUNT(0);
+	} else {
+		// Cancel race: SET_AND_ENABLE_COM_INT clears the peripheral flag,
+		// but a deadline event that reached NVIC pending just before an
+		// accepted zero-cross cancelled it still runs this handler once.
+		// The genuine commutation fires with INTERVAL_TIMER at ~waitTime
+		// (both reset together at the crossing); far earlier means this
+		// entry is that stale pend - re-arm the remainder and bail.
+		uint32_t t = INTERVAL_TIMER_COUNT;
+		if (t + 4u < waitTime) {
+			SET_AND_ENABLE_COM_INT((uint16_t)(waitTime - t));
+			return;
+		}
 	}
 	commutate();
 	commutation_interval = ((commutation_interval) + ((lastzctime + thiszctime) >> 1)) >> 1;
@@ -72,7 +87,9 @@ RAM_FUNC void PeriodElapsedCallback()
 	if (!old_routine) {
 		enableCompInterrupts(); // enable comp interrupt
 		// Next crossing expected (commutation_interval - waitTime) from
-		// now; arm the blind-step deadline at expected + 50% grace.
+		// now; arm the blind-step deadline at expected + 50% grace. The
+		// 16-bit clamp shrinks the grace above CI ~40000, but the trust
+		// rail restarts long before a healthy loop runs that slow.
 		uint32_t deadline = (commutation_interval - waitTime) + (commutation_interval >> 1);
 		if (deadline > 65535u) {
 			deadline = 65535u;

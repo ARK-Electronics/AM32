@@ -80,18 +80,24 @@ void runtimeProcessDesyncCheck(void)
 	if (desync_check && zero_crosses > 10) {
 		uint8_t desynced = (getAbsDif(last_average_interval, average_interval) > average_interval >> 1) &&
 				   (average_interval < 2000); // throttle resitricted before zc 20.
-		// Interrupt-ZC trust rail: with no runtime fallback to poll mode, a
-		// closed loop tracking artifact edges below usable BEMF (stable
-		// false lock: crossings keep arriving, so neither the blind-step
-		// deadline nor the jump check above can see it) must restart
-		// through the startup ramp instead. Only sustained slow averages
-		// count - a single lagging average during spool-up must not trip
-		// this, and transient dropouts are ridden out by blind steps.
+		// Interrupt-ZC trust rail: with no per-commutation fallback to poll
+		// mode, a closed loop tracking artifact edges below usable BEMF
+		// (stable false lock: crossings keep arriving, so neither the
+		// blind-step deadline nor the jump check above can see it) needs a
+		// way out. Sustained slow averages hand back to the poll path
+		// legacy-style - soft, no desync accounting - so a throttle chop
+		// decelerating through the band behaves exactly as before. A
+		// genuine false lock has a stationary rotor: poll then finds no
+		// real crossings and the INTERVAL_TIMER stall rail escalates to a
+		// full restart on its own. The 4-rev gate keeps the lagging
+		// average during spool-up from tripping this, and transient
+		// dropouts are ridden out by blind steps.
 		if (!old_routine && running) {
 			if (average_interval > polling_mode_changeover + 500) {
 				slow_avg_revs++;
 				if (slow_avg_revs >= 4) {
-					desynced = 1;
+					slow_avg_revs = 0;
+					old_routine = 1;
 				}
 			} else {
 				slow_avg_revs = 0;
