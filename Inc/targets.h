@@ -91,7 +91,7 @@
 #	define NFAULT_PORT GPIOB
 #	define NFAULT_PIN LL_GPIO_PIN_5
 #	define TARGET_MIN_BEMF_COUNTS 3
-	/* Closed-loop when commutation_interval < this (0.5 us ticks). Default
+/* Closed-loop when commutation_interval < this (0.5 us ticks). Default
 	 * F051 fallback is 2000; noprop ~1k RPM has CI~2700 so the ESC stayed
 	 * open-loop (rough low-speed sound). Bench sweep on 900KV noprop:
 	 * T=2000 OL@5%; T=3200 CL@5%; T=5000 also CL@~4% with no demag/jitter
