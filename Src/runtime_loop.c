@@ -77,6 +77,16 @@ void runtimeProcessDesyncCheck(void)
 {
 	static uint8_t slow_avg_revs;
 	average_interval = e_com_time / 3;
+	// Any external zero_crosses reset (stall rail, stop path, bidir
+	// reversal) closes the evaluation gate below with slow_avg_revs
+	// holding a partial count; the leftover would then complete the
+	// trust-rail rev gate on the first evaluation of the NEXT closed-loop
+	// run, against a still-lagging average_interval. zero_crosses climbs
+	// one crossing at a time, so every re-acquisition passes through this
+	// window and clears the counter.
+	if (zero_crosses <= 10) {
+		slow_avg_revs = 0;
+	}
 	if (desync_check && zero_crosses > 10) {
 		uint8_t desynced = (getAbsDif(last_average_interval, average_interval) > average_interval >> 1) &&
 				   (average_interval < 2000); // throttle resitricted before zc 20.
@@ -100,7 +110,7 @@ void runtimeProcessDesyncCheck(void)
 				// after 2 revs instead of 4 when driving hard.
 				if (slow_avg_revs >= ((duty_cycle > 500) ? 2 : 4)) {
 					slow_avg_revs = 0;
-					old_routine = 1;
+					escToOpenLoop();
 				}
 			} else {
 				slow_avg_revs = 0;

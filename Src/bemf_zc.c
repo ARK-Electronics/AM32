@@ -27,6 +27,22 @@
  */
 #define ZC_BLIND_STEP_LIMIT 8 /* consecutive extrapolated steps before the stall rail takes over */
 /*
+ * Miss-RATE rail. zc_blind_steps only counts CONSECUTIVE misses - an
+ * alternating real/missed pattern (the demag signature) resets it on every
+ * accepted crossing and would blind-step indefinitely at ~12.5% interval
+ * inflation per miss, never reaching the step limit, the trust rail (real
+ * crossings keep the average under the changeover band) or the stall rail
+ * (both paths reset INTERVAL_TIMER). Leaky bucket: each blind step adds
+ * ZC_MISS_BUCKET_INC, each accepted crossing drains 1, at
+ * ZC_MISS_BUCKET_LIMIT the handler stops stepping blind and hands the loop
+ * to the stall rail exactly like the consecutive-step limit. Sustained miss
+ * rates above 1-in-4 climb; 8 consecutive misses reach the limit on the
+ * same deadline event as ZC_BLIND_STEP_LIMIT, so the consecutive case is
+ * unchanged. Alternating 50% trips after ~12 misses (~4 electrical revs).
+ */
+#define ZC_MISS_BUCKET_INC 3
+#define ZC_MISS_BUCKET_LIMIT 24
+/*
  * Blind stepping requires an ESTABLISHED closed loop. At the poll->interrupt
  * handoff commutation_interval is whatever the startup noise made of it -
  * bench: noise-shrunk to ~1300 ticks while the true interval of the barely
@@ -65,9 +81,10 @@ RAM_FUNC void PeriodElapsedCallback()
 		// Deadline firing, not a commutation scheduled by an accepted
 		// zero-cross (interruptRoutine cancels the deadline first).
 		zc_deadline_armed = 0;
-		if (zc_blind_steps >= ZC_BLIND_STEP_LIMIT) {
-			// Position unknown for too long: stop stepping blind. Kick
-			// the INTERVAL_TIMER past the 45000 stall threshold so the
+		if (zc_blind_steps >= ZC_BLIND_STEP_LIMIT || zc_miss_bucket >= ZC_MISS_BUCKET_LIMIT) {
+			// Position unknown for too long (consecutively or as a
+			// sustained miss rate): stop stepping blind. Kick the
+			// INTERVAL_TIMER past the 45000 stall threshold so the
 			// main-loop rail (faultHandleBemfIntervalStall) restarts
 			// through the startup path on its next pass instead of
 			// 22 ms from now.
@@ -77,7 +94,8 @@ RAM_FUNC void PeriodElapsedCallback()
 		}
 		blind = 1;
 		zc_blind_steps++;
-		zc_blind_steps_total++;
+		zc_miss_bucket += ZC_MISS_BUCKET_INC;
+		HWCI_PERF_BLIND_STEP();
 		// Take the full elapsed time as the (late) crossing measurement
 		// and commutate now. The inflated interval feeds the average so
 		// timing hunts slower - the safe direction for a decelerating
@@ -130,7 +148,15 @@ RAM_FUNC void PeriodElapsedCallback()
 	if (!blind && zero_crosses < 10000) {
 		zero_crosses++;
 	}
-	HWCI_PERF_ZC();
+	if (!blind) {
+		// Blind steps must not feed the jitter accumulators: the
+		// extrapolated 1.5x interval is not a measured crossing, and the
+		// perf gate (zero_crosses >= 100) is the same window in which
+		// blind stepping is armed - counting them would conflate real
+		// jitter with blind-step count in exactly the runs being read.
+		// Blind steps have their own counter (HWCI_PERF_BLIND_STEP).
+		HWCI_PERF_ZC();
+	}
 }
 
 RAM_FUNC void interruptRoutine()
@@ -253,6 +279,9 @@ RAM_FUNC void interruptRoutine()
 	maskPhaseInterrupts();
 	zc_deadline_armed = 0; // COM_TIMER now times commutation, not the missed-ZC deadline
 	zc_blind_steps = 0;
+	if (zc_miss_bucket) {
+		zc_miss_bucket--; // accepted crossing drains the miss-rate bucket
+	}
 	lastzctime = thiszctime;
 #ifdef MCU_F051
 	thiszctime = (uint16_t)(INTERVAL_TIMER_COUNT - zc_grid_comp);
@@ -268,13 +297,14 @@ RAM_FUNC void interruptRoutine()
 void startMotor()
 {
 	if (running == 0) {
+		DISABLE_COM_TIMER_INT(); // a stale blind-step deadline must not commutate the restart
+		zc_deadline_armed = 0;
+		zc_blind_steps = 0;
+		zc_miss_bucket = 0;
 		commutate();
 		commutation_interval = 10000;
 		SET_INTERVAL_TIMER_COUNT(5000);
 		running = 1;
 	}
-	DISABLE_COM_TIMER_INT(); // a stale blind-step deadline must not commutate the restart
-	zc_deadline_armed = 0;
-	zc_blind_steps = 0;
 	enableCompInterrupts();
 }

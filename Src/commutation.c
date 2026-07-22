@@ -208,5 +208,6 @@ void zcfoundroutine()
 		// flag must not misread the first scheduled commutation.
 		zc_deadline_armed = 0;
 		zc_blind_steps = 0;
+		zc_miss_bucket = 0;
 	}
 }

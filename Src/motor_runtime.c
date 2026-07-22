@@ -50,7 +50,7 @@ volatile uint32_t polling_mode_changeover;
 /* Missed-ZC blind-step fallback (bemf_zc.c) */
 volatile uint8_t zc_deadline_armed = 0;
 volatile uint8_t zc_blind_steps = 0;
-volatile uint32_t zc_blind_steps_total = 0;
+volatile uint8_t zc_miss_bucket = 0;
 volatile uint8_t ramp_divider;
 volatile uint8_t max_ramp_startup = RAMP_SPEED_STARTUP;
 volatile uint8_t max_ramp_low_rpm = RAMP_SPEED_LOW_RPM;

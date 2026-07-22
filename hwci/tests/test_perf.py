@@ -12,7 +12,8 @@ def test_layout_sizes():
     assert perf.SIZE_BY_VERSION[3] == 84
     assert perf.SIZE_BY_VERSION[4] == 148
     assert perf.SIZE_BY_VERSION[5] == 152
-    assert perf.SIZE == perf.SIZE_BY_VERSION[6] == 168
+    assert perf.SIZE_BY_VERSION[6] == 168
+    assert perf.SIZE == perf.SIZE_BY_VERSION[7] == 172
 
 
 def test_host_cmd_offset_matches_layout():
@@ -166,7 +167,7 @@ def test_v6_roundtrip_bdshot_fields():
         "dshot_last_com_us": 420,
         "dshot_telem_mode": 1,
         "dshot_edt_mode": 1,
-    })
+    }, version=6)
     assert len(blob) == 168
     r = perf.decode(blob).raw
     assert r["dshot_rx_good"] == 120000
@@ -175,4 +176,16 @@ def test_v6_roundtrip_bdshot_fields():
     assert r["dshot_last_com_us"] == 420
     assert r["dshot_telem_mode"] == 1
     assert r["dshot_edt_mode"] == 1
+    assert r["esc_state"] == 5
+    assert "zc_blind_steps" not in r
+
+
+def test_v7_roundtrip_blind_steps():
+    blob = perf.encode({
+        "esc_state": 5,
+        "zc_blind_steps": 8,
+    })
+    assert len(blob) == 172
+    r = perf.decode(blob).raw
+    assert r["zc_blind_steps"] == 8
     assert r["esc_state"] == 5
