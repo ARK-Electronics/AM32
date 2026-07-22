@@ -20,7 +20,10 @@ Package layout:
 from __future__ import annotations
 
 from .backends import HwTuneBackend, SimTuneBackend, TuneBackend
-from .minduty import compute_min_duty, sustain_throttle_from_rows
+from .minduty import (compute_min_duty, compute_min_duty_for_idle,
+                      dshot_to_host_throttle, duty_counts_at_dshot,
+                      host_throttle_to_dshot, sustain_dshot_from_rows,
+                      sustain_throttle_from_rows)
 from .objective import check_constraints, objective_score, startup_stats
 from .profiles import (RAMP_TRANSIENT_MAX_CURRENT_A, high_throttle_profile,
                        min_duty_measure_profile, min_duty_verify_profile,
@@ -68,9 +71,13 @@ __all__ = [
     "climb",
     "compute_max_ramp",
     "compute_min_duty",
+    "compute_min_duty_for_idle",
     "drift_factor",
+    "dshot_to_host_throttle",
+    "duty_counts_at_dshot",
     "efficiency_argmax",
     "high_throttle_profile",
+    "host_throttle_to_dshot",
     "load_pilot_card",
     "load_tune_spec",
     "mech_ramp_stats",
@@ -85,6 +92,7 @@ __all__ = [
     "startup_profile",
     "startup_stats",
     "step_profile",
+    "sustain_dshot_from_rows",
     "sustain_throttle_from_rows",
     "tune_spec_from_dict",
     "winner_reason",

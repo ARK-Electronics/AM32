@@ -178,9 +178,11 @@ class RigSimulator:
 
         # Firmware minimum_duty_cycle floors PWM duty when the host is above
         # zero: eeprom unit S maps to S*10 duty counts of 2000 = S/200 as a
-        # host-throttle equivalent (Src/settings.c).
+        # host-throttle equivalent (Src/settings.c). Any positive throttle
+        # must get the floor — DShot idle is thr ≈ (48-48)/1999 ≈ 0 on the
+        # Flight Stand map (tiny epsilon), far below 0.5%.
         eff_throttle = throttle
-        if self.settings is not None and throttle > 0.005:
+        if self.settings is not None and throttle > 0.0:
             floor = self.settings.minimum_duty_cycle / 200.0
             if floor > eff_throttle:
                 eff_throttle = floor
@@ -192,7 +194,7 @@ class RigSimulator:
         # Plant sustain floor: props that need more than the effective duty
         # stall / kick-loop (RPM collapses). Disabled when sustain_throttle
         # is 0 so legacy tests stay bit-identical.
-        if (p.sustain_throttle > 0.0 and throttle > 0.005
+        if (p.sustain_throttle > 0.0 and throttle > 0.0
                 and eff_throttle < p.sustain_throttle):
             target_rpm = 0.0
 

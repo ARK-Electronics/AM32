@@ -145,35 +145,45 @@ def ramp_measure_profile(spec: TuneSpec) -> Profile:
     })
 
 
-def min_duty_measure_profile(spec: TuneSpec) -> Profile:
-    """Descending crawl for the min-duty stage: spin up, step down through
-    fine low-throttle holds, park.
+def _dshot_hold(label: str, dshot: int, duration_s: float,
+                *, steady: bool = True) -> dict:
+    """Steady hold at an absolute DShot setpoint (via host throttle map)."""
+    from .minduty import dshot_to_host_throttle
+    seg = {"label": label, "throttle": dshot_to_host_throttle(dshot),
+           "duration_s": duration_s}
+    if steady:
+        seg["steady"] = True
+    return seg
 
-    Holds sit in the weak-BEMF / aero-sustain band (≈2–8%) that steady
-    efficiency probes never visit. The measure trial programs
-    ``minimum_duty_cycle`` at the field floor so the firmware floor cannot
-    mask the plant's true sustain threshold; analysis then picks the lowest
-    hold that still spins.
+
+def min_duty_measure_profile(spec: TuneSpec) -> Profile:
+    """Descending DShot crawl for min-duty: spin up, step through the idle
+    band (100 → 48), park.
+
+    Programs ``minimum_duty_cycle`` at the field floor so the firmware floor
+    cannot mask the plant; analysis finds the lowest DShot that still spins
+    and maps that duty need onto a floor that sustains at DShot 48.
     """
+    from .minduty import dshot_to_host_throttle
     safety = dict(spec.probe.safety or {})
-    # Crawl is low power; keep the probe's current/thrust caps but do not
-    # invent snap headroom (no snaps here).
-    segs = [
-        {"label": "idle",   "throttle": 0.00, "duration_s": 2.0},
-        {"label": "spinup", "throttle": 0.10, "duration_s": 3.0, "ramp": True},
-        {"label": "t08",    "throttle": 0.08, "duration_s": 3.0, "steady": True},
-        {"label": "t06",    "throttle": 0.06, "duration_s": 3.0, "steady": True},
-        {"label": "t05",    "throttle": 0.05, "duration_s": 3.0, "steady": True},
-        {"label": "t04",    "throttle": 0.04, "duration_s": 3.0, "steady": True},
-        {"label": "t035",   "throttle": 0.035, "duration_s": 3.0, "steady": True},
-        {"label": "t03",    "throttle": 0.03, "duration_s": 3.0, "steady": True},
-        {"label": "t025",   "throttle": 0.025, "duration_s": 3.0, "steady": True},
-        {"label": "t02",    "throttle": 0.02, "duration_s": 3.0, "steady": True},
-        {"label": "rampdn", "throttle": 0.00, "duration_s": 2.0, "ramp": True},
+    # Descending crawl: spin up first, then step down through the idle band.
+    # That tests *sustain* once closed-loop (what min_duty is for). Climbing
+    # from a stop tests *startup* at each DShot and needs the startup_power
+    # boost path — a different (higher) duty requirement.
+    dshots = (140, 120, 100, 80, 70, 65, 60, 55, 52, 50, 48)
+    segs: list[dict] = [
+        {"label": "idle", "throttle": 0.00, "duration_s": 2.0},
+        {"label": "spinup", "throttle": dshot_to_host_throttle(220),
+         "duration_s": 3.0, "ramp": True},
+        _dshot_hold("hold_hi", 180, 2.0),
     ]
+    for d in dshots:
+        segs.append(_dshot_hold(f"d{d}", d, 3.0))
+    segs.append({"label": "rampdn", "throttle": 0.00, "duration_s": 2.0,
+                 "ramp": True})
     return profile_from_dict({
         "name": "tune_min_duty_measure",
-        "description": "inline low-throttle crawl for min-duty measurement "
+        "description": "inline DShot-idle crawl for min-duty measurement "
                        "(auto-tuner)",
         "sample_rate_hz": 100.0,
         "segments": segs,
@@ -182,25 +192,30 @@ def min_duty_measure_profile(spec: TuneSpec) -> Profile:
 
 
 def min_duty_verify_profile(spec: TuneSpec) -> Profile:
-    """Verify a programmed minimum_duty_cycle: spin up, hold at low throttle
-    where a too-low floor would kick-loop, park.
+    """Verify a programmed minimum_duty_cycle at DShot idle.
 
-    With an adequate floor the firmware keeps duty above the plant sustain
-    threshold even when the host commands 2–3%.
+    Spin up, then hold DShot 55 / 50 / 48. With an adequate floor the
+    firmware keeps duty above the plant sustain threshold even at DShot 48
+    (first real throttle step); a too-low floor kick-loops here.
     """
+    from .minduty import dshot_to_host_throttle
     safety = dict(spec.probe.safety or {})
     return profile_from_dict({
         "name": "tune_min_duty_verify",
-        "description": "inline low-throttle sustain check for min-duty "
+        "description": "inline DShot-idle sustain check for min-duty "
                        "(auto-tuner)",
         "sample_rate_hz": 100.0,
         "segments": [
-            {"label": "idle",   "throttle": 0.00, "duration_s": 2.0},
-            {"label": "spinup", "throttle": 0.10, "duration_s": 3.0, "ramp": True},
-            {"label": "t05",    "throttle": 0.05, "duration_s": 4.0, "steady": True},
-            {"label": "t03",    "throttle": 0.03, "duration_s": 4.0, "steady": True},
-            {"label": "t02",    "throttle": 0.02, "duration_s": 4.0, "steady": True},
-            {"label": "rampdn", "throttle": 0.00, "duration_s": 2.0, "ramp": True},
+            {"label": "idle", "throttle": 0.00, "duration_s": 2.0},
+            {"label": "spinup", "throttle": dshot_to_host_throttle(220),
+             "duration_s": 3.0, "ramp": True},
+            _dshot_hold("hold_hi", 120, 2.0),
+            # Step down into idle — sustain, not cold-start at DShot 48.
+            _dshot_hold("d55", 55, 3.5),
+            _dshot_hold("d50", 50, 3.5),
+            _dshot_hold("d48", 48, 4.0),
+            {"label": "rampdn", "throttle": 0.00, "duration_s": 2.0,
+             "ramp": True},
         ],
         "safety": safety or None,
     })

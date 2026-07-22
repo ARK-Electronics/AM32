@@ -21,7 +21,8 @@ from . import report as tunereport
 from . import search as searchmod
 from .backends import TuneBackend
 from .objective import check_constraints, objective_score, startup_stats
-from .minduty import compute_min_duty, sustain_throttle_from_rows
+from .minduty import (compute_min_duty_for_idle, sustain_dshot_from_rows,
+                      sustain_throttle_from_rows)
 from .profiles import (RAMP_TRANSIENT_MAX_CURRENT_A, high_throttle_profile,
                        min_duty_measure_profile, min_duty_verify_profile,
                        probe_profile, ramp_measure_profile, startup_profile,
@@ -271,6 +272,11 @@ class Tuner:
         (trial_dir / "metrics.json").write_text(json.dumps(m, indent=2))
 
         is_startup = plan.profile.name == "tune_startup"
+        # Min-duty crawl/verify holds sit at DShot idle (~few hundred RPM on
+        # a big prop); the "failed start" min_rpm gate is for efficiency
+        # probes, not those profiles.
+        is_min_duty = plan.profile.name in (
+            "tune_min_duty_measure", "tune_min_duty_verify")
         st = (startup_stats(result, plan.profile,
                             self.spec.constraints.startup.min_rpm)
               if is_startup else None)
@@ -279,7 +285,7 @@ class Tuner:
             jitter_reference=self.manifest["jitter_reference"],
             settings_verified=bool(extra.get("settings_verified")),
             startup=st,
-            min_start_rpm=(None if is_startup
+            min_start_rpm=(None if (is_startup or is_min_duty)
                            else self.spec.constraints.startup.min_rpm))
         score = objective_score(m, self.spec.objective) if not fails else None
         summary = m.get("summary", {})
@@ -544,7 +550,7 @@ class Tuner:
             self._run_ramp_measure_stage(stage)
 
     def _run_min_duty_stage(self, stage: StageSpec) -> None:
-        """Crawl-measure minimum_duty_cycle, then verify with upward backoff."""
+        """DShot-idle measure of minimum_duty_cycle, then verify with raise."""
         f = resolve_field("minimum_duty_cycle", None)
         indices: list[int] = []
         # Floor the measure run so the firmware floor cannot hide the plant
@@ -560,54 +566,62 @@ class Tuner:
         # are expected on the bottom rungs.
         rig = getattr(self.backend, "rig", RigConfig())
         pp = int(getattr(rig, "pole_pairs", None) or 7)
-        min_rpm = max(200.0, float(self.spec.constraints.startup.min_rpm) * 0.3)
-        stats = sustain_throttle_from_rows(
+        # Kick/false-lock on this prop sits ~350-450 RPM; real idle sustain
+        # under an adequate floor is typically ≥600-800 RPM. Gate above the
+        # kick band so coast/kick cannot pass as "sustain".
+        min_rpm = max(500.0, float(self.spec.constraints.startup.min_rpm) * 0.5)
+        stats = sustain_dshot_from_rows(
             self._trial_rows(e), min_rpm=min_rpm, pole_pairs=pp)
         computed: Optional[int] = None
         if stats is None:
-            self.log(f"stage {stage.name}: no sustained crawl hold "
+            self.log(f"stage {stage.name}: no sustained DShot hold "
                      f"(min_rpm {min_rpm:.0f}); trying verify search from "
                      f"mid-range minimum_duty_cycle")
             start_v = max(f.lo, (f.lo + f.hi) // 4)
         else:
-            computed = compute_min_duty(
-                stats["sustain_throttle"], lo=f.lo, hi=f.hi,
-                margin=stage.margin)
+            computed = compute_min_duty_for_idle(
+                stats["sustain_dshot"], lo=f.lo, hi=f.hi,
+                margin=stage.margin, measure_eeprom=f.lo)
             self.log(
-                f"stage {stage.name}: sustain @ "
-                f"{stats['sustain_throttle'] * 100:.1f}% throttle "
+                f"stage {stage.name}: sustain @ DShot "
+                f"{stats['sustain_dshot']:.0f} "
                 f"({stats['sustain_segment']}, "
-                f"{stats['sustain_rpm']:.0f} rpm), "
+                f"{stats['sustain_rpm']:.0f} rpm, "
+                f"~{stats['sustain_duty_counts']:.0f}/2000 duty), "
                 f"{stats['failed_holds']}/{stats['holds']} holds failed "
                 f"-> minimum_duty_cycle {computed} "
-                f"(margin {stage.margin})")
+                f"(margin {stage.margin}, targets DShot-48 floor)")
             start_v = computed
 
         def verify_with_backoff(base_ov: dict, start: int) -> Optional[int]:
             v = start
             while True:
-                # Verify also requires the lowest hold of the verify profile
-                # to actually sustain under the programmed floor - not only
-                # "no demag DQ" (a too-low floor can look clean if the host
-                # never sits under the plant threshold long enough).
+                # Verify requires DShot 48/50/55 holds to sustain under the
+                # programmed floor — not only "no demag DQ".
                 ev = self._trial(TrialPlan(
                     stage=stage.name, kind="verify",
                     overrides={**base_ov, "minimum_duty_cycle": v},
                     profile=min_duty_verify_profile(self.spec)))
                 indices.append(ev["index"])
-                vstats = sustain_throttle_from_rows(
+                vstats = sustain_dshot_from_rows(
                     self._trial_rows(ev), min_rpm=min_rpm, pole_pairs=pp)
                 ok = (not ev.get("disqualified")
                       and vstats is not None
-                      and vstats["failed_holds"] == 0)
+                      and vstats["failed_holds"] == 0
+                      and vstats["lowest_dshot"] <= 48.5)
                 if ok:
                     return v
                 nxt = min(f.hi, v + max(1, int(math.ceil(v * 0.25))))
                 if nxt == v:
                     return None
-                why = (ev.get("disqualified")
-                       or f"{vstats['failed_holds'] if vstats else '?'} "
-                          "hold(s) below min_rpm")
+                if ev.get("disqualified"):
+                    why = ev["disqualified"]
+                elif vstats is None:
+                    why = "no sustained holds"
+                else:
+                    why = (f"{vstats['failed_holds']} hold(s) below min_rpm "
+                           f"(lowest sustained DShot "
+                           f"{vstats.get('sustain_dshot', '?')})")
                 self.log(f"stage {stage.name}: verify failed at "
                          f"minimum_duty_cycle {v} ({why}); raising to {nxt}")
                 v = nxt
@@ -619,7 +633,7 @@ class Tuner:
                 "minimum_duty_cycle": winner_val}
         else:
             self.log(f"stage {stage.name}: no minimum_duty_cycle in range "
-                     "passed verify; leaving incumbent unchanged")
+                     "passed DShot-idle verify; leaving incumbent unchanged")
         measured = None
         if stats is not None:
             measured = {
