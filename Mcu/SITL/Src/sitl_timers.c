@@ -169,7 +169,7 @@ void sitl_interval_timer_set(uint32_t cnt)
 void sitl_com_int_arm(uint32_t time)
 {
 	extern void motor_log_event(int kind, uint32_t a, uint32_t b, uint32_t c);
-	motor_log_event(4 /*MEV_ZC_ACCEPT*/, time, 0, 0);
+	motor_log_event(4 /*MEV_COM_ARM*/, time, 0, 0);
 	SITL_TIM_TypeDef *t = &tims[SITL_TIM16_IDX];
 	tim16.base_ns = sitl_time_ns();
 	tim16.cnt_base = 0;
