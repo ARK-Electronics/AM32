@@ -127,10 +127,12 @@ def _steady_efficiency(rig, throttle=0.6, n=400, dt=0.005):
 
 def test_simsettings_decodes_the_same_blob_settings_writes():
     blob = Settings(default_blob()).apply(
-        {"advance_level": 30, "pwm_frequency": 16, "auto_advance": 1}).to_bytes()
+        {"advance_level": 30, "pwm_frequency": 16, "auto_advance": 1,
+         "minimum_duty_cycle": 6}).to_bytes()
     s = SimSettings.from_blob(blob)
     assert (s.advance_level, s.pwm_frequency, s.auto_advance) == (30, 16, 1)
     assert s.max_ramp == 160 and s.startup_power == 100
+    assert s.minimum_duty_cycle == 6
 
 
 def test_efficiency_has_interior_maximum_in_advance():
@@ -193,6 +195,20 @@ def test_low_max_ramp_prevents_step_desync():
         rig.step(0.005, 1.0)  # violent step into a high-current regime
     assert fast.desync_count >= 1
     assert slow.desync_count == 0
+
+
+def test_minimum_duty_cycle_floors_low_throttle_sustain():
+    """Plant needs 3% duty; without min_duty floor, 2% host command stalls.
+    With minimum_duty_cycle=8 (4% floor) the same command sustains."""
+    stalled = _sim_with({"minimum_duty_cycle": 1}, sustain_throttle=0.03)
+    held = _sim_with({"minimum_duty_cycle": 8}, sustain_throttle=0.03)
+    _settle(stalled, 0.10, n=80)
+    _settle(held, 0.10, n=80)
+    for _ in range(120):
+        stalled.step(0.01, 0.02)
+        held.step(0.01, 0.02)
+    assert stalled.rpm < 200.0
+    assert held.rpm > 500.0
 
 
 def test_settings_none_keeps_legacy_behaviour():

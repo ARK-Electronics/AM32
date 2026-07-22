@@ -237,6 +237,7 @@ _CONFIGURATOR_LABELS = {
     "pwm_frequency": "PWM Frequency",
     "variable_pwm": "Variable PWM",
     "max_ramp": "Ramp Speed",
+    "minimum_duty_cycle": "Minimum Duty Cycle",
     "startup_power": "Startup Power",
     "auto_advance": "Auto Timing Advance",
 }
@@ -258,6 +259,10 @@ def _configurator_value(name: str, raw) -> str | None:
         return _VARIABLE_PWM_LABELS.get(raw, str(raw))
     if name == "max_ramp":
         return f"{raw * 0.1:.1f} %/ms"
+    if name == "minimum_duty_cycle":
+        # EEPROM unit * 10 duty counts / 2000 = 0.5% per unit
+        # (Src/settings.c: minimum_duty_cycle = eeprom * 10).
+        return f"{raw * 0.5:.1f}%"
     if name == "startup_power":
         return f"{raw}%"
     if name == "auto_advance":

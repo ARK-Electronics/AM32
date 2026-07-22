@@ -95,6 +95,12 @@ stages:
                               # max_ramp from the physics, verify on the
                               # step-stress profile (0.7x back-off on fail)
     margin: 0.8               # keep 80% of the physics-derived rate
+  - name: min_duty
+    measure: min_duty         # crawl low throttle, find the sustain floor,
+                              # COMPUTE minimum_duty_cycle, verify (raise on
+                              # fail). Prevents DShot-idle kick loops on
+                              # props that need ~3% duty to stay spinning.
+    margin: 1.15              # +15% pack-sag / measurement headroom
 
 finals:
   profile: efficiency_sweep   # full sweep, winner vs default

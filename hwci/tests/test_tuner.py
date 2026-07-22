@@ -645,12 +645,63 @@ def test_measure_stage_spec_validation():
     with pytest.raises(TuneSpecError, match="exactly one"):
         tune_spec_from_dict(small_spec(stages=[
             {"name": "r", "measure": "ramp_rate", "sweep": "max_ramp"}]))
-    with pytest.raises(TuneSpecError, match="ramp_rate"):
+    with pytest.raises(TuneSpecError, match="ramp_rate|min_duty"):
         tune_spec_from_dict(small_spec(stages=[
             {"name": "r", "measure": "bogus"}]))
     with pytest.raises(TuneSpecError, match="margin"):
         tune_spec_from_dict(small_spec(stages=[
             {"name": "r", "measure": "ramp_rate", "margin": 5.0}]))
+    # min_duty is a first-class measure mode
+    spec = tune_spec_from_dict(small_spec(stages=[
+        {"name": "md", "measure": "min_duty", "margin": 1.15}]))
+    assert spec.stages[0].measure == "min_duty"
+
+
+def test_compute_min_duty_math_and_clamping():
+    from hwci.tuner import compute_min_duty, compute_min_duty_for_idle
+    # Deprecated host-throttle form (kept for back-compat).
+    assert compute_min_duty(0.029, lo=1, hi=50, margin=1.0) == 6
+    assert compute_min_duty(0.029, lo=1, hi=50, margin=1.15) == 7
+    assert compute_min_duty(0.0, lo=1, hi=50, margin=1.15) == 1
+    assert compute_min_duty(0.5, lo=1, hi=50, margin=1.0) == 50
+    # Idle-targeted: plant needs duty at DShot 65 with floor=1 (~28 counts
+    # is low); real cliff at DShot 88 (~duty 51) with margin 1.15 → ~6.
+    assert compute_min_duty_for_idle(88, lo=1, hi=50, margin=1.0,
+                                    measure_eeprom=1) == 6
+    assert compute_min_duty_for_idle(88, lo=1, hi=50, margin=1.15,
+                                    measure_eeprom=1) == 6
+    # User observation: cliff ~DShot 55 with higher floor maps to need ~58
+    # counts; targeting DShot 48 with margin → 7.
+    # duty(55, measure_s=5) is not what measure uses; with measure_s=1
+    # duty(55)≈18 → small S. The measure finds the cliff under floor=1.
+    s = compute_min_duty_for_idle(65, lo=1, hi=50, margin=1.15,
+                                 measure_eeprom=1)
+    assert 1 <= s <= 10
+
+
+def test_sustain_dshot_from_rows_picks_lowest_passing_hold():
+    from hwci.tuner import dshot_to_host_throttle, sustain_dshot_from_rows
+    rows = []
+    # (dshot, stand_rpm, e_rpm, current) — d48 coasts (no current / eRPM
+    # collapse) must fail; d55 is the lowest real sustain.
+    for dshot, rpm, e_rpm, cur, n in (
+            (100, 2000, 14000, 0.3, 20),
+            (65, 900, 6300, 0.15, 20),
+            (55, 700, 4900, 0.1, 20),
+            (48, 450, 500, 0.0, 20)):   # coast / false-lock
+        thr = dshot_to_host_throttle(dshot)
+        for i in range(n):
+            rows.append({
+                "segment": f"d{dshot}",
+                "throttle_cmd": thr,
+                "stand_rpm": rpm,
+                "stand_current_a": cur,
+                "perf_e_rpm": e_rpm,
+            })
+    stats = sustain_dshot_from_rows(rows, min_rpm=400.0, pole_pairs=7)
+    assert stats is not None
+    assert stats["sustain_dshot"] == pytest.approx(55, abs=1)
+    assert stats["failed_holds"] == 1
 
 
 def test_e2e_measure_stage_sets_max_ramp(tmp_path):
@@ -672,6 +723,34 @@ def test_e2e_measure_stage_sets_max_ramp(tmp_path):
     assert kinds[0] == "measure" and "verify" in kinds
     if st["winner"] is not None:
         assert m["incumbent"]["max_ramp"] == st["winner"]["max_ramp"]
+
+
+def test_e2e_measure_stage_sets_minimum_duty_cycle(tmp_path):
+    """Plant needs ~3% effective duty; idle-targeted measure should raise
+    the floor so DShot 48 sustains and verify passes."""
+    import json
+    spec_d = small_spec(stages=[
+        {"name": "min_duty", "measure": "min_duty", "margin": 1.15}])
+    # 2% plant need: with floor=1, DShot ≳ 48+0.02*1999 ≈ 88 sustains in sim
+    # (host-throttle model); idle verify requires floor ≥ 4 (S/200).
+    backend = make_backend(demag_prone=False, sustain_throttle=0.02)
+    _, result = run_tune(tmp_path, spec_d, backend)
+    m = json.loads((tmp_path / "tune" / "manifest.json").read_text())
+    st = m["stages"]["min_duty"]
+    assert st["measured"] is not None
+    # Measure finds a cliff above DShot idle; computed floor targets DShot 48.
+    assert st["measured"]["sustain_dshot"] >= 48
+    assert st["computed_minimum_duty_cycle"] is not None
+    from hwci.settings import resolve_field
+    f = resolve_field("minimum_duty_cycle", None)
+    assert f.lo <= st["computed_minimum_duty_cycle"] <= f.hi
+    # Floor must clear plant need at DShot 48 (eeprom units ≥ ~4–6).
+    assert st["computed_minimum_duty_cycle"] >= 4
+    kinds = [t["kind"] for t in m["trials"] if t["stage"] == "min_duty"]
+    assert kinds[0] == "measure" and "verify" in kinds
+    assert st["winner"] is not None
+    assert m["incumbent"]["minimum_duty_cycle"] == st["winner"]["minimum_duty_cycle"]
+    assert st["winner"]["minimum_duty_cycle"] >= st["computed_minimum_duty_cycle"]
 
 
 def test_measure_stage_falls_back_to_direct_search_when_measurement_desyncs(

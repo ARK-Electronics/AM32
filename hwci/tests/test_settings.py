@@ -13,6 +13,7 @@ def test_default_blob_round_trips_known_fields():
     assert s.get("variable_pwm") == 1
     assert s.get("auto_advance") == 0
     assert s.get("max_ramp") == 160
+    assert s.get("minimum_duty_cycle") == 1
     assert s.get("startup_power") == 100
 
 
@@ -49,6 +50,8 @@ def test_bin_round_trip(tmp_path):
     ("auto_advance", 2),
     ("max_ramp", 0),
     ("max_ramp", 256),
+    ("minimum_duty_cycle", 0),
+    ("minimum_duty_cycle", 51),
 ])
 def test_out_of_range_values_are_refused_not_clamped(name, value):
     base = st.Settings(st.default_blob())

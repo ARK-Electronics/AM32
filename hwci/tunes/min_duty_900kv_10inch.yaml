@@ -1,0 +1,60 @@
+# Bench-only: measure minimum_duty_cycle for 900KV + 10x5x3 on 6S.
+# No advance/pwm search — baseline + min_duty measure/verify + short finals.
+# Safety capped well below the 50–70% envelope used for propped stress work.
+name: min-duty-900kv-10inch
+description: >
+  Minimum-duty crawl for HQProp 10x5x3 on JS/generic 900KV (6S). Finds the
+  lowest sustainable throttle and programs minimum_duty_cycle with pack-sag
+  headroom so DShot idle cannot under-power the prop into a kick loop.
+
+battery_cells: 6
+
+pack:
+  min_resting_cell_v: 3.5
+  prompt_on_swap: true
+
+thermal:
+  max_start_fet_temp_c: 70.0
+
+probe:
+  # Low holds only: baseline/finals must not climb into high-current 10" territory.
+  points: {t10: 0.10, t15: 0.15, t20: 0.20}
+  dwell_s: 4.0
+  safety:
+    max_current_a: 20.0
+    max_thrust_n: 25.0
+    max_rpm: 8000
+
+objective:
+  weights: {t10: 1.0, t15: 1.0, t20: 1.0}
+  min_power_w: 5.0          # 10–20% on a 10" still has real power
+  noise_floor_pct: 2.0
+
+constraints:
+  max_demag_events: 0
+  max_bemf_timeout_samples: 0
+  jitter_max_regression_pct: 50.0   # measure-focused; do not over-gate on jitter
+  max_fet_temp_c: 90.0
+  max_motor_temp_c: 95.0
+  startup:
+    cycles: 3
+    max_failed: 0
+    spin_throttle: 0.12
+    min_rpm: 800
+
+anchors_every: 99             # single stage; no coordinate search anchors needed
+
+parameters: {}
+
+stages:
+  - name: min_duty
+    measure: min_duty
+    margin: 1.15              # +15% headroom for pack sag (PR41 crawl lesson)
+
+finals:
+  profile: tune_probe         # rebuilt from probe.points above
+  pattern: ABBA
+  repeats: 1
+  extra_repeats_if_close: 0
+  min_delta_pct: 1.0          # min_duty is not an efficiency win; expect unconfirmed
+  startup_check: true

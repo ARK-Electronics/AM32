@@ -34,6 +34,7 @@ class SimSettings:
     auto_advance: int = 0
     startup_power: int = 100
     max_ramp: int = 160
+    minimum_duty_cycle: int = 1
 
     @classmethod
     def from_blob(cls, blob: bytes) -> "SimSettings":
@@ -43,7 +44,8 @@ class SimSettings:
                    variable_pwm=s.get("variable_pwm"),
                    auto_advance=s.get("auto_advance"),
                    startup_power=s.get("startup_power"),
-                   max_ramp=s.get("max_ramp"))
+                   max_ramp=s.get("max_ramp"),
+                   minimum_duty_cycle=s.get("minimum_duty_cycle"))
 
 
 @dataclass
@@ -83,6 +85,11 @@ class MotorParams:
     # (clipped to [0, 0.9]): 50 -> 0.5, 100 -> ~0.12, 150 -> 0.
     startup_fail_ref: float = 115.0
     startup_fail_scale: float = 130.0
+    # Lowest host-throttle fraction at which the plant can sustain rotation
+    # (prop aero / friction). 0 disables the model (legacy). The firmware's
+    # minimum_duty_cycle (eeprom units / 200 ≈ duty fraction) floors the
+    # effective throttle when the host commands below it - see step().
+    sustain_throttle: float = 0.0
 
 
 @dataclass
@@ -169,9 +176,27 @@ class RigSimulator:
         throttle = max(0.0, min(1.0, throttle))
         cmd_jump = throttle - self._prev_cmd
 
+        # Firmware minimum_duty_cycle floors PWM duty when the host is above
+        # zero: eeprom unit S maps to S*10 duty counts of 2000 = S/200 as a
+        # host-throttle equivalent (Src/settings.c). Any positive throttle
+        # must get the floor — DShot idle is thr ≈ (48-48)/1999 ≈ 0 on the
+        # Flight Stand map (tiny epsilon), far below 0.5%.
+        eff_throttle = throttle
+        if self.settings is not None and throttle > 0.0:
+            floor = self.settings.minimum_duty_cycle / 200.0
+            if floor > eff_throttle:
+                eff_throttle = floor
+
         # Detect a demag/desync trigger: a big, fast throttle increase into a
         # high-current regime on a demag-prone motor.
-        target_rpm = throttle * self._rpm_max()
+        target_rpm = eff_throttle * self._rpm_max()
+
+        # Plant sustain floor: props that need more than the effective duty
+        # stall / kick-loop (RPM collapses). Disabled when sustain_throttle
+        # is 0 so legacy tests stay bit-identical.
+        if (p.sustain_throttle > 0.0 and throttle > 0.0
+                and eff_throttle < p.sustain_throttle):
+            target_rpm = 0.0
 
         # Startup reliability model (settings runs only): each stopped->spin
         # transition is a start attempt that fails with a probability set by
