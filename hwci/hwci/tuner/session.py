@@ -21,7 +21,9 @@ from . import report as tunereport
 from . import search as searchmod
 from .backends import TuneBackend
 from .objective import check_constraints, objective_score, startup_stats
+from .minduty import compute_min_duty, sustain_throttle_from_rows
 from .profiles import (RAMP_TRANSIENT_MAX_CURRENT_A, high_throttle_profile,
+                       min_duty_measure_profile, min_duty_verify_profile,
                        probe_profile, ramp_measure_profile, startup_profile,
                        step_profile)
 from .ramp import compute_max_ramp, mech_ramp_stats
@@ -536,6 +538,107 @@ class Tuner:
         return out
 
     def _run_measure_stage(self, stage: StageSpec) -> None:
+        if stage.measure == "min_duty":
+            self._run_min_duty_stage(stage)
+        else:
+            self._run_ramp_measure_stage(stage)
+
+    def _run_min_duty_stage(self, stage: StageSpec) -> None:
+        """Crawl-measure minimum_duty_cycle, then verify with upward backoff."""
+        f = resolve_field("minimum_duty_cycle", None)
+        indices: list[int] = []
+        # Floor the measure run so the firmware floor cannot hide the plant
+        # sustain threshold (eeprom unit 1 = 0.5% duty).
+        measure_ov = self._merged(stage, {"minimum_duty_cycle": f.lo})
+        e = self._trial(TrialPlan(
+            stage=stage.name, kind="measure",
+            overrides=measure_ov,
+            profile=min_duty_measure_profile(self.spec)))
+        indices.append(e["index"])
+        # Analyse samples even if low holds tripped demag/bemf constraints:
+        # the crawl's job is to find where sustain ends, and those failures
+        # are expected on the bottom rungs.
+        rig = getattr(self.backend, "rig", RigConfig())
+        pp = int(getattr(rig, "pole_pairs", None) or 7)
+        min_rpm = max(200.0, float(self.spec.constraints.startup.min_rpm) * 0.3)
+        stats = sustain_throttle_from_rows(
+            self._trial_rows(e), min_rpm=min_rpm, pole_pairs=pp)
+        computed: Optional[int] = None
+        if stats is None:
+            self.log(f"stage {stage.name}: no sustained crawl hold "
+                     f"(min_rpm {min_rpm:.0f}); trying verify search from "
+                     f"mid-range minimum_duty_cycle")
+            start_v = max(f.lo, (f.lo + f.hi) // 4)
+        else:
+            computed = compute_min_duty(
+                stats["sustain_throttle"], lo=f.lo, hi=f.hi,
+                margin=stage.margin)
+            self.log(
+                f"stage {stage.name}: sustain @ "
+                f"{stats['sustain_throttle'] * 100:.1f}% throttle "
+                f"({stats['sustain_segment']}, "
+                f"{stats['sustain_rpm']:.0f} rpm), "
+                f"{stats['failed_holds']}/{stats['holds']} holds failed "
+                f"-> minimum_duty_cycle {computed} "
+                f"(margin {stage.margin})")
+            start_v = computed
+
+        def verify_with_backoff(base_ov: dict, start: int) -> Optional[int]:
+            v = start
+            while True:
+                # Verify also requires the lowest hold of the verify profile
+                # to actually sustain under the programmed floor - not only
+                # "no demag DQ" (a too-low floor can look clean if the host
+                # never sits under the plant threshold long enough).
+                ev = self._trial(TrialPlan(
+                    stage=stage.name, kind="verify",
+                    overrides={**base_ov, "minimum_duty_cycle": v},
+                    profile=min_duty_verify_profile(self.spec)))
+                indices.append(ev["index"])
+                vstats = sustain_throttle_from_rows(
+                    self._trial_rows(ev), min_rpm=min_rpm, pole_pairs=pp)
+                ok = (not ev.get("disqualified")
+                      and vstats is not None
+                      and vstats["failed_holds"] == 0)
+                if ok:
+                    return v
+                nxt = min(f.hi, v + max(1, int(math.ceil(v * 0.25))))
+                if nxt == v:
+                    return None
+                why = (ev.get("disqualified")
+                       or f"{vstats['failed_holds'] if vstats else '?'} "
+                          "hold(s) below min_rpm")
+                self.log(f"stage {stage.name}: verify failed at "
+                         f"minimum_duty_cycle {v} ({why}); raising to {nxt}")
+                v = nxt
+
+        winner_val = verify_with_backoff(self._merged(stage, {}), start_v)
+        if winner_val is not None:
+            self.manifest["incumbent"] = {
+                **self.incumbent, **stage.fixed,
+                "minimum_duty_cycle": winner_val}
+        else:
+            self.log(f"stage {stage.name}: no minimum_duty_cycle in range "
+                     "passed verify; leaving incumbent unchanged")
+        measured = None
+        if stats is not None:
+            measured = {
+                k: (round(v, 4) if isinstance(v, float) else v)
+                for k, v in stats.items()
+            }
+        self.manifest["stages"][stage.name] = {
+            "winner": (None if winner_val is None
+                       else {"minimum_duty_cycle": winner_val}),
+            "winner_score": None,
+            "measured": measured,
+            "computed_minimum_duty_cycle": computed,
+            "trials": indices,
+        }
+        self._save()
+        self.log(f"stage {stage.name}: winner "
+                 f"{None if winner_val is None else {'minimum_duty_cycle': winner_val}}")
+
+    def _run_ramp_measure_stage(self, stage: StageSpec) -> None:
         """Physics-based max_ramp: measure, compute, verify with backoff,
         fall back to lower-ranked advance values if needed."""
         f = resolve_field("max_ramp", None)

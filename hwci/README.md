@@ -202,16 +202,17 @@ staircase, the primary baseline), `demag_step_stress` (aggressive steps).
 
 Given a motor/prop on the rig, `hwci tune` automatically searches the AM32
 EEPROM settings (`advance_level`, `pwm_frequency`, `variable_pwm`,
-`auto_advance`, `max_ramp`, …) for the combination that maximizes efficiency
-(g/W), subject to hard constraints: no demag/desync/bemf timeouts, zero-cross
-jitter not regressed vs the default settings, temperatures bounded, and
-reliable startup. **No rebuild per trial**: AM32 reads its 192-byte EEprom
-page once at boot, so each trial one-shot-flashes the page over SWD (+ reset)
-and runs a ~28 s probe. The live page address is read from the firmware's
-`eeprom_address` global (the bootloader can relocate it) and the field
-offsets are cross-checked against the flashed ELF's DWARF before anything is
-written. Trial blobs are seeded from the device's current page and mutate
-only the tuned bytes, so version/identity bytes and rig calibration survive.
+`auto_advance`, `max_ramp`, `minimum_duty_cycle`, …) for the combination that
+maximizes efficiency (g/W), subject to hard constraints: no demag/desync/bemf
+timeouts, zero-cross jitter not regressed vs the default settings,
+temperatures bounded, and reliable startup. **No rebuild per trial**: AM32
+reads its 192-byte EEprom page once at boot, so each trial one-shot-flashes
+the page over SWD (+ reset) and runs a ~28 s probe. The live page address is
+read from the firmware's `eeprom_address` global (the bootloader can relocate
+it) and the field offsets are cross-checked against the flashed ELF's DWARF
+before anything is written. Trial blobs are seeded from the device's current
+page and mutate only the tuned bytes, so version/identity bytes and rig
+calibration survive.
 
 ```bash
 hwci tune --spec tunes/example.yaml --config rig.yaml --battery-cells 4 \
@@ -230,7 +231,11 @@ steady probe points (points under `min_power_w` are bench noise and never
 score); `constraints:` are hard disqualifiers, never traded against score. A
 `constraint_only: true` sweep (e.g. `max_ramp` on the step-stress profile)
 tries values in listed order and picks the first with zero failures — list
-them best-first.
+them best-first. Measure stages derive settings from physics rather than
+scoring g/W: `measure: ramp_rate` sets `max_ramp` from the powertrain step
+response; `measure: min_duty` crawls low throttle, finds the sustain floor,
+and programs `minimum_duty_cycle` (with `margin` as pack-sag headroom,
+typically 1.15) so DShot-idle commands cannot under-power a heavy prop.
 
 **Noise handling**: same-firmware g/W spread reaches ~10 % on the bench and
 the pack sags within a session, so the incumbent is re-run every

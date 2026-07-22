@@ -101,8 +101,14 @@ class StageSpec:
     # "ramp_rate": measure the powertrain (mech time constant + transient
     # current per % of duty lead) with one instrumented step run, COMPUTE
     # max_ramp from the physics, then verify it on the step-stress profile.
+    # "min_duty": crawl down throttle, find the lowest sustained hold,
+    # COMPUTE minimum_duty_cycle (eeprom units) with pack-sag headroom,
+    # then verify on a low-throttle sustain profile.
     measure: str | None = None
-    margin: float = 0.8       # fraction of the physics-derived rate to keep
+    # ramp_rate: fraction of the physics-derived rate to keep (typically <1).
+    # min_duty: headroom multiplier on the measured sustain threshold
+    # (typically >1, e.g. 1.15 for pack sag).
+    margin: float = 0.8
     # Restrict a sweep to values within ±polish_radius (setting units) of
     # the current incumbent - used for a cheap post-modes advance re-climb.
     polish_radius: int | None = None
@@ -250,10 +256,10 @@ def tune_spec_from_dict(data: dict) -> TuneSpec:
             raise TuneSpecError(
                 f"tune spec: stage {s.name!r} needs exactly one of "
                 "'sweep', 'ab_candidates' or 'measure'")
-        if s.measure is not None and s.measure != "ramp_rate":
+        if s.measure is not None and s.measure not in ("ramp_rate", "min_duty"):
             raise TuneSpecError(
                 f"tune spec: stage {s.name!r} measure {s.measure!r} is not "
-                "'ramp_rate'")
+                "'ramp_rate' or 'min_duty'")
         if s.measure and s.constraint_only:
             raise TuneSpecError(
                 f"tune spec: stage {s.name!r}: 'measure' and "

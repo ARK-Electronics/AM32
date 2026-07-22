@@ -31,9 +31,12 @@ def test_minimal_spec_gets_documented_defaults():
 def test_example_spec_loads():
     spec = load_tune_spec(REPO_ROOT / "hwci" / "tunes" / "example.yaml")
     assert {s.name for s in spec.stages} == {
-        "advance", "pwm", "modes", "advance_polish", "ramp"}
+        "advance", "pwm", "modes", "advance_polish", "ramp", "min_duty"}
     assert spec.parameters["advance_level"].refine_step == 2
     assert next(s for s in spec.stages if s.name == "ramp").measure == "ramp_rate"
+    md = next(s for s in spec.stages if s.name == "min_duty")
+    assert md.measure == "min_duty"
+    assert md.margin == 1.15
     polish = next(s for s in spec.stages if s.name == "advance_polish")
     assert polish.polish_radius == 4
     assert spec.finals.min_delta_pct == 1.0

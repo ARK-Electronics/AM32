@@ -145,6 +145,67 @@ def ramp_measure_profile(spec: TuneSpec) -> Profile:
     })
 
 
+def min_duty_measure_profile(spec: TuneSpec) -> Profile:
+    """Descending crawl for the min-duty stage: spin up, step down through
+    fine low-throttle holds, park.
+
+    Holds sit in the weak-BEMF / aero-sustain band (≈2–8%) that steady
+    efficiency probes never visit. The measure trial programs
+    ``minimum_duty_cycle`` at the field floor so the firmware floor cannot
+    mask the plant's true sustain threshold; analysis then picks the lowest
+    hold that still spins.
+    """
+    safety = dict(spec.probe.safety or {})
+    # Crawl is low power; keep the probe's current/thrust caps but do not
+    # invent snap headroom (no snaps here).
+    segs = [
+        {"label": "idle",   "throttle": 0.00, "duration_s": 2.0},
+        {"label": "spinup", "throttle": 0.10, "duration_s": 3.0, "ramp": True},
+        {"label": "t08",    "throttle": 0.08, "duration_s": 3.0, "steady": True},
+        {"label": "t06",    "throttle": 0.06, "duration_s": 3.0, "steady": True},
+        {"label": "t05",    "throttle": 0.05, "duration_s": 3.0, "steady": True},
+        {"label": "t04",    "throttle": 0.04, "duration_s": 3.0, "steady": True},
+        {"label": "t035",   "throttle": 0.035, "duration_s": 3.0, "steady": True},
+        {"label": "t03",    "throttle": 0.03, "duration_s": 3.0, "steady": True},
+        {"label": "t025",   "throttle": 0.025, "duration_s": 3.0, "steady": True},
+        {"label": "t02",    "throttle": 0.02, "duration_s": 3.0, "steady": True},
+        {"label": "rampdn", "throttle": 0.00, "duration_s": 2.0, "ramp": True},
+    ]
+    return profile_from_dict({
+        "name": "tune_min_duty_measure",
+        "description": "inline low-throttle crawl for min-duty measurement "
+                       "(auto-tuner)",
+        "sample_rate_hz": 100.0,
+        "segments": segs,
+        "safety": safety or None,
+    })
+
+
+def min_duty_verify_profile(spec: TuneSpec) -> Profile:
+    """Verify a programmed minimum_duty_cycle: spin up, hold at low throttle
+    where a too-low floor would kick-loop, park.
+
+    With an adequate floor the firmware keeps duty above the plant sustain
+    threshold even when the host commands 2–3%.
+    """
+    safety = dict(spec.probe.safety or {})
+    return profile_from_dict({
+        "name": "tune_min_duty_verify",
+        "description": "inline low-throttle sustain check for min-duty "
+                       "(auto-tuner)",
+        "sample_rate_hz": 100.0,
+        "segments": [
+            {"label": "idle",   "throttle": 0.00, "duration_s": 2.0},
+            {"label": "spinup", "throttle": 0.10, "duration_s": 3.0, "ramp": True},
+            {"label": "t05",    "throttle": 0.05, "duration_s": 4.0, "steady": True},
+            {"label": "t03",    "throttle": 0.03, "duration_s": 4.0, "steady": True},
+            {"label": "t02",    "throttle": 0.02, "duration_s": 4.0, "steady": True},
+            {"label": "rampdn", "throttle": 0.00, "duration_s": 2.0, "ramp": True},
+        ],
+        "safety": safety or None,
+    })
+
+
 def high_throttle_profile(spec: TuneSpec, throttle: float,
                           dwell_s: float) -> Profile:
     """Constraint-only hold through a known desync band (e.g. t70).

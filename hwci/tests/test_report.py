@@ -182,6 +182,13 @@ def test_configurator_value_max_ramp_is_direct_percent_per_ms():
     assert report._configurator_value("max_ramp", 1) == "0.1 %/ms"
 
 
+def test_configurator_value_minimum_duty_cycle_is_half_percent_units():
+    # EEPROM unit * 10 duty counts / 2000 = 0.5% per unit.
+    assert report._configurator_value("minimum_duty_cycle", 1) == "0.5%"
+    assert report._configurator_value("minimum_duty_cycle", 6) == "3.0%"
+    assert report._configurator_value("minimum_duty_cycle", 50) == "25.0%"
+
+
 def test_configurator_value_startup_power_is_direct_percent():
     assert report._configurator_value("startup_power", 100) == "100%"
 

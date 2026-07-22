@@ -72,6 +72,10 @@ class Field:
 EEPROM_FIELDS: dict[str, Field] = {f.name: f for f in [
     Field("max_ramp", 5, 1, 255,
           "throttle ramp limit, 0.1%/ms steps up to 25%/ms (default 160)"),
+    # loadEEpromSettings: 1..50 accepted (value*10 duty counts of 2000);
+    # 0 or >=51 fall back to zero floor (firmware default path).
+    Field("minimum_duty_cycle", 6, 1, 50,
+          "min PWM duty floor, eeprom units of 0.5% (1=0.5% .. 50=25%)"),
     Field("variable_pwm", 21, 0, 2,
           "0=fixed PWM, 1=RPM-scaled within pwm_frequency range, 2=auto range"),
     Field("advance_level", 23, 10, 42,

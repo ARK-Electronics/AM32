@@ -1,16 +1,18 @@
 """Auto settings tuner: find the best AM32 EEPROM settings for a motor/prop.
 
 Given a motor/prop on the rig, ``hwci tune`` searches the AM32 settings space
-(advance_level, pwm_frequency, variable_pwm, auto_advance, max_ramp, ...) for
-the combination that maximizes efficiency (g/W) subject to hard constraints.
+(advance_level, pwm_frequency, variable_pwm, auto_advance, max_ramp,
+minimum_duty_cycle, ...) for the combination that maximizes efficiency (g/W)
+subject to hard constraints.
 
 Package layout:
 
 * :mod:`hwci.tuner.spec` -- strict YAML schema
-* :mod:`hwci.tuner.profiles` -- probe / startup / step / ramp profiles
+* :mod:`hwci.tuner.profiles` -- probe / startup / step / ramp / min-duty profiles
 * :mod:`hwci.tuner.objective` -- scoring and constraint checks
 * :mod:`hwci.tuner.search` -- climb, normalize, pick_winner
 * :mod:`hwci.tuner.ramp` -- mech step-response max_ramp physics
+* :mod:`hwci.tuner.minduty` -- low-throttle crawl → minimum_duty_cycle
 * :mod:`hwci.tuner.backends` -- sim and hardware trial backends
 * :mod:`hwci.tuner.session` -- Tuner session, resume, stages, finals
 * :mod:`hwci.tuner.report` -- markdown report builders
@@ -18,8 +20,10 @@ Package layout:
 from __future__ import annotations
 
 from .backends import HwTuneBackend, SimTuneBackend, TuneBackend
+from .minduty import compute_min_duty, sustain_throttle_from_rows
 from .objective import check_constraints, objective_score, startup_stats
 from .profiles import (RAMP_TRANSIENT_MAX_CURRENT_A, high_throttle_profile,
+                       min_duty_measure_profile, min_duty_verify_profile,
                        probe_profile, ramp_measure_profile, startup_profile,
                        step_profile)
 from .ramp import compute_max_ramp, mech_ramp_stats
@@ -63,12 +67,15 @@ __all__ = [
     "check_constraints",
     "climb",
     "compute_max_ramp",
+    "compute_min_duty",
     "drift_factor",
     "efficiency_argmax",
     "high_throttle_profile",
     "load_pilot_card",
     "load_tune_spec",
     "mech_ramp_stats",
+    "min_duty_measure_profile",
+    "min_duty_verify_profile",
     "normalize",
     "objective_score",
     "pick_winner",
@@ -78,6 +85,7 @@ __all__ = [
     "startup_profile",
     "startup_stats",
     "step_profile",
+    "sustain_throttle_from_rows",
     "tune_spec_from_dict",
     "winner_reason",
     "write_pilot_card",
