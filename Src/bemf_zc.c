@@ -16,9 +16,111 @@
 #include "eeprom.h"
 #include "hwci_perf.h"
 
+/*
+ * Missed-ZC fallback (BLHeli-style timeout commutation). After each
+ * commutation COM_TIMER is re-armed as a deadline for the next crossing:
+ * expected arrival plus 50% grace. An accepted crossing re-arms COM_TIMER
+ * for the commutation schedule (cancelling the deadline); if the deadline
+ * fires instead, commutate blind at extrapolated timing and keep watching.
+ * A missed crossing costs one extrapolated step, not a mode change - there
+ * is no fallback to poll mode at runtime.
+ */
+#define ZC_BLIND_STEP_LIMIT 8 /* consecutive extrapolated steps before the stall rail takes over */
+/*
+ * Miss-RATE rail. zc_blind_steps only counts CONSECUTIVE misses - an
+ * alternating real/missed pattern (the demag signature) resets it on every
+ * accepted crossing and would blind-step indefinitely at ~12.5% interval
+ * inflation per miss, never reaching the step limit, the trust rail (real
+ * crossings keep the average under the changeover band) or the stall rail
+ * (both paths reset INTERVAL_TIMER). Leaky bucket: each blind step adds
+ * ZC_MISS_BUCKET_INC, each accepted crossing drains 1, at
+ * ZC_MISS_BUCKET_LIMIT the handler stops stepping blind and hands the loop
+ * to the stall rail exactly like the consecutive-step limit. Sustained miss
+ * rates above 1-in-4 climb; 8 consecutive misses reach the limit on the
+ * same deadline event as ZC_BLIND_STEP_LIMIT, so the consecutive case is
+ * unchanged. Alternating 50% trips after ~12 misses (~4 electrical revs).
+ */
+#define ZC_MISS_BUCKET_INC 3
+#define ZC_MISS_BUCKET_LIMIT 24
+/*
+ * Blind stepping requires an ESTABLISHED closed loop. At the poll->interrupt
+ * handoff commutation_interval is whatever the startup noise made of it -
+ * bench: noise-shrunk to ~1300 ticks while the true interval of the barely
+ * moving rotor is 5-10x longer - so a deadline at 1.5x the believed interval
+ * fires BEFORE the first real crossing can arrive, commutates blind, and
+ * drags the stator field away from the rotor. The result is a stable false
+ * lock: noise bursts get accepted as crossings, blind steps bridge the gaps
+ * between bursts (bench: ~40% of commutations blind, phantom ~15k eRPM,
+ * rotor stalled at 3 A), and the stall rail almost never fires because every
+ * blind step resets INTERVAL_TIMER. Below this zero-cross count the handler
+ * keeps legacy semantics (commutate once per accepted crossing, no re-arm):
+ * a noise chain then dies at the 45000-tick stall rail and the poll path
+ * kick-steps the rotor exactly as ark-release does. 100 matches the startup
+ * self-heal window in commutate() and the "stable running" gates elsewhere;
+ * zero_crosses resets on desync/stop, so every re-acquisition passes through
+ * the legacy path again before blind stepping re-arms.
+ */
+#define ZC_DEADLINE_MIN_ZC 100
+
 RAM_FUNC void PeriodElapsedCallback()
 {
+	uint8_t blind = 0;
 	DISABLE_COM_TIMER_INT(); // disable interrupt
+	if (!running || old_routine) {
+		// COM events are meaningless outside interrupt closed-loop: a
+		// stale blind-step deadline after a stop or forced restart, or a
+		// poll-mode COM_TIMER ARR write landing while the deadline's
+		// interrupt enable was still set. Legacy never ran this handler
+		// in poll mode (the enable stayed off); keep that invariant, or
+		// the cancel-race guard below re-arms COM against the poll
+		// startup and spurious commutations fight zcfoundroutine.
+		zc_deadline_armed = 0;
+		return;
+	}
+	if (zc_deadline_armed) {
+		// Deadline firing, not a commutation scheduled by an accepted
+		// zero-cross (interruptRoutine cancels the deadline first).
+		zc_deadline_armed = 0;
+		if (zc_blind_steps >= ZC_BLIND_STEP_LIMIT || zc_miss_bucket >= ZC_MISS_BUCKET_LIMIT) {
+			// Position unknown for too long (consecutively or as a
+			// sustained miss rate): stop stepping blind. Kick the
+			// INTERVAL_TIMER past the 45000 stall threshold so the
+			// main-loop rail (faultHandleBemfIntervalStall) restarts
+			// through the startup path on its next pass instead of
+			// 22 ms from now.
+			maskPhaseInterrupts();
+			SET_INTERVAL_TIMER_COUNT(46000);
+			return;
+		}
+		blind = 1;
+		zc_blind_steps++;
+		zc_miss_bucket += ZC_MISS_BUCKET_INC;
+		HWCI_PERF_BLIND_STEP();
+		// Take the full elapsed time as the (late) crossing measurement
+		// and commutate now. The inflated interval feeds the average so
+		// timing hunts slower - the safe direction for a decelerating
+		// rotor - and the next accepted crossing resyncs immediately.
+		maskPhaseInterrupts();
+		uint32_t elapsed = INTERVAL_TIMER_COUNT;
+		if (elapsed > 65535u) {
+			elapsed = 65535u;
+		}
+		lastzctime = thiszctime;
+		thiszctime = (uint16_t)elapsed;
+		SET_INTERVAL_TIMER_COUNT(0);
+	} else {
+		// Cancel race: SET_AND_ENABLE_COM_INT clears the peripheral flag,
+		// but a deadline event that reached NVIC pending just before an
+		// accepted zero-cross cancelled it still runs this handler once.
+		// The genuine commutation fires with INTERVAL_TIMER at ~waitTime
+		// (both reset together at the crossing); far earlier means this
+		// entry is that stale pend - re-arm the remainder and bail.
+		uint32_t t = INTERVAL_TIMER_COUNT;
+		if (t + 4u < waitTime) {
+			SET_AND_ENABLE_COM_INT((uint16_t)(waitTime - t));
+			return;
+		}
+	}
 	commutate();
 	commutation_interval = ((commutation_interval) + ((lastzctime + thiszctime) >> 1)) >> 1;
 	if (!eepromBuffer.auto_advance) {
@@ -29,11 +131,32 @@ RAM_FUNC void PeriodElapsedCallback()
 	waitTime = (commutation_interval >> 1) - advance;
 	if (!old_routine) {
 		enableCompInterrupts(); // enable comp interrupt
+		if (zero_crosses >= ZC_DEADLINE_MIN_ZC) {
+			// Next crossing expected (commutation_interval - waitTime)
+			// from now; arm the blind-step deadline at expected + 50%
+			// grace. The 16-bit clamp shrinks the grace above CI ~40000,
+			// but the trust rail restarts long before a healthy loop
+			// runs that slow.
+			uint32_t deadline = (commutation_interval - waitTime) + (commutation_interval >> 1);
+			if (deadline > 65535u) {
+				deadline = 65535u;
+			}
+			zc_deadline_armed = 1;
+			SET_AND_ENABLE_COM_INT((uint16_t)deadline);
+		}
 	}
-	if (zero_crosses < 10000) {
+	if (!blind && zero_crosses < 10000) {
 		zero_crosses++;
 	}
-	HWCI_PERF_ZC();
+	if (!blind) {
+		// Blind steps must not feed the jitter accumulators: the
+		// extrapolated 1.5x interval is not a measured crossing, and the
+		// perf gate (zero_crosses >= 100) is the same window in which
+		// blind stepping is armed - counting them would conflate real
+		// jitter with blind-step count in exactly the runs being read.
+		// Blind steps have their own counter (HWCI_PERF_BLIND_STEP).
+		HWCI_PERF_ZC();
+	}
 }
 
 RAM_FUNC void interruptRoutine()
@@ -154,6 +277,11 @@ RAM_FUNC void interruptRoutine()
 #endif
 	__disable_irq();
 	maskPhaseInterrupts();
+	zc_deadline_armed = 0; // COM_TIMER now times commutation, not the missed-ZC deadline
+	zc_blind_steps = 0;
+	if (zc_miss_bucket) {
+		zc_miss_bucket--; // accepted crossing drains the miss-rate bucket
+	}
 	lastzctime = thiszctime;
 #ifdef MCU_F051
 	thiszctime = (uint16_t)(INTERVAL_TIMER_COUNT - zc_grid_comp);
@@ -169,6 +297,10 @@ RAM_FUNC void interruptRoutine()
 void startMotor()
 {
 	if (running == 0) {
+		DISABLE_COM_TIMER_INT(); // a stale blind-step deadline must not commutate the restart
+		zc_deadline_armed = 0;
+		zc_blind_steps = 0;
+		zc_miss_bucket = 0;
 		commutate();
 		commutation_interval = 10000;
 		SET_INTERVAL_TIMER_COUNT(5000);

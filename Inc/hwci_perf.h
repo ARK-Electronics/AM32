@@ -48,8 +48,9 @@
  *     frozen at offset 60).
  * v4: appended the 32-bin PWM-phase histogram of accepted zero-crossings.
  * v5: appended esc_state + illegal edge counter (drive state machine).
- * v6: appended bidirectional DShot (BDShot) RX/TX health counters. */
-#	define HWCI_PERF_VERSION 6u
+ * v6: appended bidirectional DShot (BDShot) RX/TX health counters.
+ * v7: appended zc_blind_steps (missed-ZC blind commutation counter). */
+#	define HWCI_PERF_VERSION 7u
 
 /* PWM-phase histogram bins (power of two: the binning multiply-shift and the
  * host's modular math both assume it). */
@@ -151,7 +152,15 @@ typedef struct hwci_perf_s {
 	uint16_t dshot_last_com_us; /* off 164: last packed com period   */
 	uint8_t dshot_telem_mode;   /* off 166: 0=uni DShot, 1=BDShot    */
 	uint8_t dshot_edt_mode;	    /* off 167: EDT enabled              */
-} hwci_perf_t;			    /* total size: 168 bytes             */
+
+	/* --- v7: missed-ZC blind commutation counter ---
+     * Incremented once per blind (deadline-extrapolated) commutation in
+     * PeriodElapsedCallback. Monotonic u32, host-diffed like loop_iters:
+     * delta over a window is the blind-step rate, the health monitor for
+     * the BLHeli-style timeout-commutation path (zero on a healthy loop;
+     * a short burst at commanded stop is the designed teardown). */
+	uint32_t zc_blind_steps; /* off 168: blind commutations       */
+} hwci_perf_t;			 /* total size: 172 bytes             */
 
 extern volatile hwci_perf_t hwci_perf;
 
@@ -257,6 +266,17 @@ void hwci_perf_reset_stats(void);
 #	define HWCI_PERF_CONFIRM_REJECT()                                                                                                 \
 		do {                                                                                                                       \
 			hwci_perf.zc_confirm_reject++;                                                                                     \
+		} while (0)
+
+/*
+ * Blind (deadline-extrapolated) commutation counter. Runs in the COM timer
+ * ISR, only on the blind path - a single volatile u32 increment. Not gated
+ * on zero_crosses: blind steps only ever happen past the deadline arming
+ * gate, and the commanded-stop teardown burst is itself worth counting.
+ */
+#	define HWCI_PERF_BLIND_STEP()                                                                                                     \
+		do {                                                                                                                       \
+			hwci_perf.zc_blind_steps++;                                                                                        \
 		} while (0)
 
 /*
@@ -371,6 +391,9 @@ void hwci_perf_reset_stats(void);
 		do {                                                                                                                       \
 		} while (0)
 #	define HWCI_PERF_CONFIRM_REJECT()                                                                                                 \
+		do {                                                                                                                       \
+		} while (0)
+#	define HWCI_PERF_BLIND_STEP()                                                                                                     \
 		do {                                                                                                                       \
 		} while (0)
 #	define HWCI_PERF_ZC_PHASE_CAPTURE()                                                                                               \

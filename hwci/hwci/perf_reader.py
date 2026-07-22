@@ -52,7 +52,11 @@ class PerfReader:
             return
         # Pick the canonical layout matching the firmware's vintage by probing
         # for version-marker members, then verify every field of THAT layout.
-        if "esc_state" in members:
+        if "zc_blind_steps" in members:
+            fields = perf.FIELDS_V7
+        elif "dshot_rx_good" in members:
+            fields = perf.FIELDS_V6
+        elif "esc_state" in members:
             fields = perf.FIELDS_V5
         elif "zc_phase_hist" in members:
             fields = perf.FIELDS_V4

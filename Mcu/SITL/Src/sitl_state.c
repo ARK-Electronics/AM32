@@ -20,14 +20,24 @@
         coarse periods)
       cmd 1 LOAD_MODEL: JSON file path (rest of packet)
       cmd 2 SET_SPEEDUP: float speedup (0 = free run)
+      cmd 3 ZC_FAULT: pad byte = mode (0 off, 1 drop all comparator
+        edge deliveries, 2 drop every other commutation window),
+        u32 duration_us. For blind-step/missed-ZC path tests.
+      cmd 4 ZC_STATS: no payload; replies with the commutation
+        tracking snapshot below
   SITL -> client:
     u16 magic 0x5354, u8 version=1, u8 count, count * sample
     u16 magic 0x5355, u8 ok, u8 pad, message   (LOAD_MODEL reply)
+    u16 magic 0x5356, u8 version=1, u8 pad, u32 zero_crosses,
+      u32 commutation_interval, u32 dropped_edges, u32 desync_happened,
+      u8 old_routine, u8 running, u8 armed, u8 zc_blind_steps,
+      u8 zc_miss_bucket, u8 zc_deadline_armed  (ZC_STATS reply)
 */
 
 #include "sitl.h"
 #include "sitl_config.h"
 #include "motor.h"
+#include "motor_runtime.h"
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -194,6 +204,42 @@ void sitl_state_poll(void)
 			apply_period();
 			fprintf(stderr, "SITL: speedup %.3f\n", (double)speedup);
 		}
+	} else if (cmd == 3 && ret >= 8) {
+		uint32_t duration_us;
+		memcpy(&duration_us, pkt + 4, 4);
+		motor_zc_fault(pkt[3], duration_us);
+	} else if (cmd == 4) {
+		// racy reads of firmware globals are fine here: every field is a
+		// naturally-aligned scalar and the client polls
+		struct __attribute__((packed)) {
+			uint16_t magic;
+			uint8_t version;
+			uint8_t pad;
+			uint32_t zero_crosses;
+			uint32_t commutation_interval;
+			uint32_t dropped_edges;
+			uint32_t desync_happened;
+			uint8_t old_routine;
+			uint8_t running;
+			uint8_t armed;
+			uint8_t zc_blind_steps;
+			uint8_t zc_miss_bucket;
+			uint8_t zc_deadline_armed;
+		} reply = {
+			.magic = 0x5356,
+			.version = 1,
+			.zero_crosses = zero_crosses,
+			.commutation_interval = commutation_interval,
+			.dropped_edges = motor_zc_dropped(),
+			.desync_happened = desync_happened,
+			.old_routine = (uint8_t)old_routine,
+			.running = running,
+			.armed = (uint8_t)armed,
+			.zc_blind_steps = zc_blind_steps,
+			.zc_miss_bucket = zc_miss_bucket,
+			.zc_deadline_armed = zc_deadline_armed,
+		};
+		sendto(fd, &reply, sizeof(reply), 0, (struct sockaddr *)&src, sizeof(src));
 	}
 }
 

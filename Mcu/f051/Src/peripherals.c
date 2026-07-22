@@ -301,7 +301,23 @@ void MX_TIM14_Init(void)
 	TIM14->ARR = 4000;
 	NVIC_SetPriority(TIM14_IRQn, 0);
 	NVIC_EnableIRQ(TIM14_IRQn);
-	LL_TIM_EnableARRPreload(TIM14);
+	/*
+	 * ARR preload must stay OFF on the commutation timer. The blind-step
+	 * deadline alternates COM_TIMER->ARR between ~waitTime (commutation
+	 * scheduled by an accepted crossing) and ~2.2x waitTime (missed-ZC
+	 * deadline armed after commutating). With ARPE each write only takes
+	 * effect at the next update event, so the two values arrive one event
+	 * LATE - swapped: commutations fire at the deadline value and the
+	 * "deadline" fires right at the expected crossing, racing (and ~50%
+	 * of the time beating) every genuine zero-cross. Bench: 46% of
+	 * commutations went blind on a healthy spinning loop, phase scrambled,
+	 * 3 A stall on a 0.2 A operating point. Legacy never noticed the
+	 * preload because both its writers wrote ~waitTime, so a one-cycle-old
+	 * ARR was indistinguishable. Immediate ARR writes are safe here: every
+	 * writer (SET_AND_ENABLE_COM_INT, zcfoundroutine) zeroes CNT before
+	 * setting ARR, so the new value is always ahead of the counter.
+	 */
+	LL_TIM_DisableARRPreload(TIM14);
 }
 
 void MX_TIM16_Init(void)

@@ -75,10 +75,51 @@ void runtimeUpdateVariablePwm(uint16_t *last_tim1_arr)
 
 void runtimeProcessDesyncCheck(void)
 {
+	static uint8_t slow_avg_revs;
 	average_interval = e_com_time / 3;
+	// Any external zero_crosses reset (stall rail, stop path, bidir
+	// reversal) closes the evaluation gate below with slow_avg_revs
+	// holding a partial count; the leftover would then complete the
+	// trust-rail rev gate on the first evaluation of the NEXT closed-loop
+	// run, against a still-lagging average_interval. zero_crosses climbs
+	// one crossing at a time, so every re-acquisition passes through this
+	// window and clears the counter.
+	if (zero_crosses <= 10) {
+		slow_avg_revs = 0;
+	}
 	if (desync_check && zero_crosses > 10) {
-		if ((getAbsDif(last_average_interval, average_interval) > average_interval >> 1) &&
-		    (average_interval < 2000)) { // throttle resitricted before zc 20.
+		uint8_t desynced = (getAbsDif(last_average_interval, average_interval) > average_interval >> 1) &&
+				   (average_interval < 2000); // throttle resitricted before zc 20.
+		// Interrupt-ZC trust rail: with no per-commutation fallback to poll
+		// mode, a closed loop tracking artifact edges below usable BEMF
+		// (stable false lock: crossings keep arriving, so neither the
+		// blind-step deadline nor the jump check above can see it) needs a
+		// way out. Sustained slow averages hand back to the poll path
+		// legacy-style - soft, no desync accounting - so a throttle chop
+		// decelerating through the band behaves exactly as before. A
+		// genuine false lock has a stationary rotor: poll then finds no
+		// real crossings and the INTERVAL_TIMER stall rail escalates to a
+		// full restart on its own. The 4-rev gate keeps the lagging
+		// average during spool-up from tripping this, and transient
+		// dropouts are ridden out by blind steps.
+		if (!old_routine && running) {
+			if (average_interval > polling_mode_changeover + 500) {
+				slow_avg_revs++;
+				// High duty into an untrusted lock is the damage vector
+				// (wrong-phase drive; some boards have no VDS trip): bail
+				// after 2 revs instead of 4 when driving hard.
+				if (slow_avg_revs >= ((duty_cycle > 500) ? 2 : 4)) {
+					slow_avg_revs = 0;
+					escToOpenLoop();
+				}
+			} else {
+				slow_avg_revs = 0;
+			}
+		} else {
+			slow_avg_revs = 0;
+		}
+		if (desynced) {
+			slow_avg_revs = 0;
 			zero_crosses = 0;
 			desync_happened++;
 			if ((!eepromBuffer.bi_direction && (input > 47)) || commutation_interval > 1000) {

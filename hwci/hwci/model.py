@@ -46,6 +46,8 @@ COLUMNS = [
     # bidirectional DShot health (struct v6+)
     "perf_dshot_rx_good", "perf_dshot_rx_bad", "perf_dshot_tx_frames",
     "perf_dshot_last_com_us", "perf_dshot_telem_mode", "perf_dshot_edt_mode",
+    # missed-ZC blind commutation counter (struct v7+)
+    "perf_zc_blind_steps",
 ]
 
 
@@ -126,6 +128,8 @@ def make_row(t: float, segment: str, throttle_cmd: float,
                 perf_dshot_telem_mode=r["dshot_telem_mode"],
                 perf_dshot_edt_mode=r["dshot_edt_mode"],
             )
+        if "zc_blind_steps" in r:  # struct v7+
+            row.update(perf_zc_blind_steps=r["zc_blind_steps"])
     return row
 
 

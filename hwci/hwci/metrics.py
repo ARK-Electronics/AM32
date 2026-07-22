@@ -253,6 +253,7 @@ def compute(run: RunResult, profile: Profile) -> dict:
     zc_isum = _col(rows, "perf_zc_interval_sum")
     zc_jmax = _col(rows, "perf_zc_jitter_max")
     zc_reject = _col(rows, "perf_zc_confirm_reject")
+    zc_blind = _col(rows, "perf_zc_blind_steps")
 
     steady_points = []
     for s in profile.segments:
@@ -292,6 +293,10 @@ def compute(run: RunResult, profile: Profile) -> dict:
             phase["peak_bin"] if phase else None)
         steady_points[-1]["zc_phase_hist"] = phase["hist"] if phase else None
 
+    zb_valid = np.where(~np.isnan(zc_blind))[0]
+    zc_blind_total = (_wrap32(zc_blind[zb_valid[0]], zc_blind[zb_valid[-1]])
+                      if zb_valid.size >= 2 else None)
+
     demag = detect_demag(run, profile)
     starts = startup_stats(run, profile)
     smoke = evaluate_smoke_gates(run, profile, demag=demag,
@@ -328,6 +333,10 @@ def compute(run: RunResult, profile: Profile) -> dict:
              if p.get("zc_jitter_max_pct") is not None), default=None),
         "demag_events": demag["event_count"],
         "bemf_timeout_samples": demag["bemf_timeout_samples"],
+        # blind (deadline-extrapolated) commutations over the whole run
+        # (struct v7+ monotonic counter; None on older firmware). Zero on a
+        # healthy loop; a short burst at commanded stop is designed teardown.
+        "zc_blind_steps_total": zc_blind_total,
         # start-attempt outcomes; None/0 unless the profile has start* segments
         "start_attempts": starts["attempts"] or None,
         "start_failures": starts["failures"] if starts["attempts"] else None,

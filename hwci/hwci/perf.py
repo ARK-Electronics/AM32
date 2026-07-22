@@ -22,7 +22,7 @@ from dataclasses import dataclass
 
 # ASCII "HWC1" little-endian == 0x31435748
 MAGIC = 0x31435748
-VERSION = 6
+VERSION = 7
 
 # (name, struct_code).  Order and codes must match Inc/hwci_perf.h exactly.
 # Pad fields are decoded then dropped from the public dict.
@@ -94,11 +94,16 @@ FIELDS_V6: list[tuple[str, str]] = FIELDS_V5 + [
     ("dshot_edt_mode", "B"),
 ]
 
-FIELDS = FIELDS_V6
+# v7 appends the missed-ZC blind commutation counter (HWCI_PERF_BLIND_STEP).
+FIELDS_V7: list[tuple[str, str]] = FIELDS_V6 + [
+    ("zc_blind_steps", "I"),
+]
+
+FIELDS = FIELDS_V7
 
 FIELDS_BY_VERSION: dict[int, list[tuple[str, str]]] = {
     1: FIELDS_V1, 2: FIELDS_V2, 3: FIELDS_V3, 4: FIELDS_V4,
-    5: FIELDS_V5, 6: FIELDS_V6}
+    5: FIELDS_V5, 6: FIELDS_V6, 7: FIELDS_V7}
 
 
 def _field_count(code: str) -> int:
@@ -114,7 +119,7 @@ _FORMAT_BY_VERSION = {v: _format(f) for v, f in FIELDS_BY_VERSION.items()}
 SIZE_BY_VERSION = {v: struct.calcsize(fmt) for v, fmt in _FORMAT_BY_VERSION.items()}
 
 _FORMAT = _FORMAT_BY_VERSION[VERSION]
-SIZE = SIZE_BY_VERSION[VERSION]  # 168 bytes (v5: 152, v4: 148, v3: 84, v2: 80, v1: 64)
+SIZE = SIZE_BY_VERSION[VERSION]  # 172 bytes (v6: 168, v5: 152, v4: 148, v3: 84, v2: 80, v1: 64)
 _NAMES = [name for name, _ in FIELDS]
 
 # magic + version + size header, enough to pick the right layout for the rest.

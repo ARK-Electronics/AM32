@@ -56,6 +56,34 @@ extern uint32_t current_EXTI_LINE;
 static void check_desync_dump(void);
 static void dump_ring(void);
 
+/*
+  zero-cross fault injection (state port cmd 3): suppress comparator EXTI
+  delivery so the firmware's missed-ZC blind-step path can be exercised
+  deterministically. The comparator OUTPUT keeps tracking the physics (poll
+  mode and the confirm loop read the level directly and must stay honest) -
+  only the edge -> EXTI pend -> NVIC delivery is dropped, which is exactly
+  what a crossing invisible to the interrupt path looks like.
+  mode 0: off, 1: drop every delivery, 2: drop deliveries during every
+  other commutation window (alternating real/missed - the demag signature
+  the miss-rate bucket exists for).
+ */
+static uint8_t zc_fault_mode;
+static uint64_t zc_fault_end_ns;
+static uint32_t zc_dropped_edges;
+static uint32_t commutation_count; // total comStep calls, real + blind
+
+void motor_zc_fault(uint8_t mode, uint32_t duration_us)
+{
+	zc_fault_mode = mode;
+	zc_fault_end_ns = sitl_time_ns() + (uint64_t)duration_us * 1000ULL;
+	fprintf(stderr, "SITL: zc fault mode %u for %u us\n", mode, duration_us);
+}
+
+uint32_t motor_zc_dropped(void)
+{
+	return zc_dropped_edges;
+}
+
 static struct {
 	double theta; // mechanical angle, rad
 	double omega; // mechanical speed, rad/s
@@ -427,12 +455,22 @@ void motor_step(uint64_t now_ns, uint32_t dt_ns)
 		const uint32_t line = current_EXTI_LINE;
 		const bool rising_edge = out != 0;
 		if ((rising_edge && (sitl_exti.RTSR & line)) || (!rising_edge && (sitl_exti.FTSR & line))) {
-			sitl_exti.PR |= line;
-			const bool unmasked = (sitl_exti.IMR & line) != 0;
-			if (unmasked) {
-				sitl_irq_pend(SITL_IRQ_COMP);
+			if (zc_fault_mode && now_ns < zc_fault_end_ns && (zc_fault_mode == 1 || (commutation_count & 1u) == 0u)) {
+				// injected missed crossing: edge never reaches EXTI.
+				// Alternating mode keys off the commutation counter
+				// (blind steps increment it too), so a blind step in a
+				// dropped window flips the parity and the next window
+				// delivers - real/missed/real/missed indefinitely.
+				zc_dropped_edges++;
+				motor_log_event(MEV_EDGE, out, 0, 1);
+			} else {
+				sitl_exti.PR |= line;
+				const bool unmasked = (sitl_exti.IMR & line) != 0;
+				if (unmasked) {
+					sitl_irq_pend(SITL_IRQ_COMP);
+				}
+				motor_log_event(MEV_EDGE, out, unmasked, 0);
 			}
-			motor_log_event(MEV_EDGE, out, unmasked, 0);
 		}
 	}
 
@@ -506,6 +544,7 @@ void motor_log_commutation(int step)
 {
 	extern volatile uint16_t duty_cycle;
 	extern uint16_t duty_cycle_maximum;
+	commutation_count++;
 	motor_log_event(MEV_COMMUTATE, (uint32_t)step, duty_cycle, duty_cycle_maximum);
 }
 

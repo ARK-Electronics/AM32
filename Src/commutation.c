@@ -79,7 +79,19 @@ RAM_FUNC void commutate()
 	__enable_irq();
 	changeCompInput();
 #ifndef NO_POLLING_START
-	if (average_interval > polling_mode_changeover + 500) {
+	// Poll re-entry, startup window only. On real hardware, PWM /
+	// comparator noise during the first start kicks can shrink
+	// commutation_interval below the changeover and hand off to interrupt
+	// mode with no usable BEMF; once old_routine is 0 the 20 kHz poll
+	// drive stops sampling entirely and the motor never starts (bench:
+	// FAULT_STUCK with zero crossings, CI pinned ~19.6k from the stall
+	// rail's restart cycle). Legacy healed that by re-asserting poll mode
+	// on every slow-average commutation; keep the self-heal while
+	// starting (zero_crosses resets on desync/stop, so recovery paths get
+	// it too). Established closed loop never exits here - a missed
+	// crossing is one blind step (PeriodElapsedCallback) and false locks
+	// are the trust rail's job (runtimeProcessDesyncCheck).
+	if (zero_crosses < 100 && average_interval > polling_mode_changeover + 500) {
 		old_routine = 1;
 	}
 #endif
@@ -168,6 +180,10 @@ void zcfoundroutine()
 	bad_count = 0;
 
 	zero_crosses++;
+	// Poll mode is startup-only: these enter thresholds are unchanged, but
+	// once in interrupt mode there is no re-entry (see commutate) - the
+	// blind-step deadline in PeriodElapsedCallback rides through missed
+	// crossings and a genuinely lost rotor restarts through this ramp.
 #ifdef NO_POLLING_START // changes to interrupt mode after 2 zero crosses, does not re-enter
 	if (zero_crosses > 2) {
 		old_routine = 0;
@@ -186,4 +202,12 @@ void zcfoundroutine()
 		}
 	}
 #endif
+	if (!old_routine) {
+		// Fresh closed-loop run: a blind-step budget left over from a
+		// previous run must not shorten this one, and a stale deadline
+		// flag must not misread the first scheduled commutation.
+		zc_deadline_armed = 0;
+		zc_blind_steps = 0;
+		zc_miss_bucket = 0;
+	}
 }
