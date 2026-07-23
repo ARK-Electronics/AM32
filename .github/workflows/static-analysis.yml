@@ -55,7 +55,9 @@ jobs:
           submodules: recursive
 
       - name: Install Arm toolchain
-        run: make arm_sdk_install
+        run: |
+          make arm_sdk_install
+          make arm_sdk_check
 
       - name: Build ARK + size check
         run: make size-check-ark -j$(nproc)

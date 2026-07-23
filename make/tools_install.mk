@@ -8,10 +8,22 @@
 # Windows additionally still pulls windows-tools.zip for the make/ utilities
 # used by the Windows CI job (tools/windows/make/bin/make).
 
-# Shared pin (must match make/tools.mk)
+# Shared pin — prefer value from make/tools.mk (included first); keep defaults
+# identical so a standalone `make -f make/tools_install.mk` still works.
 XPACK_GCC_VER ?= 15.2.1-1.1
 XPACK_GCC_DIR ?= xpack-arm-none-eabi-gcc-$(XPACK_GCC_VER)
 XPACK_GCC_REL := https://github.com/xpack-dev-tools/arm-none-eabi-gcc-xpack/releases/download/v$(XPACK_GCC_VER)
+
+# Download helper: wget preferred, curl fallback. No apt/system-gcc fallback.
+define xpack_download
+	if command -v wget >/dev/null 2>&1; then \
+		wget -q --show-progress -O $(1) $(2) || wget -q -O $(1) $(2); \
+	elif command -v curl >/dev/null 2>&1; then \
+		curl -fL --retry 3 --retry-delay 2 -o $(1) $(2); \
+	else \
+		echo "error: need wget or curl to fetch $(2)" >&2; exit 1; \
+	fi
+endef
 
 # Windows helper utilities (make, etc.) — not the compiler
 WINDOWS_TOOLS_UTILS := https://firmware.ardupilot.org/Tools/AM32-tools/windows-tools.zip
@@ -40,6 +52,7 @@ arm_sdk_install:
 		} else { \
 			Write-Host 'already installed: tools/windows/$(XPACK_GCC_DIR)'; \
 		}"
+	@bash scripts/check-arm-sdk.sh tools/windows/$(XPACK_GCC_DIR)/bin/arm-none-eabi- $(XPACK_GCC_VER)
 	@echo windows tools install done
 
 else
@@ -61,11 +74,12 @@ arm_sdk_install:
 	@if [ ! -x tools/macos/$(XPACK_GCC_DIR)/bin/arm-none-eabi-gcc ]; then \
 		echo "downloading $(MAC_XPACK_ASSET)"; \
 		mkdir -p tools/macos downloads; \
-		wget -q -O downloads/$(MAC_XPACK_ASSET) $(XPACK_GCC_REL)/$(MAC_XPACK_ASSET); \
+		$(call xpack_download,downloads/$(MAC_XPACK_ASSET),$(XPACK_GCC_REL)/$(MAC_XPACK_ASSET)); \
 		tar -xzf downloads/$(MAC_XPACK_ASSET) -C tools/macos; \
 	else \
 		echo "already installed: tools/macos/$(XPACK_GCC_DIR)"; \
 	fi
+	@bash scripts/check-arm-sdk.sh tools/macos/$(XPACK_GCC_DIR)/bin/arm-none-eabi- $(XPACK_GCC_VER)
 	@echo macos tools install done
 
 else
@@ -83,11 +97,12 @@ arm_sdk_install:
 	@if [ ! -x tools/linux/$(XPACK_GCC_DIR)/bin/arm-none-eabi-gcc ]; then \
 		echo "downloading $(LINUX_XPACK_ASSET)"; \
 		mkdir -p tools/linux downloads; \
-		wget -q -O downloads/$(LINUX_XPACK_ASSET) $(XPACK_GCC_REL)/$(LINUX_XPACK_ASSET); \
+		$(call xpack_download,downloads/$(LINUX_XPACK_ASSET),$(XPACK_GCC_REL)/$(LINUX_XPACK_ASSET)); \
 		tar -xzf downloads/$(LINUX_XPACK_ASSET) -C tools/linux; \
 	else \
 		echo "already installed: tools/linux/$(XPACK_GCC_DIR)"; \
 	fi
+	@bash scripts/check-arm-sdk.sh tools/linux/$(XPACK_GCC_DIR)/bin/arm-none-eabi- $(XPACK_GCC_VER)
 	@echo linux tools install done
 
 endif
