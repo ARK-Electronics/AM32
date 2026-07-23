@@ -661,8 +661,8 @@ RAM_FUNC void tenKhzRoutine()
 			// window closes within ~3 commutations, so every observable
 			// distress signal arrives after lock is unrecoverable. The
 			// working alternative is the learned ramp back-off in
-			// faultDesyncEpisodeCharge: the first desync episode clamps
-			// the configured ramp to the fine rate for the rest of the
+			// faultDesyncEpisodeCharge: each desync episode halves the
+			// configured ramp (floor fine 0.1%/ms) for the rest of the
 			// power cycle.
 			if ((duty_cycle - last_duty_cycle) > max_duty_cycle_change) {
 				duty_cycle = last_duty_cycle + max_duty_cycle_change;
