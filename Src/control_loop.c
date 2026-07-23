@@ -289,7 +289,16 @@ void setInput()
 #ifndef BRUSHED_MODE
 	if (escMaySixStepThrottle()) {
 		if (input >= 47 + (80 * eepromBuffer.use_sine_start)) {
-			if (!escIsDriving()) {
+			// Re-entry into six-step happens HERE, at input-frame rate -
+			// not in runtimeMotorModeTick. The episode-rail coast (holdoff
+			// or latched fault) must gate this branch or the mode tick's
+			// running=0 and this restart chatter against each other at
+			// kHz rate, pulsing startMotor() commutations through the
+			// whole "coast". escIsFault() also covers the latch when
+			// stuck_rotor_protection is disabled in EEPROM (the
+			// faultHandleStuckRotorIfNeeded gate above honors that flag;
+			// the episode rail is independent of it).
+			if (!escIsDriving() && !escIsFault() && !faultDesyncRestartHoldoffActive()) {
 				allOff();
 				if (!old_routine) {
 					startMotor();

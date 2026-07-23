@@ -55,16 +55,17 @@ void faultHandleBemfIntervalStall(void);
  * Single desync episodes are already bounded (blind-step cap, miss bucket,
  * demag-late power cut). A bad EEPROM tune can still loop forever:
  * restart → spool → desync spike → restart. Each episode charges this
- * bucket; healthy closed-loop time drains it. At the limit, latch
- * ESC_FAULT_STUCK so drive stays off until the fault path clears.
+ * bucket; healthy closed-loop time drains it; zero throttle (pilot
+ * intervention) clears it. At the limit, latch ESC_FAULT_STUCK so drive
+ * stays off until the fault path clears.
  *
- * charge kinds: jump-check desync, stall-rail trip (incl. blind/miss limit
- * handoff), and future demag-late saturation.
+ * charge kinds: jump-check desync, stall-rail trip of an established run
+ * (zero_crosses > 100; includes the blind/miss limit handoff, which always
+ * follows an established closed loop), and future demag-late saturation.
  */
 typedef enum {
 	DESYNC_EPISODE_JUMP = 0,
 	DESYNC_EPISODE_STALL_RAIL,
-	DESYNC_EPISODE_BLIND_LIMIT,
 } desync_episode_kind_t;
 
 void faultDesyncEpisodeCharge(desync_episode_kind_t kind);

@@ -97,6 +97,15 @@ void faultUpdateBemfTimeoutPolicy(void)
 	if ((zero_crosses > 1000) || (adjusted_input == 0)) {
 		bemf_timeout_happened = 0;
 	}
+	if (adjusted_input == 0) {
+		// Zero throttle is pilot intervention: clear the episode rail the
+		// same way the legacy latch clears. Deliberately NOT on
+		// zero_crosses > 1000 - a bad-tune cycle that respins fast between
+		// desyncs must keep accumulating (that reset defeating the stuck
+		// latch is one of the gaps this rail exists to close).
+		desync_episode_bucket = 0;
+		desync_restart_holdoff_ms = 0;
+	}
 	if (zero_crosses > 100 && adjusted_input < 200) {
 		bemf_timeout_happened = 0;
 	}
@@ -123,26 +132,36 @@ void faultUpdateBemfTimeoutPolicy(void)
  * bucket, demag-late power cut) bound a single event; this bucket bounds a
  * *repeating* restart→desync cycle from a bad tune / wrong prop match.
  *
- * Charge rates are tuned so 3–5 hard episodes latch within ~1–2 s of cycling,
+ * Charge rates are tuned so 3-5 hard episodes latch within ~1-2 s of cycling,
  * while a couple of honest in-flight desyncs drain out in a few seconds of
- * healthy closed-loop. Restart holdoff grows with the bucket so the FETs
- * spend most of each cycle cooling instead of immediately re-entering the
- * wrong-phase current spike.
+ * healthy closed-loop (stall: 4 episodes at 12; jump: 5 at 8).
+ *
+ * The FIRST episode must restart immediately - an honest in-flight desync
+ * that coasts even 100 ms is a dropped motor on a quad - so restart holdoff
+ * only arms once the bucket shows repetition (>= MIN_BUCKET, i.e. from the
+ * second episode on) and then grows so the FETs spend most of each later
+ * cycle cooling instead of immediately re-entering the wrong-phase spike.
+ * Stall path: ep2 300 ms, ep3 500 ms, ep4 latch. Jump path: ep2 100 ms,
+ * ep3 300 ms, ep4 500 ms, ep5 latch.
  */
 #define DESYNC_EPISODE_LIMIT 40
 #define DESYNC_EPISODE_CHARGE_JUMP 8
 #define DESYNC_EPISODE_CHARGE_STALL 12
-#define DESYNC_EPISODE_CHARGE_BLIND 12
-#define DESYNC_EPISODE_DRAIN_MS 100 /* −1 charge per this many ms of healthy CL */
+#define DESYNC_EPISODE_DRAIN_MS 100  /* -1 charge per this many ms of healthy CL */
+#define DESYNC_BACKOFF_MIN_BUCKET 16 /* below this (first episode): no holdoff */
 #define DESYNC_BACKOFF_BASE_MS 100
-#define DESYNC_BACKOFF_STEP_MS 50
+#define DESYNC_BACKOFF_STEP_MS 25
 #define DESYNC_BACKOFF_MAX_MS 500
 
 static uint8_t desync_episode_drain_ms;
 
 static void desync_episode_apply_backoff(void)
 {
-	uint16_t hold = (uint16_t)(DESYNC_BACKOFF_BASE_MS + (uint16_t)desync_episode_bucket * DESYNC_BACKOFF_STEP_MS);
+	if (desync_episode_bucket < DESYNC_BACKOFF_MIN_BUCKET) {
+		return; // first episode restarts immediately (legacy behavior)
+	}
+	uint16_t hold =
+		(uint16_t)(DESYNC_BACKOFF_BASE_MS + (uint16_t)(desync_episode_bucket - DESYNC_BACKOFF_MIN_BUCKET) * DESYNC_BACKOFF_STEP_MS);
 	if (hold > DESYNC_BACKOFF_MAX_MS) {
 		hold = DESYNC_BACKOFF_MAX_MS;
 	}
@@ -157,8 +176,6 @@ void faultDesyncEpisodeCharge(desync_episode_kind_t kind)
 	uint8_t inc = DESYNC_EPISODE_CHARGE_STALL;
 	if (kind == DESYNC_EPISODE_JUMP) {
 		inc = DESYNC_EPISODE_CHARGE_JUMP;
-	} else if (kind == DESYNC_EPISODE_BLIND_LIMIT) {
-		inc = DESYNC_EPISODE_CHARGE_BLIND;
 	}
 	if ((uint16_t)desync_episode_bucket + inc > 255) {
 		desync_episode_bucket = 255;
@@ -188,8 +205,11 @@ void faultDesyncEpisodeTick1kHz(void)
 		desync_restart_holdoff_ms--;
 	}
 
-	/* Drain only in established, trusted closed loop. */
-	if (escInClosedLoop() && zc_blind_steps == 0 && zc_demag_run == 0 && bemf_timeout_happened == 0 && desync_episode_bucket > 0) {
+	/* Drain only in established, trusted closed loop. bemf_timeout_happened
+	 * is deliberately NOT in the gate: it stays nonzero until
+	 * zero_crosses > 1000 (5-10 s at crawler rpm), which would block drain
+	 * through exactly the healthy running that should earn it. */
+	if (escInClosedLoop() && zc_blind_steps == 0 && zc_demag_run == 0 && desync_episode_bucket > 0) {
 		if (desync_episode_drain_ms < 255) {
 			desync_episode_drain_ms++;
 		}
@@ -215,7 +235,20 @@ void faultHandleBemfIntervalStall(void)
 		bemf_timeout_happened++;
 
 		maskPhaseInterrupts();
-		faultDesyncEpisodeCharge(DESYNC_EPISODE_STALL_RAIL);
+		// Charge the episode rail only when this run was ESTABLISHED
+		// before it died (the bad-tune restart->spool->desync cycle
+		// always reaches closed loop first). A start attempt that never
+		// got going is the legacy stuck-rotor rail's job, with its
+		// throttle-scaled tolerance (bemf_timeout 100 below input 150) -
+		// heavy props legitimately kick many times at low throttle, and
+		// charging those latched the ESC on the 4th kick. This gate also
+		// covers the blind/miss-limit handoff (bemf_zc kicks
+		// INTERVAL_TIMER to 46000 with comparator interrupts masked, so
+		// this rail is guaranteed to run next pass): blind stepping only
+		// arms at zero_crosses >= 100, so those episodes always charge.
+		if (zero_crosses > 100) {
+			faultDesyncEpisodeCharge(DESYNC_EPISODE_STALL_RAIL);
+		}
 		if (escIsFault()) {
 			/* Episode rail latched: do not re-enter startup. */
 			zero_crosses = 0;
