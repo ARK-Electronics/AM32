@@ -76,3 +76,102 @@ def test_standless_run_completes_within_limits():
     assert result.meta["aborted"] is None
     assert len(result.rows) == 200
     assert result.rows[0]["stand_thrust_gf"] == ""  # stand columns empty
+
+
+def test_runner_aborts_on_live_bemf_desync():
+    """Once spin is established, firmware bemf_timeout must cut the run
+    immediately — not finish the remaining high-throttle segments."""
+    from hwci.perf import PerfSample
+
+    class _DummyThrottle:
+        def __init__(self):
+            self.disarmed = False
+            self.last = 0.0
+
+        def arm(self): pass
+
+        def set(self, throttle):
+            self.last = throttle
+
+        def disarm(self):
+            self.disarmed = True
+
+        def close(self): pass
+
+    n = {"i": 0}
+
+    def perf_source():
+        n["i"] += 1
+        # Establish spin for a few ticks, then latch bemf_timeout.
+        if n["i"] < 30:
+            raw = {"bemf_timeout_state": 0, "running": 1, "e_rpm": 50,
+                   "ctrl_exec_us_last": 0, "ctrl_exec_us_max": 0,
+                   "ctrl_period_us_last": 50, "ctrl_period_us_max": 50,
+                   "ctrl_period_us_min": 50, "main_loop_us_last": 0,
+                   "main_loop_us_max": 0, "input": 1000, "duty_cycle": 500,
+                   "voltage_cv": 2200, "current_ca": 500, "temperature_c": 30,
+                   "armed": 1, "loop_iters": 1, "zero_cross_count": 10,
+                   "commutation_interval": 1000, "commutation_interval_max": 1000,
+                   "update_count": n["i"], "host_cmd": 0, "magic": 1,
+                   "version": 1, "size": 0}
+        else:
+            raw = {"bemf_timeout_state": 3, "running": 1, "e_rpm": 5,
+                   "ctrl_exec_us_last": 0, "ctrl_exec_us_max": 0,
+                   "ctrl_period_us_last": 50, "ctrl_period_us_max": 50,
+                   "ctrl_period_us_min": 50, "main_loop_us_last": 0,
+                   "main_loop_us_max": 0, "input": 1000, "duty_cycle": 500,
+                   "voltage_cv": 2200, "current_ca": 5000, "temperature_c": 30,
+                   "armed": 1, "loop_iters": 1, "zero_cross_count": 10,
+                   "commutation_interval": 50000, "commutation_interval_max": 50000,
+                   "update_count": n["i"], "host_cmd": 0, "magic": 1,
+                   "version": 1, "size": 0}
+        return PerfSample(raw=raw)
+
+    thr = _DummyThrottle()
+    sources = Sources(
+        throttle=thr,
+        stand=None,
+        perf_source=perf_source,
+        telem_source=lambda: None,
+    )
+    # 5 s would be 500 samples at 100 Hz; desync at tick 30 must abort early.
+    result = run_profile(_profile(max_current_a=200.0), sources, realtime=False)
+    assert result.meta["aborted"] is not None
+    assert "desync" in result.meta["aborted"]
+    assert "bemf_timeout" in result.meta["aborted"]
+    assert thr.disarmed is True
+    assert len(result.rows) < 200  # did not run the full 2 s segment out
+
+
+def test_runner_aborts_on_rpm_collapse_while_throttle_high():
+    from hwci.flightstand.base import StandSample
+
+    class _DummyThrottle:
+        def arm(self): pass
+        def set(self, throttle): pass
+        def disarm(self): pass
+        def close(self): pass
+
+    n = {"i": 0}
+
+    def stand_read():
+        n["i"] += 1
+        rpm = 5000.0 if n["i"] < 50 else 1000.0  # collapse after peak
+        return StandSample(t=0.0, throttle=1.0, thrust_n=5.0, torque_nm=0.0,
+                           rpm=rpm, voltage_v=22.0, current_a=10.0)
+
+    class _Stand:
+        def read_sample(self):
+            return stand_read()
+
+    sources = Sources(
+        throttle=_DummyThrottle(),
+        stand=_Stand(),
+        perf_source=lambda: None,
+        telem_source=lambda: None,
+    )
+    result = run_profile(_profile(max_current_a=200.0), sources, realtime=False)
+    assert result.meta["aborted"] is not None
+    assert "desync" in result.meta["aborted"]
+    assert "rpm collapse" in result.meta["aborted"]
+    assert len(result.rows) < 200

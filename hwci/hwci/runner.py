@@ -90,6 +90,106 @@ def enforce_safety(limits: SafetyLimits, stand: StandSample | None,
         limits.check(current_a=telem.current_a, temp_c=telem.temperature_c)
 
 
+# Stuck-rotor latch value from firmware (Inc/esc_state.h / bemf path).
+_BEMF_STUCK_LATCH = 102
+
+
+class DesyncTripped(StandSafetyTripped):
+    """Live desync / demag detected mid-run; throttle must cut immediately."""
+
+
+class LiveDesyncWatch:
+    """Per-run state for aborting as soon as the motor loses sync.
+
+    Offline metrics detect demag after the fact; by then the profile may have
+    kept commanding high throttle into a desynced rotor for seconds. This
+    watch trips on the first clear live signal so ``run_profile`` disarms in
+    the ``finally`` block.
+    """
+
+    def __init__(self, *, rpm_drop_fraction: float = 0.25,
+                 min_drive_throttle: float = 0.20):
+        self.rpm_drop_fraction = rpm_drop_fraction
+        self.min_drive_throttle = min_drive_throttle
+        self._ref_rpm: float | None = None
+        self._prev_throttle = 0.0
+        self._spin_established = False
+        self._blind0: int | None = None
+
+    def check(self, throttle: float, stand: StandSample | None,
+              pf: PerfSample | None) -> None:
+        """Raise :class:`DesyncTripped` if the plant looks desynced."""
+        thr = float(throttle)
+
+        # --- firmware BEMF / stuck-rotor flags (perf path) ---------------
+        if pf is not None:
+            raw = pf.raw
+            bemf = int(raw.get("bemf_timeout_state") or 0)
+            running = int(raw.get("running") or 0)
+            erpm = 0
+            try:
+                erpm = int(pf.e_rpm)
+            except Exception:
+                erpm = int(raw.get("e_rpm") or 0) * 100
+            if erpm > 3000 or running:
+                self._spin_established = True
+            if bemf >= _BEMF_STUCK_LATCH:
+                raise DesyncTripped(
+                    f"stuck-rotor latch bemf_timeout={bemf}")
+            # After spin is established, any bemf_timeout while we still
+            # command drive means "cut now" — do not keep the rest of the
+            # profile running into the desync.
+            if (self._spin_established and thr >= self.min_drive_throttle
+                    and bemf >= 1):
+                raise DesyncTripped(
+                    f"firmware bemf_timeout={bemf} while throttle="
+                    f"{thr:.2f} (aborting into desync)")
+            # Burst of blind steps after established spin: closed loop is
+            # freewheeling commutations — cut if the counter jumps hard.
+            blind = raw.get("zc_blind_steps")
+            if blind is not None and self._spin_established and thr >= 0.25:
+                b = int(blind)
+                if self._blind0 is None:
+                    self._blind0 = b
+                elif b - self._blind0 >= 32:
+                    raise DesyncTripped(
+                        f"blind-step burst +{b - self._blind0} "
+                        f"(total {b}) while throttle={thr:.2f}")
+
+        # --- stand RPM collapse while throttle high and not falling ------
+        if stand is not None:
+            rpm = float(stand.rpm)
+            # Invalidate peak reference when throttle is falling (commanded
+            # coast-down is not a desync).
+            if thr + 1e-6 < self._prev_throttle:
+                self._ref_rpm = None
+            elif thr >= 0.50:
+                if rpm > 500.0:
+                    self._spin_established = True
+                if self._ref_rpm is None:
+                    if rpm > 500.0:
+                        self._ref_rpm = rpm
+                else:
+                    self._ref_rpm = max(self._ref_rpm, rpm)
+                    if (self._ref_rpm > 1000.0
+                            and rpm < self._ref_rpm * (1.0 - self.rpm_drop_fraction)):
+                        raise DesyncTripped(
+                            f"rpm collapse {rpm:.0f} < "
+                            f"{100 * (1.0 - self.rpm_drop_fraction):.0f}% of "
+                            f"peak {self._ref_rpm:.0f} at throttle={thr:.2f}")
+            # Current spiral: high current, almost no RPM, after we had spin.
+            if (self._spin_established and thr >= 0.25
+                    and stand.current_a >= 25.0 and rpm < 800.0):
+                raise DesyncTripped(
+                    f"high current {stand.current_a:.1f} A with rpm "
+                    f"{rpm:.0f} at throttle={thr:.2f}")
+
+        if thr < self.min_drive_throttle:
+            self._ref_rpm = None
+            self._blind0 = None
+        self._prev_throttle = thr
+
+
 # Default per-cell low-voltage threshold for check_battery(). Matches AM32
 # firmware's own default (Src/main.c: `low_cell_volt_cutoff = 330` -> 3.30
 # V/cell), so the harness refuses to start a test at roughly the same pack
@@ -240,6 +340,9 @@ def run_profile(profile: Profile, sources: Sources, *,
     start = time.monotonic()
     tick = 0
     prev_throttle = 0.0
+    desync_watch = LiveDesyncWatch(
+        rpm_drop_fraction=float(getattr(profile, "demag_rpm_drop_fraction", 0.25)
+                                or 0.25))
     try:
         for seg in profile.segments:
             n = max(1, round(seg.duration_s * profile.sample_rate_hz))
@@ -288,8 +391,13 @@ def run_profile(profile: Profile, sources: Sources, *,
                 # sample covers (and corrupt counter-rate math downstream).
                 t = (time.monotonic() - start) if realtime else t_sched
                 rows.append(make_row(t, seg.label, throttle, stand, tm, pf))
+                # Cut throttle immediately on live desync — do not finish the
+                # remaining profile segments into a freewheeling/desynced rotor.
+                desync_watch.check(throttle, stand, pf)
                 tick += 1
             prev_throttle = seg.throttle
+    except DesyncTripped as e:
+        aborted = f"desync: {e}"
     except StandSafetyTripped as e:
         aborted = f"safety: {e}"
     finally:

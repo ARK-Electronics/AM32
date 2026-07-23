@@ -74,40 +74,65 @@ def startup_profile(spec: TuneSpec) -> Profile:
     })
 
 
+def _step_snap_levels(spec: TuneSpec) -> tuple[float, float]:
+    """Hold / snap throttle levels for max_ramp verify.
+
+    5–7" benches keep the classic 0.30→0.95 geometry. Heavy props (low
+    ``max_rpm`` or modest current + low probe ceiling, e.g. 10" on 6S) use a
+    milder spinning-state step so verify searches certify slew limits without
+    thrashing the plant into 100 A desync loops.
+    """
+    pts = [float(v) for v in (spec.probe.points or {}).values()]
+    thr_hi = max(pts) if pts else 0.60
+    safety = spec.probe.safety or {}
+    max_rpm = float(safety.get("max_rpm") or 32000.0)
+    max_i = float(safety.get("max_current_a") or 70.0)
+    heavy = max_rpm <= 15000.0 or (max_i <= 60.0 and thr_hi <= 0.45)
+    if heavy:
+        hold = min(0.30, max(0.15, thr_hi * 0.80))
+        snap = min(0.70, max(hold + 0.20, thr_hi + 0.15))
+        if snap - hold < 0.15:
+            snap = min(0.70, hold + 0.15)
+        return hold, snap
+    return 0.30, 0.95
+
+
 def step_profile(spec: TuneSpec) -> Profile:
-    """Step-stress profile for the max_ramp constraint stage: aggressive
-    snaps into a high-current regime FROM A SPINNING STATE (0.30 hold).
+    """Step-stress profile for the max_ramp constraint stage: snaps into a
+    higher-current regime FROM A SPINNING STATE (not from a stop).
 
     Snapping from a stop (as demag_step_stress does) makes the host demag
     detector read the spool-up's long commutation intervals as spike events
-    even when nothing desynced; stepping from 0.30 keeps the detector's
-    median-interval reference honest, so only a real loss of sync (bemf
-    timeouts, interval blow-up, RPM collapse) disqualifies a max_ramp value.
+    even when nothing desynced; stepping from a spinning hold keeps the
+    detector's median-interval reference honest, so only a real loss of sync
+    (bemf timeouts, interval blow-up, RPM collapse) disqualifies a max_ramp
+    value. Snap amplitude scales with the probe envelope (see
+    :func:`_step_snap_levels`).
     """
+    hold, snap = _step_snap_levels(spec)
+    # Transient headroom: light snaps stay near probe current; full 0.95 snaps
+    # still need the 5" bench 80–100 A budget.
+    cur_floor = (RAMP_TRANSIENT_MAX_CURRENT_A if snap >= 0.85
+                 else max(RAMP_TRANSIENT_MAX_CURRENT_A * 0.6,
+                          (spec.probe.safety or {}).get("max_current_a") or 0.0))
     return profile_from_dict({
         "name": "tune_step",
         "description": "inline step-stress for the max_ramp stage (auto-tuner)",
         "sample_rate_hz": 100.0,
         "segments": [
             {"label": "idle", "throttle": 0.0, "duration_s": 2.0},
-            {"label": "spool", "throttle": 0.30, "duration_s": 2.0, "ramp": True},
-            {"label": "hold30a", "throttle": 0.30, "duration_s": 2.0},
-            {"label": "snap95a", "throttle": 0.95, "duration_s": 1.5},
-            {"label": "hold30b", "throttle": 0.30, "duration_s": 2.0},
-            {"label": "snap95b", "throttle": 0.95, "duration_s": 1.5},
-            {"label": "hold30c", "throttle": 0.30, "duration_s": 2.0},
+            {"label": "spool", "throttle": hold, "duration_s": 2.0, "ramp": True},
+            {"label": "hold_a", "throttle": hold, "duration_s": 2.0},
+            {"label": "snap_a", "throttle": snap, "duration_s": 1.5},
+            {"label": "hold_b", "throttle": hold, "duration_s": 2.0},
+            {"label": "snap_b", "throttle": snap, "duration_s": 1.5},
+            {"label": "hold_c", "throttle": hold, "duration_s": 2.0},
             {"label": "rampdn", "throttle": 0.0, "duration_s": 1.5, "ramp": True},
         ],
-        # The snaps are the point of this profile, and a legitimate
-        # 0.3->0.95 snap transient can draw into the 80-100 A range on this
-        # bench (see RAMP_TRANSIENT_MAX_CURRENT_A). Probe-level current
-        # limits would abort every candidate on that transient before demag
-        # is even assessed, so give the current limit snap headroom; all
-        # other probe safety limits apply unchanged.
         "safety": {**(spec.probe.safety or {}),
                    "max_current_a": max(
                        (spec.probe.safety or {}).get("max_current_a") or 0.0,
-                       RAMP_TRANSIENT_MAX_CURRENT_A)},
+                       cur_floor)},
     })
 
 

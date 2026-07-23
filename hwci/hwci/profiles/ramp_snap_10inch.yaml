@@ -1,0 +1,28 @@
+# Same shape as the auto-tuner max_ramp verify step_profile (0.30 hold →
+# snap 0.95), safety raised for 900KV + 10" 3-blade on 6S so the harness
+# can observe demag/desync instead of aborting at the 5" 55 A cap.
+name: ramp_snap_10inch
+description: >
+  Spinning-state ramp/snap stress for 10" props: spool to 30%, hold, snap
+  to 95% twice (tuner max_ramp verify geometry). Host demag detection +
+  firmware bemf-timeout / blind-step counters.
+sample_rate_hz: 200
+arm_settle_s: 2.0
+demag_commutation_spike: 3.0
+demag_rpm_drop_fraction: 0.25
+
+safety:
+  max_current_a: 120.0
+  max_thrust_n: 80.0
+  # 900KV×6S no-load ~20k; 10" under load still topped 12k on a slow slew
+  max_rpm: 20000
+
+segments:
+  - {label: idle,    throttle: 0.00, duration_s: 2.0}
+  - {label: spool,   throttle: 0.30, duration_s: 2.0, ramp: true}
+  - {label: hold30a, throttle: 0.30, duration_s: 2.0}
+  - {label: snap95a, throttle: 0.95, duration_s: 1.5}
+  - {label: hold30b, throttle: 0.30, duration_s: 2.0}
+  - {label: snap95b, throttle: 0.95, duration_s: 1.5}
+  - {label: hold30c, throttle: 0.30, duration_s: 2.0}
+  - {label: rampdn,  throttle: 0.00, duration_s: 1.5, ramp: true}

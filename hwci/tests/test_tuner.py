@@ -453,21 +453,38 @@ def test_default_tune_probe_yaml_ramps_into_large_steps():
 
 def test_step_profile_current_limit_has_snap_headroom():
     from hwci.tuner import step_profile
+    # Default probe envelope (no low max_rpm) keeps the classic 0.30→0.95 snap
+    # and the full transient current budget.
     spec = tune_spec_from_dict(small_spec(
         probe={"dwell_s": 1.0,
                "safety": {"max_current_a": 40.0, "max_thrust_n": 16.0}}))
     p = step_profile(spec)
-    # deliberate 0.3->0.95 snaps can draw 80-100 A on the bench: headroom to
-    # RAMP_TRANSIENT_MAX_CURRENT_A, while the other limits pass through
-    # unchanged
     from hwci.tuner import RAMP_TRANSIENT_MAX_CURRENT_A
     assert p.safety.max_current_a == RAMP_TRANSIENT_MAX_CURRENT_A
     assert p.safety.max_thrust_n == 16.0
+    thr = [s.throttle for s in p.segments if s.label.startswith("snap")]
+    assert thr and max(thr) >= 0.90
     spec_hi = tune_spec_from_dict(small_spec(
         probe={"dwell_s": 1.0,
                "safety": {"max_current_a": RAMP_TRANSIENT_MAX_CURRENT_A + 20}}))
     assert (step_profile(spec_hi).safety.max_current_a
             == RAMP_TRANSIENT_MAX_CURRENT_A + 20)
+
+
+def test_step_profile_softens_snap_for_heavy_prop_envelope():
+    """10\"-style probe safety must not still demand 0.30→0.95 snaps."""
+    from hwci.tuner import step_profile
+    spec = tune_spec_from_dict(small_spec(
+        probe={"dwell_s": 1.0,
+               "points": {"t20": 0.20, "t35": 0.35},
+               "safety": {"max_current_a": 55.0, "max_thrust_n": 45.0,
+                          "max_rpm": 9000}}))
+    p = step_profile(spec)
+    snaps = [s.throttle for s in p.segments if s.label.startswith("snap")]
+    holds = [s.throttle for s in p.segments if s.label.startswith("hold")]
+    assert snaps and max(snaps) <= 0.70
+    assert holds and max(holds) <= 0.30
+    assert max(snaps) - max(holds) >= 0.15
 
 
 # --------------------------------------------------------------------------
@@ -753,19 +770,16 @@ def test_e2e_measure_stage_sets_minimum_duty_cycle(tmp_path):
     assert st["winner"]["minimum_duty_cycle"] >= st["computed_minimum_duty_cycle"]
 
 
-def test_measure_stage_falls_back_to_direct_search_when_measurement_desyncs(
+def test_measure_stage_falls_back_to_bubble_search_when_measurement_desyncs(
         tmp_path):
-    """A disqualified measurement run (e.g. the unrestricted snap itself
-    desyncs) must not silently give up on the ramp stage: it should fall
-    back to the same verify+backoff search, starting from the field max,
-    that a successful measurement would have used."""
+    """A disqualified measurement run must not give up: bubble-search
+    max_ramp from the floor (not thrash down from the ceiling)."""
     import json
     spec_d = small_spec(stages=[
         {"name": "ramp", "measure": "ramp_rate", "margin": 0.8}])
-    # demag_step_threshold scaled so the unrestricted (max_ramp=255) snap
-    # desyncs on both the measure and the first verify attempt, and the
-    # backoff search only clears the sim's desync condition once max_ramp
-    # backs off to 42 (160/max_ramp scaling - see sim.py _demag_step_threshold).
+    # demag_step_threshold scaled so unrestricted (max_ramp=255) snaps
+    # desync; safe once max_ramp is low enough that
+    # jump 0.65 < 0.2*(160/max_ramp)  => max_ramp <= 49 (sim.py).
     backend = make_backend(demag_prone=True, demag_step_threshold=0.2,
                            demag_current_a=1.0)
     _, result = run_tune(tmp_path, spec_d, backend)
@@ -773,14 +787,19 @@ def test_measure_stage_falls_back_to_direct_search_when_measurement_desyncs(
     st = m["stages"]["ramp"]
     assert st["measured"] is None          # measurement itself desynced
     assert st["computed_max_ramp"] is None  # no physics to compute from
+    assert st.get("search") == "bubble"
     trials = [t for t in m["trials"] if t["stage"] == "ramp"]
     assert trials[0]["kind"] == "measure" and trials[0]["disqualified"]
     verifies = [t for t in trials if t["kind"] == "verify"]
-    # the search kept trying lower max_ramp values instead of stopping after
-    # the failed measurement
     assert len(verifies) > 1
-    assert st["winner"] == {"max_ramp": 42}
-    assert m["incumbent"]["max_ramp"] == 42
+    # Floor-first: first verify is the field lo (1), never the ceiling.
+    assert verifies[0]["overrides"]["max_ramp"] == 1
+    assert st["winner"] is not None
+    mr = st["winner"]["max_ramp"]
+    assert 1 <= mr <= 49
+    assert m["incumbent"]["max_ramp"] == mr
+    # Never probe above the first failure with a high-first 0.7 ladder.
+    assert max(t["overrides"]["max_ramp"] for t in verifies) <= 64
 
 
 def _spec_with_advance_and_ramp(**ramp_kwargs) -> dict:
@@ -934,7 +953,7 @@ def test_measure_stage_falls_back_to_alternative_advance_level(tmp_path):
             dq = ["demag events 1 > 0"]        # unrestricted snap desyncs
         elif plan.kind == "verify":
             # advance_level 18 (the efficiency winner) NEVER certifies at
-            # any max_ramp; 26 certifies once max_ramp backs off <= 80.
+            # any max_ramp; 26 certifies for max_ramp <= 80.
             if ov.get("advance_level") == 18:
                 dq = ["demag events 1 > 0"]
             elif ov.get("advance_level") == 26 and ov["max_ramp"] > 80:
@@ -951,8 +970,10 @@ def test_measure_stage_falls_back_to_alternative_advance_level(tmp_path):
 
     st = t.manifest["stages"]["ramp"]
     assert st["used_fallback_settings"] == {"advance_level": 26}
-    assert st["winner"] == {"advance_level": 26, "max_ramp": 60}
-    assert t.manifest["incumbent"] == {"advance_level": 26, "max_ramp": 60}
+    # Bubble from floor + binary refine finds the largest safe value (80),
+    # not the old 0.7-backoff ladder's first hit (60).
+    assert st["winner"] == {"advance_level": 26, "max_ramp": 80}
+    assert t.manifest["incumbent"] == {"advance_level": 26, "max_ramp": 80}
 
 
 def test_measure_stage_fallback_verifies_exactly_what_it_adopts(tmp_path):
@@ -992,8 +1013,9 @@ def test_measure_stage_fallback_verifies_exactly_what_it_adopts(tmp_path):
     t._run_measure_stage(ramp_stage)
 
     # stage.fixed (pwm_frequency=8) must have been the value actually
-    # snap-tested ...
-    assert seen_pwm_frequency_at_certify == [8]
+    # snap-tested on every verify ...
+    assert seen_pwm_frequency_at_certify
+    assert all(x == 8 for x in seen_pwm_frequency_at_certify)
     # ... and the SAME value the session adopts going forward.
     assert t.manifest["incumbent"]["pwm_frequency"] == 8
 
