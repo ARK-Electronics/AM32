@@ -62,13 +62,15 @@ INITA=$(sec_size .init_array)
 FINIA=$(sec_size .fini_array)
 DATA=$(sec_size .data)
 BSS=$(sec_size .bss)
+# Survives soft-reset (not zeroed); currently the signal-lost boot cookie
+NOINIT=$(sec_size .noinit)
 HEAPSTACK=$(sec_size ._user_heap_stack)
 
 # RX image in flash: code + const + vectab + filename + init arrays +
 # the flash load image of .data
 FLASH_USED=$((ISR + TEXT + RODATA + INITA + FINIA + FILE_NAME_SZ + DATA))
-# RAM at runtime: .data + .bss + heap/stack reservation
-RAM_USED=$((DATA + BSS + HEAPSTACK))
+# RAM at runtime: .data + .bss + .noinit + heap/stack reservation
+RAM_USED=$((DATA + BSS + NOINIT + HEAPSTACK))
 
 FLASH_MAX=$((FLASH_CAPACITY * FLASH_MAX_PCT / 100))
 RAM_MAX=$((RAM_CAPACITY * RAM_MAX_PCT / 100))
@@ -77,7 +79,7 @@ flash_pct=$(awk -v u="$FLASH_USED" -v c="$FLASH_CAPACITY" 'BEGIN{printf "%.2f", 
 ram_pct=$(awk -v u="$RAM_USED" -v c="$RAM_CAPACITY" 'BEGIN{printf "%.2f", 100*u/c}')
 
 echo "=== size check: $ELF ==="
-echo "  .text=$TEXT .rodata=$RODATA .data=$DATA .bss=$BSS heap/stack=$HEAPSTACK"
+echo "  .text=$TEXT .rodata=$RODATA .data=$DATA .bss=$BSS .noinit=$NOINIT heap/stack=$HEAPSTACK"
 echo "  FLASH used=$FLASH_USED / $FLASH_CAPACITY (${flash_pct}%)  limit=${FLASH_MAX} (${FLASH_MAX_PCT}%)"
 echo "  RAM   used=$RAM_USED / $RAM_CAPACITY (${ram_pct}%)  limit=${RAM_MAX} (${RAM_MAX_PCT}%)"
 
