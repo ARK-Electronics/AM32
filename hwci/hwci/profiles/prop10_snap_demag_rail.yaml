@@ -1,0 +1,50 @@
+name: prop10_snap_demag_rail
+description: >
+  PR48 episode-rail validation on the real constant-demag vector for the 10"
+  prop: spinning snap transitions (tuner ramp-stage geometry). History on this
+  rig: measure snaps 0.20->0.55 drew 100-165 A with demag (spec note,
+  ark4in1-900kv-10inch), and the 12:00 tune baselines ground through t30 with
+  ~1650 blind steps / rpm halved / 40 A for a full 2 s hold without
+  recovering. Settings are NOT the trigger (failing and passing runs used the
+  same tune) - run with config/prop10_good_tuned.bin. EXPECTED on PR48: if
+  the snap desyncs, the blind cut bounds current, blind/miss-limit stall
+  episodes charge the bucket with growing coasts, and sustained cycling
+  latches FAULT_STUCK (perf_bemf_timeout >= 102); the cut segment clears the
+  latch and hold15 must spin healthy. The failure is nondeterministic - two
+  snap bites per run; repeat the run if both stay clean. Safety current sits
+  between the healthy snap transient (~40 A) and the historic runaway
+  (100+ A) so a rail failure aborts immediately.
+sample_rate_hz: 200
+arm_settle_s: 2.0
+pole_pairs: 7
+demag_rpm_drop_fraction: 0.25
+demag_commutation_spike: 3.0
+steady_tail_fraction: 0.5
+
+safety:
+  # The INITIAL snap transient on this prop is legitimately 30-75 A for
+  # tens of ms (healthy morning snap95: 67 A under a 120 A allowance) and
+  # no desync rail can act inside the first grind window - runs 1-3
+  # aborted on that transient at 60 A and proved nothing. 85 sits above
+  # the honest transient band and below the historic 100-165 A runaway.
+  max_current_a: 85.0
+  max_motor_temp_c: 80.0
+  max_rpm: 12000
+  max_thrust_n: 40.0
+
+smoke_gates:
+  enabled: false
+
+segments:
+  - {label: idle,    throttle: 0.00, duration_s: 2.0}
+  - {label: spool,   throttle: 0.20, duration_s: 3.0, ramp: true}
+  - {label: hold20a, throttle: 0.20, duration_s: 3.0, steady: true}
+  - {label: snap55a, throttle: 0.55, duration_s: 3.0}   # historic 100-165 A demag vector
+  - {label: back20a, throttle: 0.20, duration_s: 3.0}   # decel re-sync stress
+  - {label: snap55b, throttle: 0.55, duration_s: 3.0}
+  - {label: back20b, throttle: 0.20, duration_s: 3.0}
+  - {label: cut,     throttle: 0.00, duration_s: 4.0}   # latch clear (pilot zero throttle)
+  - {label: ramp15,  throttle: 0.15, duration_s: 3.0, ramp: true}
+  - {label: hold15,  throttle: 0.15, duration_s: 4.0, steady: true}  # healthy restart check
+  - {label: rampdn,  throttle: 0.00, duration_s: 2.0, ramp: true}
+  - {label: stop,    throttle: 0.00, duration_s: 2.0}

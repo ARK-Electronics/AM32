@@ -289,7 +289,16 @@ void setInput()
 #ifndef BRUSHED_MODE
 	if (escMaySixStepThrottle()) {
 		if (input >= 47 + (80 * eepromBuffer.use_sine_start)) {
-			if (!escIsDriving()) {
+			// Re-entry into six-step happens HERE, at input-frame rate -
+			// not in runtimeMotorModeTick. The episode-rail coast (holdoff
+			// or latched fault) must gate this branch or the mode tick's
+			// running=0 and this restart chatter against each other at
+			// kHz rate, pulsing startMotor() commutations through the
+			// whole "coast". escIsFault() also covers the latch when
+			// stuck_rotor_protection is disabled in EEPROM (the
+			// faultHandleStuckRotorIfNeeded gate above honors that flag;
+			// the episode rail is independent of it).
+			if (!escIsDriving() && !escIsFault() && !faultDesyncRestartHoldoffActive()) {
 				allOff();
 				if (!old_routine) {
 					startMotor();
@@ -463,11 +472,18 @@ void setInput()
 	if (zc_demag_run > zc_untrusted_steps) {
 		zc_untrusted_steps = zc_demag_run;
 	}
-	if (!old_routine && running && zc_untrusted_steps >= 2) {
-		uint16_t blind_cap = (zc_untrusted_steps >= 4) ? 250 : 500;
-		if (blind_cap < min_startup_duty) {
-			blind_cap = min_startup_duty;
-		}
+	// zc_grind_hold_ms keeps the cut engaged through a blind-grind (faults.c):
+	// without it a single accepted crossing resets zc_blind_steps, the cap
+	// releases, and duty re-slews into the next spike (bench: 102 A limit
+	// cycle at 19.5% miss rate, pr48-snap-rail-1).
+	if (!old_routine && running && (zc_untrusted_steps >= 2 || zc_grind_hold_ms)) {
+		/* Fixed protective cut — do NOT raise the floor with EEPROM
+		 * min_startup_duty / startup power. A misconfigured high
+		 * startup duty is exactly what this cut must bound; scaling
+		 * it away left wrong-phase drive near full heat. Worst case
+		 * the motor coasts and the stall rail restarts (or the
+		 * episode bucket latches). */
+		uint16_t blind_cap = (zc_untrusted_steps >= 4 || zc_grind_hold_ms) ? 250 : 500;
 		if (duty_cycle_setpoint > blind_cap) {
 			duty_cycle_setpoint = blind_cap;
 		}
@@ -575,6 +591,7 @@ RAM_FUNC void tenKhzRoutine()
 		if (one_khz_loop_counter > PID_LOOP_DIVIDER) { // 1khz PID loop
 			PROCESS_ADC_FLAG = 1;		       // set flag to do new adc read at lower priority
 			one_khz_loop_counter = 0;
+			faultDesyncEpisodeTick1kHz();
 			if (use_current_limit && escIsDriving()) {
 				use_current_limit_adjust -=
 					(int16_t)(doPidCalculations(&currentPid, actual_current, eepromBuffer.limits.current * 2 * 100) /

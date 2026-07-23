@@ -37,6 +37,9 @@ extern volatile uint8_t zc_miss_bucket;
 extern volatile uint8_t zc_pre_seen;
 extern volatile uint8_t zc_demag_run;
 extern volatile uint32_t zc_demag_accepts;
+/* Blind-grind rail (faults.c): blind steps this 100 ms window / cut hold */
+extern volatile uint8_t zc_blind_window_count;
+extern volatile uint16_t zc_grind_hold_ms;
 extern uint8_t filter_level;
 extern uint8_t bad_count;
 extern uint8_t bad_count_threshold;
@@ -47,6 +50,9 @@ extern uint8_t changeover_step;
 extern uint8_t stuckcounter;
 /* uint32_t always: DroneCAN telemetry and SITL stats both use 32-bit. */
 extern uint32_t desync_happened;
+/* Cross-episode desync rail (faults.c); saturating charge, time-based drain. */
+extern volatile uint8_t desync_episode_bucket;
+extern volatile uint16_t desync_restart_holdoff_ms;
 
 /* --- duty / throttle --- */
 extern volatile uint16_t duty_cycle;

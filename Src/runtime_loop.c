@@ -122,6 +122,7 @@ void runtimeProcessDesyncCheck(void)
 			slow_avg_revs = 0;
 			zero_crosses = 0;
 			desync_happened++;
+			faultDesyncEpisodeCharge(DESYNC_EPISODE_JUMP);
 			if ((!eepromBuffer.bi_direction && (input > 47)) || commutation_interval > 1000) {
 				running = 0;
 			}
@@ -131,6 +132,11 @@ void runtimeProcessDesyncCheck(void)
 				average_interval = 5000;
 			}
 			last_duty_cycle = min_startup_duty / 2;
+			if (faultDesyncRestartHoldoffActive() || escIsFault()) {
+				running = 0;
+				allOff();
+				maskPhaseInterrupts();
+			}
 		}
 		desync_check = 0;
 		//	}
@@ -260,6 +266,22 @@ void runtimeMotorModeTick(void)
 	/* Once per main loop: ISR flag side-effects → named esc_state (not in 20 kHz). */
 	escReconcileFromFlags();
 	stuckcounter = 0;
+	/* Post-desync coast: do not re-enter six-step until holdoff expires.
+	 * (setInput's start branch is gated the same way - this alone cannot
+	 * hold the motor off, it only kills a run that was already going.) */
+	if (faultDesyncRestartHoldoffActive() || escIsFault()) {
+		if (running) {
+			running = 0;
+			allOff();
+			maskPhaseInterrupts();
+		}
+		// The early return skips the e_rpm update below; zero it so
+		// telemetry (DroneCAN) reports the coast instead of the last
+		// running rpm for up to the whole holdoff.
+		e_rpm = 0;
+		k_erpm = 0;
+		return;
+	}
 	if (!escInSineStart()) {
 		e_rpm = running * (600000 / e_com_time); // in tens of rpm
 		k_erpm = e_rpm / 10;			 // ecom time is time for one electrical revolution in microseconds

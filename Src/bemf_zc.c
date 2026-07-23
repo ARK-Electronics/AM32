@@ -87,7 +87,11 @@ RAM_FUNC void PeriodElapsedCallback()
 			// INTERVAL_TIMER past the 45000 stall threshold so the
 			// main-loop rail (faultHandleBemfIntervalStall) restarts
 			// through the startup path on its next pass instead of
-			// 22 ms from now.
+			// 22 ms from now. That rail also charges the cross-episode
+			// desync bucket - do NOT charge here as well (it double-
+			// counted the episode), and the stall rail is guaranteed to
+			// see it: comparator interrupts are masked, so no accepted
+			// crossing can reset INTERVAL_TIMER before the main loop.
 			maskPhaseInterrupts();
 			SET_INTERVAL_TIMER_COUNT(46000);
 			return;
@@ -95,6 +99,9 @@ RAM_FUNC void PeriodElapsedCallback()
 		blind = 1;
 		zc_blind_steps++;
 		zc_miss_bucket += ZC_MISS_BUCKET_INC;
+		if (zc_blind_window_count < 255) {
+			zc_blind_window_count++; // grind-rate window (faults.c, 1 kHz)
+		}
 		HWCI_PERF_BLIND_STEP();
 		// Take the full elapsed time as the (late) crossing measurement
 		// and commutate now. The inflated interval feeds the average so
@@ -338,6 +345,7 @@ void startMotor()
 		zc_deadline_armed = 0;
 		zc_blind_steps = 0;
 		zc_miss_bucket = 0;
+		zc_blind_window_count = 0;
 		zc_pre_seen = 1;
 		zc_demag_run = 0;
 		commutate();

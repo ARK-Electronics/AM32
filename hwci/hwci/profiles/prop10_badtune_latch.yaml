@@ -1,0 +1,43 @@
+name: prop10_badtune_latch
+description: >
+  PR48 episode-rail validation on the known bad tune (advance 26 + auto_advance
+  + fixed pwm reproduced constant demag at t50 / 52 A on 900KV + 10x5x3, 6S;
+  see tune-900kv-10inch-70pct-20260723 runs). EXPECTED behavior on PR48
+  firmware: demag-late power cut bounds current far below the 52 A runaway,
+  desync episodes charge the bucket, and sustained cycling latches FAULT_STUCK
+  (bemf_timeout_samples > 0, esc_state FAULT_STUCK) during hold50/hold60. The
+  zero-throttle segment must clear the latch and the final 20% hold must spin
+  healthy. Smoke gates are off - the "failure" is the point; judge from the
+  report. Safety current is set BELOW the historic 52 A runaway so a rail
+  failure aborts the run instead of cooking the FETs. Write
+  config/prop10_badtune_adv26.bin before this run; restore
+  config/prop10_good_tuned.bin after.
+sample_rate_hz: 200
+arm_settle_s: 3.0
+pole_pairs: 7
+demag_rpm_drop_fraction: 0.25
+demag_commutation_spike: 3.0
+steady_tail_fraction: 0.5
+
+safety:
+  max_current_a: 35.0
+  max_motor_temp_c: 80.0
+  max_rpm: 12000
+  max_thrust_n: 35.0
+
+smoke_gates:
+  enabled: false
+
+segments:
+  - {label: idle,    throttle: 0.00, duration_s: 2.0}
+  - {label: ramp30,  throttle: 0.30, duration_s: 3.0, ramp: true}
+  - {label: hold30,  throttle: 0.30, duration_s: 4.0, steady: true}   # healthy reference
+  - {label: ramp50,  throttle: 0.50, duration_s: 3.0, ramp: true}
+  - {label: hold50,  throttle: 0.50, duration_s: 8.0}                 # historic failure point
+  - {label: ramp60,  throttle: 0.60, duration_s: 3.0, ramp: true}
+  - {label: hold60,  throttle: 0.60, duration_s: 6.0}                 # push through if 50 rode out
+  - {label: cut,     throttle: 0.00, duration_s: 4.0}                 # latch clear (pilot zero throttle)
+  - {label: ramp20,  throttle: 0.20, duration_s: 3.0, ramp: true}
+  - {label: hold20,  throttle: 0.20, duration_s: 4.0, steady: true}   # healthy restart after clear
+  - {label: rampdn,  throttle: 0.00, duration_s: 3.0, ramp: true}
+  - {label: stop,    throttle: 0.00, duration_s: 2.0}

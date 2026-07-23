@@ -1,0 +1,45 @@
+name: prop10_badtune_snap
+description: >
+  PR48 episode-rail validation, snap-start vector. The constant demag-late
+  lock engages on WARM snap starts (bench 2026-07-22: ~1/3 of warm, 100% of
+  hot snap starts settle ~30% slow at 8-10x current) - the slow-ramp
+  staircase (prop10_badtune_latch) does NOT reproduce it. Run this
+  immediately after a warming run, with the bad tune
+  (config/prop10_badtune_adv26.bin) written. Five stop -> snap-to-50% cycles;
+  each snap start from standstill on the hot 10" is the trigger. EXPECTED on
+  PR48: demag-late cut bounds each episode, repeated desync episodes charge
+  the bucket, latch (perf_bemf_timeout >= 102) if it cycles; final segments
+  verify zero-throttle clear + healthy restart. Safety current is far below
+  the historic 52 A lock so a rail failure aborts fast.
+sample_rate_hz: 200
+arm_settle_s: 2.0
+pole_pairs: 7
+demag_rpm_drop_fraction: 0.25
+demag_commutation_spike: 3.0
+steady_tail_fraction: 0.5
+
+safety:
+  max_current_a: 35.0
+  max_motor_temp_c: 80.0
+  max_rpm: 12000
+  max_thrust_n: 35.0
+
+smoke_gates:
+  enabled: false
+
+segments:
+  - {label: idle,    throttle: 0.00, duration_s: 2.0}
+  - {label: snap50a, throttle: 0.50, duration_s: 3.0}   # snap start from standstill
+  - {label: stop_a,  throttle: 0.00, duration_s: 2.5}
+  - {label: snap50b, throttle: 0.50, duration_s: 3.0}
+  - {label: stop_b,  throttle: 0.00, duration_s: 2.5}
+  - {label: snap50c, throttle: 0.50, duration_s: 3.0}
+  - {label: stop_c,  throttle: 0.00, duration_s: 2.5}
+  - {label: snap50d, throttle: 0.50, duration_s: 3.0}
+  - {label: stop_d,  throttle: 0.00, duration_s: 2.5}
+  - {label: snap50e, throttle: 0.50, duration_s: 3.0}
+  - {label: cut,     throttle: 0.00, duration_s: 4.0}   # latch clear window
+  - {label: ramp20,  throttle: 0.20, duration_s: 3.0, ramp: true}
+  - {label: hold20,  throttle: 0.20, duration_s: 4.0, steady: true}  # healthy restart
+  - {label: rampdn,  throttle: 0.00, duration_s: 2.0, ramp: true}
+  - {label: stop,    throttle: 0.00, duration_s: 2.0}
