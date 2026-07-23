@@ -219,6 +219,24 @@ void faultDesyncEpisodeCharge(desync_episode_kind_t kind)
 	desync_episode_drain_ms = 0;
 	desync_episode_apply_backoff();
 
+	// Learned ramp back-off: a desync episode means the configured ramp
+	// outran what this motor/prop can follow, and no reactive signal can
+	// catch it in time (the first ~15 ms of a too-fast transient are
+	// electrically silent - see the note at the slew limiter in
+	// control_loop.c). Clamp all ramp regimes to the fine rate (0.1%/ms,
+	// the rate bench-proven to hold lock on the heaviest supported prop)
+	// for the REST OF THE POWER CYCLE: the first episode is the lesson,
+	// every later transition stays locked, and the episode bucket stops
+	// charging so the latch never fires from ramp misconfiguration alone.
+	// Deliberately not cleared at zero throttle (unlike the bucket):
+	// re-arming the fast ramp would re-desync on the next transient.
+	// A settings write reruns loadEEpromSettings and restores the
+	// configured values - retuning is the way back within a session.
+	ramp_divider = 9;
+	max_ramp_startup = 1;
+	max_ramp_low_rpm = 1;
+	max_ramp_high_rpm = 1;
+
 	if (desync_episode_bucket >= DESYNC_EPISODE_LIMIT) {
 		allOff();
 		maskPhaseInterrupts();

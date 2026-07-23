@@ -303,7 +303,12 @@ __attribute__((optimize("Os"))) static void runtimeTransientGovernorTick(void)
 	// (c) BEMF-headroom ceiling from the live eRPM: equilibrium duty via
 	// the slope (multiply, no divide) plus headroom in duty units.
 	// headroom = HEADROOM_CV*2000/Vbat, folded into scale_q8
-	// (= VREF<<8/Vbat) to save the divide: 300*2000/1480/256 ~= 405/256
+	// (= VREF<<8/Vbat) to save the divide: 300*2000/1480/256 ~= 405/256.
+	// The headroom bounds slip MAGNITUDE only; it cannot prevent a
+	// too-fast ramp from breaking lock (bench rpmhead-snap-40: even 1 V
+	// applied in 4 ms desyncs where 24 A reached gradually stays locked -
+	// the cliff is dV/dt, not level; that is the learned ramp back-off's
+	// job, faultDesyncEpisodeCharge).
 	uint16_t ceiling = 2000;
 	if (closed && gov_conf >= GOV_CONF_ARM) {
 		uint32_t c = ((erpm * gov_slope_q10) >> 10) + ((scale_q8 * 405u) >> 8);

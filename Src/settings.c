@@ -163,6 +163,13 @@ void loadEEpromSettings(void)
 			EDT_ARMED = 1;
 		}
 
+		// Reset to compile defaults first so this load is idempotent: the
+		// eeprom value below only lowers (min semantics), and the learned
+		// ramp back-off (faultDesyncEpisodeCharge) clamps these at runtime
+		// - a settings write is the documented way to restore them.
+		max_ramp_startup = RAMP_SPEED_STARTUP;
+		max_ramp_low_rpm = RAMP_SPEED_LOW_RPM;
+		max_ramp_high_rpm = RAMP_SPEED_HIGH_RPM;
 		if (eepromBuffer.max_ramp < 10) {
 			ramp_divider = 9;
 			max_ramp_startup = eepromBuffer.max_ramp;
