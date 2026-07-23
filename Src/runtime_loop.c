@@ -120,9 +120,21 @@ void runtimeProcessDesyncCheck(void)
 		}
 		if (desynced) {
 			slow_avg_revs = 0;
+			const uint32_t zc_at_desync = zero_crosses;
 			zero_crosses = 0;
 			desync_happened++;
-			faultDesyncEpisodeCharge(DESYNC_EPISODE_JUMP);
+			// Same established-run gate as the stall rail (see
+			// faultHandleBemfIntervalStall): interval jumps while the
+			// loop is still acquiring (zc 11..100) are normal startup
+			// roughness on light motors - charging them stacks holdoff
+			// and ramp back-off onto honest starts until the bucket
+			// latches a motor that never got going (SITL racer model
+			// reproduces this under plain dshot spool). Legacy desync
+			// handling below still restarts; only the episode
+			// accounting is established-runs-only.
+			if (zc_at_desync > 100) {
+				faultDesyncEpisodeCharge(DESYNC_EPISODE_JUMP);
+			}
 			if ((!eepromBuffer.bi_direction && (input > 47)) || commutation_interval > 1000) {
 				running = 0;
 			}
