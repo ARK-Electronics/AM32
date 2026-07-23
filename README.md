@@ -97,30 +97,30 @@ Upstream feature docs and crawler notes: [AM32 wiki / crawler hardware](https://
 
 AM32 has no speaker. Beeps are PWM on the motor phases so the windings act as a small transducer (same idea as other BLHeli-family ESCs). Implementation: [`Src/sounds.c`](Src/sounds.c) / [`Inc/sounds.h`](Inc/sounds.h). Volume is EEPROM `beep_volume` (0–11; DroneCAN param `BEEP_VOLUME`, default 5). Sounds only run when the motor is **not spinning** (idle / disarmed / zero throttle as applicable).
 
-Pitch below is **relative** (higher PWM timer prescaler → lower pitch). Exact Hz depends on MCU clock and timer setup.
+Pitch below is **relative** (higher PWM timer prescaler → lower pitch). Exact Hz depends on MCU clock and timer setup. The ARK signature tunes (startup and arm/beacon-4 morse) instead use fixed note frequencies via `playBJNote`.
 
 ### Quick reference
 
 | When you hear it | Pattern (pitch) | Function | Meaning |
 |------------------|-----------------|----------|---------|
-| Power-up (brushless) | 3 rising beeps (or custom melody) | `playStartupTune` | Firmware booted and is ready for input |
+| Power-up (brushless) | Morse **“ARK”** (·– / ·–· / –·–) rising C6 → E6 → G6 (or custom melody) | `playStartupTune` | Firmware booted and is ready for input |
 | Power-up (brushed build) | 4 rising beeps | `playBrushedStartupTune` | Brushed-mode startup |
-| Arm / throttle zero accepted | 1 rising 3-note phrase | `playInputTune` | ESC armed / input lock-in |
-| Arm + cell LVC enabled | That phrase **once per cell** | `playInputTune` × N | Detected pack cell count (`Vbat / 3.70`) |
+| Arm / throttle zero accepted | Morse **“R”** (·–·) on G6 | `playInputTune` | ESC armed / input lock-in (“roger”) |
+| Arm + cell LVC enabled | That “R” **once per cell** | `playInputTune` × N | Detected pack cell count (`Vbat / 3.70`) |
 | Stick cal entered (PWM) | Descending whoop/sweep | `playBeaconTune3` | Entered servo high/low calibration |
 | Stick cal high done | 2 notes, **rising** | `playDefaultTone` | Max endpoint captured |
 | Stick cal low done | 2 notes, **falling** | `playChangedTone` | Min endpoint saved to EEPROM |
 | DShot beacon 1 or 5 | Same as “default” 2-note rising | `playDefaultTone` | Beacon / locate |
 | DShot beacon 2 | 2 notes, **falling** | `playChangedTone` | Beacon |
 | DShot beacon 3 | Descending sweep | `playBeaconTune3` | Beacon |
-| DShot beacon 4 | 3 notes, **falling** | `playInputTune2` | Beacon |
+| DShot beacon 4 | Morse **“R”** (·–·) on E6 | `playInputTune2` | Beacon |
 | DShot cmd 12 (save settings) | Rising if normal dir, falling if reversed | `playDefaultTone` / `playChangedTone` | Settings written |
 
 ### Startup
 
 | Function | When | Pattern |
 |----------|------|---------|
-| **`playStartupTune`** | Normal brushless boot (after init; also CRSF path) | If EEPROM custom tune byte 0 is programmed (not `0xFF`): plays **BlueJay-compatible** melody from `eepromBuffer.tune[]` via `playBlueJayTune`. Otherwise default: **three rising beeps** (~200 ms each), each on a different phase (prescalers 55 → 40 → 25). |
+| **`playStartupTune`** | Normal brushless boot (after init; also CRSF path) | If EEPROM custom tune byte 0 is programmed (not `0xFF`): plays **BlueJay-compatible** melody from `eepromBuffer.tune[]` via `playBlueJayTune`. Otherwise default: the **ARK signature tune** — “ARK” in morse code (·– / ·–· / –·–), one letter per step up a C major arpeggio (C6 → E6 → G6), ~1.4 s total. |
 | **`playBrushedStartupTune`** | `BRUSHED_MODE` builds only | **Four rising beeps** (~300 ms), phases 1–4 (prescalers 40 → 30 → 25 → 20). |
 | **`playBlueJayTune`** | Custom startup only | Notes/rests encoded in EEPROM tune blob (configurator “custom startup music”). Inter-note pause can scale with tune header byte 3. |
 
@@ -132,9 +132,9 @@ Played from the 20 kHz control path when the ESC transitions to armed-idle after
 
 | Function | When | Pattern |
 |----------|------|---------|
-| **`playInputTune`** | Armed with **low-voltage cutoff mode 1** (cell-based) **off**, or as each cell beep | **Three notes, rising pitch** (~100 ms; prescalers 80 → 70 → 40). |
-| **Cell-count beeps** | Armed **and** `low_voltage_cut_off == 1` | `cell_count = battery_voltage / 370` (≈ 3.70 V/cell), then **`playInputTune` once per cell** with ~100 ms gaps. Count the phrases to read pack cell count. |
-| **`playInputTune2`** | DShot beacon 4; also used as deferred arm beep on some AT415 builds | **Three notes, falling pitch** (~75 ms; prescalers 60 → 80 → 90). |
+| **`playInputTune`** | Armed with **low-voltage cutoff mode 1** (cell-based) **off**, or as each cell beep | **Morse “R”** (·–·, “roger — signal received”) on G6 (≈ 1568 Hz), ~400 ms. |
+| **Cell-count beeps** | Armed **and** `low_voltage_cut_off == 1` | `cell_count = battery_voltage / 370` (≈ 3.70 V/cell), then **`playInputTune` once per cell** with ~100 ms gaps. Count the “R”s to read pack cell count. |
+| **`playInputTune2`** | DShot beacon 4; also used as deferred arm beep on some AT415 builds | Same **morse “R”** one arpeggio step lower (E6, ≈ 1319 Hz) so the beacon is distinguishable from the arm tune. |
 
 ### Servo PWM stick calibration
 
@@ -153,7 +153,7 @@ DShot commands run only when **armed**, **motor not running**, and the command i
 | **1** | 1 | `playDefaultTone` — 2 notes rising | Beacon 1 |
 | **2** | 2 | `playChangedTone` — 2 notes falling | Beacon 2 |
 | **3** | 3 | `playBeaconTune3` — long descending sweep | Beacon 3 |
-| **4** | 4 | `playInputTune2` — 3 notes falling | Beacon 4 |
+| **4** | 4 | `playInputTune2` — morse “R” on E6 | Beacon 4 |
 | **5** | 5 | `playDefaultTone` — same as beacon 1 | Beacon 5 |
 | **12** | `1 + dir_reversed` | Rising if direction normal, falling if reversed | **Save settings** confirmation |
 
