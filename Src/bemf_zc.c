@@ -14,6 +14,7 @@
 #include "peripherals.h"
 #include "functions.h"
 #include "eeprom.h"
+#include "faults.h"
 #include "hwci_perf.h"
 
 /*
@@ -87,9 +88,11 @@ RAM_FUNC void PeriodElapsedCallback()
 			// INTERVAL_TIMER past the 45000 stall threshold so the
 			// main-loop rail (faultHandleBemfIntervalStall) restarts
 			// through the startup path on its next pass instead of
-			// 22 ms from now.
+			// 22 ms from now. Charge the cross-episode desync
+			// bucket so a bad-tune restart loop latches off.
 			maskPhaseInterrupts();
 			SET_INTERVAL_TIMER_COUNT(46000);
+			faultDesyncEpisodeCharge(DESYNC_EPISODE_BLIND_LIMIT);
 			return;
 		}
 		blind = 1;

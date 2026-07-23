@@ -118,6 +118,96 @@ void faultUpdateBemfTimeoutPolicy(void)
 #endif
 }
 
+/*
+ * Cross-episode desync protection. Per-episode rails (blind-step cap, miss
+ * bucket, demag-late power cut) bound a single event; this bucket bounds a
+ * *repeating* restart→desync cycle from a bad tune / wrong prop match.
+ *
+ * Charge rates are tuned so 3–5 hard episodes latch within ~1–2 s of cycling,
+ * while a couple of honest in-flight desyncs drain out in a few seconds of
+ * healthy closed-loop. Restart holdoff grows with the bucket so the FETs
+ * spend most of each cycle cooling instead of immediately re-entering the
+ * wrong-phase current spike.
+ */
+#define DESYNC_EPISODE_LIMIT 40
+#define DESYNC_EPISODE_CHARGE_JUMP 8
+#define DESYNC_EPISODE_CHARGE_STALL 12
+#define DESYNC_EPISODE_CHARGE_BLIND 12
+#define DESYNC_EPISODE_DRAIN_MS 100 /* −1 charge per this many ms of healthy CL */
+#define DESYNC_BACKOFF_BASE_MS 100
+#define DESYNC_BACKOFF_STEP_MS 50
+#define DESYNC_BACKOFF_MAX_MS 500
+
+static uint8_t desync_episode_drain_ms;
+
+static void desync_episode_apply_backoff(void)
+{
+	uint16_t hold = (uint16_t)(DESYNC_BACKOFF_BASE_MS + (uint16_t)desync_episode_bucket * DESYNC_BACKOFF_STEP_MS);
+	if (hold > DESYNC_BACKOFF_MAX_MS) {
+		hold = DESYNC_BACKOFF_MAX_MS;
+	}
+	if (hold > desync_restart_holdoff_ms) {
+		desync_restart_holdoff_ms = hold;
+	}
+}
+
+void faultDesyncEpisodeCharge(desync_episode_kind_t kind)
+{
+#ifndef BRUSHED_MODE
+	uint8_t inc = DESYNC_EPISODE_CHARGE_STALL;
+	if (kind == DESYNC_EPISODE_JUMP) {
+		inc = DESYNC_EPISODE_CHARGE_JUMP;
+	} else if (kind == DESYNC_EPISODE_BLIND_LIMIT) {
+		inc = DESYNC_EPISODE_CHARGE_BLIND;
+	}
+	if ((uint16_t)desync_episode_bucket + inc > 255) {
+		desync_episode_bucket = 255;
+	} else {
+		desync_episode_bucket = (uint8_t)(desync_episode_bucket + inc);
+	}
+	desync_episode_drain_ms = 0;
+	desync_episode_apply_backoff();
+
+	if (desync_episode_bucket >= DESYNC_EPISODE_LIMIT) {
+		allOff();
+		maskPhaseInterrupts();
+		escToFaultStuck();
+#	ifdef USE_RGB_LED
+		setIndividualRGBLed(1, 0, 0);
+#	endif
+	}
+#else
+	(void)kind;
+#endif
+}
+
+void faultDesyncEpisodeTick1kHz(void)
+{
+#ifndef BRUSHED_MODE
+	if (desync_restart_holdoff_ms > 0) {
+		desync_restart_holdoff_ms--;
+	}
+
+	/* Drain only in established, trusted closed loop. */
+	if (escInClosedLoop() && zc_blind_steps == 0 && zc_demag_run == 0 && bemf_timeout_happened == 0 && desync_episode_bucket > 0) {
+		if (desync_episode_drain_ms < 255) {
+			desync_episode_drain_ms++;
+		}
+		if (desync_episode_drain_ms >= DESYNC_EPISODE_DRAIN_MS) {
+			desync_episode_drain_ms = 0;
+			desync_episode_bucket--;
+		}
+	} else {
+		desync_episode_drain_ms = 0;
+	}
+#endif
+}
+
+uint8_t faultDesyncRestartHoldoffActive(void)
+{
+	return (uint8_t)(desync_restart_holdoff_ms > 0);
+}
+
 void faultHandleBemfIntervalStall(void)
 {
 	/* Six-step only (not sine soft-start). */
@@ -125,8 +215,21 @@ void faultHandleBemfIntervalStall(void)
 		bemf_timeout_happened++;
 
 		maskPhaseInterrupts();
+		faultDesyncEpisodeCharge(DESYNC_EPISODE_STALL_RAIL);
+		if (escIsFault()) {
+			/* Episode rail latched: do not re-enter startup. */
+			zero_crosses = 0;
+			running = 0;
+			return;
+		}
 		escNoteStallOrDesync(1);
 		zero_crosses = 0;
+		if (faultDesyncRestartHoldoffActive()) {
+			/* Coast until holdoff expires; main loop will re-arm. */
+			running = 0;
+			allOff();
+			return;
+		}
 		zcfoundroutine();
 	}
 }

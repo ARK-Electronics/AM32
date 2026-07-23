@@ -47,6 +47,9 @@ extern uint8_t changeover_step;
 extern uint8_t stuckcounter;
 /* uint32_t always: DroneCAN telemetry and SITL stats both use 32-bit. */
 extern uint32_t desync_happened;
+/* Cross-episode desync rail (faults.c); saturating charge, time-based drain. */
+extern volatile uint8_t desync_episode_bucket;
+extern volatile uint16_t desync_restart_holdoff_ms;
 
 /* --- duty / throttle --- */
 extern volatile uint16_t duty_cycle;
