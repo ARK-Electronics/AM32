@@ -90,6 +90,14 @@
 #	define NFAULT_PORT GPIOB
 #	define NFAULT_PIN LL_GPIO_PIN_5
 #	define TARGET_MIN_BEMF_COUNTS 3
+/* Unconfigured-eeprom max_ramp default. The generic 160 (16%/ms) is a
+	 * racing-quad value; ARK vehicles fly 5-10"+ where nothing needs it and
+	 * heavy props desync on it (bench 2026-07-23 bracket on 900KV+10x5x3:
+	 * snap 20->55%% breaks lock at max_ramp 5/10/20/40, clean at 1). 40
+	 * (4%%/ms, full stick in 25 ms) keeps 5" response while halving the
+	 * unconfigured worst case; per-airframe provisioning still writes the
+	 * tuned value (10": 1) - this is only the blank-eeprom fallback. */
+#	define TARGET_DEFAULT_MAX_RAMP 40
 /* Closed-loop when commutation_interval < this (0.5 us ticks). Default
 	 * F051 fallback is 2000; noprop ~1k RPM has CI~2700 so the ESC stayed
 	 * open-loop (rough low-speed sound). Bench sweep on 900KV noprop:
@@ -136,6 +144,12 @@
 
 #ifndef TARGET_STALL_PROTECTION_INTERVAL
 #	define TARGET_STALL_PROTECTION_INTERVAL 6500
+#endif
+
+/* Blank-eeprom max_ramp fallback (settings.c default-restore). Targets may
+ * override; upstream-equivalent 160 (16%/ms) otherwise. */
+#ifndef TARGET_DEFAULT_MAX_RAMP
+#	define TARGET_DEFAULT_MAX_RAMP 160
 #endif
 
 #ifndef RAMP_SPEED_STARTUP
