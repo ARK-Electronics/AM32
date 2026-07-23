@@ -113,28 +113,39 @@ void playBlueJayTune(void)
 	RELOAD_WATCHDOG_COUNTER();
 }
 
-#define ARK_MORSE_UNIT_MS 50 // morse dot length; dash is 3 units
+// equal-tempered pitches of the ARK signature arpeggio
+#define ARK_NOTE_C6 1047
+#define ARK_NOTE_E6 1319
+#define ARK_NOTE_G6 1568
 
-static void playArkMorseLetter(const char *code, uint16_t freq)
+#define ARK_MORSE_UNIT_MS 50 // startup tune dot length; dash is 3 units
+// arm/beacon tunes run inside the control loop with IRQs off, so they use a
+// faster dot to keep the busy-wait no longer than the old ~300 ms tune
+#define ARK_ARM_MORSE_UNIT_MS 40
+
+static void playArkMorseLetter(const char *code, uint16_t freq, uint16_t unit_ms)
 {
 	while (*code) {
 		RELOAD_WATCHDOG_COUNTER();
-		playBJNote(freq, (*code == '-') ? (3 * ARK_MORSE_UNIT_MS) : ARK_MORSE_UNIT_MS);
+		playBJNote(freq, (*code == '-') ? (3 * unit_ms) : unit_ms);
 		SET_DUTY_CYCLE_ALL(0); // silence between elements
-		delayMillis(ARK_MORSE_UNIT_MS);
+		delayMillis(unit_ms);
 		code++;
 	}
 }
 
 // ARK signature tune: "ARK" in morse code (.- .-. -.-), each letter one
-// step up a C major arpeggio so the tune rises like the stock beeps do
+// step up a C major arpeggio so the tune rises like the stock beeps did;
+// letters also walk the commutation steps the stock beeps used
 static void playArkTune(void)
 {
-	playArkMorseLetter(".-", 1047); // A on C6
+	playArkMorseLetter(".-", ARK_NOTE_C6, ARK_MORSE_UNIT_MS); // A
 	delayMillis(2 * ARK_MORSE_UNIT_MS);
-	playArkMorseLetter(".-.", 1319); // R on E6
+	comStep(5);
+	playArkMorseLetter(".-.", ARK_NOTE_E6, ARK_MORSE_UNIT_MS); // R
 	delayMillis(2 * ARK_MORSE_UNIT_MS);
-	playArkMorseLetter("-.-", 1568); // K on G6
+	comStep(6);
+	playArkMorseLetter("-.-", ARK_NOTE_G6, ARK_MORSE_UNIT_MS); // K
 }
 
 void playStartupTune()
@@ -211,7 +222,7 @@ void playInputTune2()
 	__disable_irq();
 	RELOAD_WATCHDOG_COUNTER();
 	comStep(1);
-	playArkMorseLetter(".-.", 1319); // R on E6
+	playArkMorseLetter(".-.", ARK_NOTE_E6, ARK_ARM_MORSE_UNIT_MS); // R
 	allOff();
 	SET_PRESCALER_PWM(0);
 	signaltimeout = 0;
@@ -226,7 +237,7 @@ void playInputTune()
 	__disable_irq();
 	RELOAD_WATCHDOG_COUNTER();
 	comStep(3);
-	playArkMorseLetter(".-.", 1568); // R on G6
+	playArkMorseLetter(".-.", ARK_NOTE_G6, ARK_ARM_MORSE_UNIT_MS); // R
 	allOff();
 	SET_PRESCALER_PWM(0);
 	signaltimeout = 0;
