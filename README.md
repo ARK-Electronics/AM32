@@ -132,7 +132,7 @@ Played from the 20 kHz control path when the ESC transitions to armed-idle after
 
 | Function | When | Pattern |
 |----------|------|---------|
-| **`playInputTune`** | Armed with **low-voltage cutoff mode 1** (cell-based) **off**, or as each cell beep | **Morse “R”** (·–·, “roger — signal received”) on G6 (≈ 1568 Hz), ~400 ms. |
+| **`playInputTune`** | Armed with **low-voltage cutoff mode 1** (cell-based) **off**, or as each cell beep | **Morse “R”** (·–·, “roger — signal received”) on G6 (≈ 1568 Hz), ~320 ms (same busy-wait budget as the old tune). |
 | **Cell-count beeps** | Armed **and** `low_voltage_cut_off == 1` | `cell_count = battery_voltage / 370` (≈ 3.70 V/cell), then **`playInputTune` once per cell** with ~100 ms gaps. Count the “R”s to read pack cell count. |
 | **`playInputTune2`** | DShot beacon 4; also used as deferred arm beep on some AT415 builds | Same **morse “R”** one arpeggio step lower (E6, ≈ 1319 Hz) so the beacon is distinguishable from the arm tune. |
 
