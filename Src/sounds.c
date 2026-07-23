@@ -113,6 +113,30 @@ void playBlueJayTune(void)
 	RELOAD_WATCHDOG_COUNTER();
 }
 
+#define ARK_MORSE_UNIT_MS 50 // morse dot length; dash is 3 units
+
+static void playArkMorseLetter(const char *code, uint16_t freq)
+{
+	while (*code) {
+		RELOAD_WATCHDOG_COUNTER();
+		playBJNote(freq, (*code == '-') ? (3 * ARK_MORSE_UNIT_MS) : ARK_MORSE_UNIT_MS);
+		SET_DUTY_CYCLE_ALL(0); // silence between elements
+		delayMillis(ARK_MORSE_UNIT_MS);
+		code++;
+	}
+}
+
+// ARK signature tune: "ARK" in morse code (.- .-. -.-), each letter one
+// step up a C major arpeggio so the tune rises like the stock beeps do
+static void playArkTune(void)
+{
+	playArkMorseLetter(".-", 1047); // A on C6
+	delayMillis(2 * ARK_MORSE_UNIT_MS);
+	playArkMorseLetter(".-.", 1319); // R on E6
+	delayMillis(2 * ARK_MORSE_UNIT_MS);
+	playArkMorseLetter("-.-", 1568); // K on G6
+}
+
 void playStartupTune()
 {
 	__disable_irq();
@@ -120,20 +144,7 @@ void playStartupTune()
 	if (eepromBuffer.tune[0] != ERASED_FLASH_BYTE) {
 		playBlueJayTune();
 	} else {
-		SET_AUTO_RELOAD_PWM(TIM1_AUTORELOAD);
-		setCaptureCompare();
-		comStep(3);	       // activate a pwm channel
-		SET_PRESCALER_PWM(55); // frequency of beep
-		delayMillis(200);      // duration of beep
-
-		comStep(5);
-		SET_PRESCALER_PWM(40); // next beep is higher frequency
-		delayMillis(200);
-
-		comStep(6);
-		SET_PRESCALER_PWM(25); // higher again..
-		delayMillis(200);
-
+		playArkTune();
 		allOff();	      // turn all channels low again
 		SET_PRESCALER_PWM(0); // set prescaler back to 0.
 		signaltimeout = 0;
