@@ -136,15 +136,15 @@ void advanceincrement()
 		}
 	}
 #ifdef GIMBAL_MODE
-	setPWMCompare1(((2 * pwmSin[phase_A_position]) + gate_drive_offset) * TIMER1_MAX_ARR / 2000);
-	setPWMCompare2(((2 * pwmSin[phase_B_position]) + gate_drive_offset) * TIMER1_MAX_ARR / 2000);
-	setPWMCompare3(((2 * pwmSin[phase_C_position]) + gate_drive_offset) * TIMER1_MAX_ARR / 2000);
+	setPWMCompare1(((2 * pwmSinLookup(phase_A_position)) + gate_drive_offset) * TIMER1_MAX_ARR / 2000);
+	setPWMCompare2(((2 * pwmSinLookup(phase_B_position)) + gate_drive_offset) * TIMER1_MAX_ARR / 2000);
+	setPWMCompare3(((2 * pwmSinLookup(phase_C_position)) + gate_drive_offset) * TIMER1_MAX_ARR / 2000);
 #else
-	setPWMCompare1((((2 * pwmSin[phase_A_position] / SINE_DIVIDER) + gate_drive_offset) * TIMER1_MAX_ARR / 2000) *
+	setPWMCompare1((((2 * pwmSinLookup(phase_A_position) / SINE_DIVIDER) + gate_drive_offset) * TIMER1_MAX_ARR / 2000) *
 		       eepromBuffer.sine_mode_power / 10);
-	setPWMCompare2((((2 * pwmSin[phase_B_position] / SINE_DIVIDER) + gate_drive_offset) * TIMER1_MAX_ARR / 2000) *
+	setPWMCompare2((((2 * pwmSinLookup(phase_B_position) / SINE_DIVIDER) + gate_drive_offset) * TIMER1_MAX_ARR / 2000) *
 		       eepromBuffer.sine_mode_power / 10);
-	setPWMCompare3((((2 * pwmSin[phase_C_position] / SINE_DIVIDER) + gate_drive_offset) * TIMER1_MAX_ARR / 2000) *
+	setPWMCompare3((((2 * pwmSinLookup(phase_C_position) / SINE_DIVIDER) + gate_drive_offset) * TIMER1_MAX_ARR / 2000) *
 		       eepromBuffer.sine_mode_power / 10);
 #endif
 }

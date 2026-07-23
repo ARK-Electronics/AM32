@@ -14,7 +14,6 @@
 #ifndef USE_MAKE
 // convenience defines for IDE builds without make - pick one board
 // #define ARK_4IN1_F051
-// #define ARK_4IN1_RAMP_F051
 // #define AM32REF_F051
 // #define REF_G431
 // #define AM32_SITL_CAN
@@ -91,6 +90,24 @@
 #	define NFAULT_PORT GPIOB
 #	define NFAULT_PIN LL_GPIO_PIN_5
 #	define TARGET_MIN_BEMF_COUNTS 3
+/* Unconfigured-eeprom max_ramp default. The generic 160 (16%/ms) is a
+	 * racing-quad value; ARK vehicles fly 5-10"+ where nothing needs it and
+	 * heavy props desync on it (bench 2026-07-23 bracket on 900KV+10x5x3:
+	 * snap 20->55%% breaks lock at max_ramp 5/10/20/40, clean at 1). 40
+	 * (4%%/ms, full stick in 25 ms) keeps 5" response while halving the
+	 * unconfigured worst case; per-airframe provisioning still writes the
+	 * tuned value (10": 1) - this is only the blank-eeprom fallback. */
+#	define TARGET_DEFAULT_MAX_RAMP 40
+/* Ramp-regime CEILINGS (eeprom max_ramp can only lower below these, so
+	 * they bound the fastest reachable slew). Generic fallbacks 16/6 are
+	 * racing values; ARK vehicles are 5-10"+ PX4 craft where 8%%/ms full-
+	 * stick authority (0->100%% in 12.5 ms) is already far above controller
+	 * dynamics. Startup stays at the generic 2 - it governs spool-up
+	 * reliability, and SLO never overrode it either. NOT changed in the
+	 * global fallbacks: AM32REF_F051 / REF_G431 stay upstream-identical
+	 * for A/B reference. */
+#	define RAMP_SPEED_LOW_RPM 3
+#	define RAMP_SPEED_HIGH_RPM 8
 /* Closed-loop when commutation_interval < this (0.5 us ticks). Default
 	 * F051 fallback is 2000; noprop ~1k RPM has CI~2700 so the ESC stayed
 	 * open-loop (rough low-speed sound). Bench sweep on 900KV noprop:
@@ -101,30 +118,15 @@
 #	endif
 #endif
 
-#ifdef ARK_4IN1_RAMP_F051
-#	define FILE_NAME "ARK_4IN1_RAMP_F051"
-#	define FIRMWARE_NAME "ARK 4IN1 SLO"
-#	define DEAD_TIME 25
-#	define HARDWARE_GROUP_F0_B
-#	define MILLIVOLT_PER_AMP 10
-#	define CURRENT_OFFSET 25 // millivolts
-#	define TARGET_VOLTAGE_DIVIDER 210
-#	define VOLTAGE_ADC_CHANNEL LL_ADC_CHANNEL_6
-#	define VOLTAGE_ADC_PIN LL_GPIO_PIN_6
-#	define CURRENT_ADC_CHANNEL LL_ADC_CHANNEL_3
-#	define CURRENT_ADC_PIN LL_GPIO_PIN_3
-#	define USE_SERIAL_TELEMETRY
-#	define USE_DRV8328_NSLEEP
-#	define NSLEEP_PORT GPIOA
-#	define NSLEEP_PIN LL_GPIO_PIN_15
-#	define USE_DRV8328_NFAULT
-#	define NFAULT_PORT GPIOB
-#	define NFAULT_PIN LL_GPIO_PIN_5
-#	define TARGET_MIN_BEMF_COUNTS 3
-#	define RAMP_SPEED_LOW_RPM 1
-#	define RAMP_SPEED_HIGH_RPM 1
-#	define LOOP_FREQUENCY_HZ 10000
-#endif
+/*
+ * ARK_4IN1_RAMP_F051 ("ARK 4IN1 SLO") removed: its entire delta was a
+ * compile-frozen 0.5%/ms ramp (RAMP_SPEED_LOW/HIGH_RPM 1 at a 10 kHz
+ * loop). The regular firmware reaches the identical rate as an EEPROM
+ * setting - max_ramp = 5 (fine mode, 0.1%/ms steps, all regimes) - and
+ * additionally voltage-compensates it, bounds slip current with the
+ * BEMF-headroom governor, and latches misconfiguration via the desync
+ * rails. Heavy-prop builds are a config preset, not a second firmware.
+ */
 
 #ifndef FIRMWARE_NAME
 /* if you get this then you have forgotten to add the section for your target above */
@@ -152,6 +154,12 @@
 
 #ifndef TARGET_STALL_PROTECTION_INTERVAL
 #	define TARGET_STALL_PROTECTION_INTERVAL 6500
+#endif
+
+/* Blank-eeprom max_ramp fallback (settings.c default-restore). Targets may
+ * override; upstream-equivalent 160 (16%/ms) otherwise. */
+#ifndef TARGET_DEFAULT_MAX_RAMP
+#	define TARGET_DEFAULT_MAX_RAMP 160
 #endif
 
 #ifndef RAMP_SPEED_STARTUP

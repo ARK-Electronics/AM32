@@ -120,9 +120,21 @@ void runtimeProcessDesyncCheck(void)
 		}
 		if (desynced) {
 			slow_avg_revs = 0;
+			const uint32_t zc_at_desync = zero_crosses;
 			zero_crosses = 0;
 			desync_happened++;
-			faultDesyncEpisodeCharge(DESYNC_EPISODE_JUMP);
+			// Same established-run gate as the stall rail (see
+			// faultHandleBemfIntervalStall): interval jumps while the
+			// loop is still acquiring (zc 11..100) are normal startup
+			// roughness on light motors - charging them stacks holdoff
+			// and ramp back-off onto honest starts until the bucket
+			// latches a motor that never got going (SITL racer model
+			// reproduces this under plain dshot spool). Legacy desync
+			// handling below still restarts; only the episode
+			// accounting is established-runs-only.
+			if (zc_at_desync > 100) {
+				faultDesyncEpisodeCharge(DESYNC_EPISODE_JUMP);
+			}
 			if ((!eepromBuffer.bi_direction && (input > 47)) || commutation_interval > 1000) {
 				running = 0;
 			}
@@ -213,10 +225,123 @@ void runtimeSendTelemetryIfNeeded(void)
 	}
 }
 
+/*
+ * Transient governor, 1 kHz (main-loop context, fresh battery_voltage).
+ *
+ * (a) Voltage-compensated ramp: max_ramp_* are duty-per-tick, so the same
+ * setting slews 1.7x the VOLTS/ms on 8S that it does on 4S. Scale the
+ * working copies by GOV_RAMP_VREF_CV/Vbat (clamped 0.5x-1.5x) so a tuned
+ * ramp means the same electrical transient on any pack.
+ *
+ * (b) BEMF-headroom ceiling: bound duty to the equilibrium duty implied by
+ * the LIVE eRPM plus a fixed voltage headroom. Slip current is
+ * (duty*Vbat - BEMF)/R, so capping the headroom bounds slip current and
+ * demag duration without a current shunt (this board has one shunt for
+ * all four ESCs - per-motor current limiting is not available). Prop
+ * inertia never needs to be known: on a light prop rpm chases duty within
+ * ms and the ceiling never binds; on a heavy prop duty waits for rpm, so
+ * a snap becomes the fastest spool the prop can physically follow (bench
+ * 2026-07-23: snap 0.20->0.55 on the 10" at 4%/ms ramp = blind-grind at
+ * 100+ A; the same snap at 0.1%/ms = healthy synced 67 A spool).
+ *
+ * The gain (eRPM per duty*volt) is MEASURED, not taken from the eeprom KV
+ * field: at steady state duty*Vbat ~= BEMF + I*R, so obs = e_rpm/(duty*V)
+ * is observable every loop and load bias errs conservative (lower gain ->
+ * lower ceiling). A misconfigured KV byte is exactly the failure class
+ * this protects against, so it must not be an input. The estimator only
+ * samples in trusted steady state (slew settled, no blind/demag/grind,
+ * NOT riding the ceiling - riding it would drag the estimate down and
+ * under-spool), and the ceiling only arms after GOV_CONF_ARM eligible
+ * samples (~0.3 s cumulative steady running per power-up).
+ */
+#ifndef BRUSHED_MODE
+#	define GOV_RAMP_VREF_CV 1480 /* 4S nominal: legacy ramp feel is preserved there */
+#	define GOV_HEADROOM_CV 300   /* 3.0 V of slip headroom above the BEMF line */
+#	define GOV_CEIL_FLOOR 350    /* ceiling never below this (nor min_startup_duty+100) */
+#	define GOV_CONF_ARM 300
+
+__attribute__((optimize("Os"))) static void runtimeTransientGovernorTick(void)
+{
+	// gov_slope_q10: duty units per e_rpm unit, Q10 (duty<<10/e_rpm at
+	// steady state). Pack voltage folds into the slope at estimation time
+	// - no live-voltage term in the ceiling. Sag/pack-swap staleness errs
+	// conservative (V drop -> true equilibrium duty rises -> stale ceiling
+	// is low) and the estimator re-tracks in ~30 ms of steady running.
+	static uint16_t gov_slope_q10;
+	static uint16_t gov_conf;
+	// One volatile read each; everything below works on locals (M0: every
+	// volatile re-read is a literal-pool load + ldr, and this function is
+	// flash-budget critical).
+	const uint32_t v = battery_voltage;
+	const uint32_t erpm = e_rpm;
+	const uint32_t duty = duty_cycle;
+	const uint8_t closed = (running && !old_routine && zero_crosses > 150);
+
+	// (a) voltage-compensated ramp working copies
+	uint32_t scale_q8 = 256;
+	if (v > 600) {
+		scale_q8 = ((uint32_t)GOV_RAMP_VREF_CV << 8) / v;
+		if (scale_q8 < 128) {
+			scale_q8 = 128;
+		}
+		if (scale_q8 > 384) {
+			scale_q8 = 384;
+		}
+	}
+	uint16_t r;
+	r = (uint16_t)((max_ramp_startup * scale_q8) >> 8);
+	max_ramp_startup_vcomp = r ? (uint8_t)r : 1;
+	r = (uint16_t)((max_ramp_low_rpm * scale_q8) >> 8);
+	max_ramp_low_rpm_vcomp = r ? (uint8_t)r : 1;
+	r = (uint16_t)((max_ramp_high_rpm * scale_q8) >> 8);
+	max_ramp_high_rpm_vcomp = r ? (uint8_t)r : 1;
+
+	// (b) slope estimator, steady trusted closed loop only (slew settled,
+	// no blind/demag/grind, not riding the ceiling - riding it would drag
+	// the estimate down and under-spool)
+	if (closed && duty > 250 && last_duty_cycle == duty_cycle_setpoint && duty_cycle_setpoint < gov_duty_ceiling &&
+	    zc_blind_steps == 0 && zc_demag_run == 0 && zc_grind_hold_ms == 0 && erpm > 32) {
+		uint32_t obs = (duty << 10) / erpm; // erpm > 32 keeps this in uint16
+		if (gov_conf == 0) {
+			gov_slope_q10 = (uint16_t)obs;
+		} else {
+			gov_slope_q10 = (uint16_t)(gov_slope_q10 + (((int32_t)obs - gov_slope_q10) >> 5));
+		}
+		if (gov_conf < 1000) {
+			gov_conf++;
+		}
+	}
+
+	// (c) BEMF-headroom ceiling from the live eRPM: equilibrium duty via
+	// the slope (multiply, no divide) plus headroom in duty units.
+	// headroom = HEADROOM_CV*2000/Vbat, folded into scale_q8
+	// (= VREF<<8/Vbat) to save the divide: 300*2000/1480/256 ~= 405/256.
+	// The headroom bounds slip MAGNITUDE only; it cannot prevent a
+	// too-fast ramp from breaking lock (bench rpmhead-snap-40: even 1 V
+	// applied in 4 ms desyncs where 24 A reached gradually stays locked -
+	// the cliff is dV/dt, not level; that is the learned ramp back-off's
+	// job, faultDesyncEpisodeCharge).
+	uint16_t ceiling = 2000;
+	if (closed && gov_conf >= GOV_CONF_ARM) {
+		uint32_t c = ((erpm * gov_slope_q10) >> 10) + ((scale_q8 * 405u) >> 8);
+		if (c < GOV_CEIL_FLOOR) {
+			c = GOV_CEIL_FLOOR;
+		}
+		if (c < 2000) {
+			ceiling = (uint16_t)c;
+		}
+	}
+	gov_duty_ceiling = ceiling;
+}
+#endif
+
 void runtimeProcessAdcAndProtections(void)
 {
 	if (PROCESS_ADC_FLAG == 1) { // for adc and telemetry set adc counter at 1khz loop rate
 		adcAppServiceConversion();
+#ifndef BRUSHED_MODE
+		runtimeTransientGovernorTick();
+#endif
 		if (eepromBuffer.low_voltage_cut_off == 1) {
 			if (battery_voltage < (cell_count * low_cell_volt_cutoff)) {
 				low_voltage_count++;

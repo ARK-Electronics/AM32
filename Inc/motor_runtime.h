@@ -75,6 +75,12 @@ extern uint8_t max_duty_cycle_change;
 extern volatile uint8_t max_ramp_startup;
 extern volatile uint8_t max_ramp_low_rpm;
 extern volatile uint8_t max_ramp_high_rpm;
+/* Voltage-compensated working copies + BEMF-headroom governor ceiling
+ * (computed in runtime_loop.c at 1 kHz; see runtimeTransientGovernorTick) */
+extern volatile uint8_t max_ramp_startup_vcomp;
+extern volatile uint8_t max_ramp_low_rpm_vcomp;
+extern volatile uint8_t max_ramp_high_rpm_vcomp;
+extern volatile uint16_t gov_duty_ceiling;
 extern volatile uint8_t ramp_divider;
 extern uint16_t ramp_count;
 extern volatile uint32_t pwm_to_arr_scale_q16;
@@ -108,7 +114,15 @@ extern uint16_t desired_angle;
 extern int16_t phase_A_position;
 extern int16_t phase_B_position;
 extern int16_t phase_C_position;
-extern const int16_t pwmSin[];
+/* Half-period sine table + reconstructing lookup. The original 360-entry
+ * table satisfies pwmSin[i] + pwmSin[i+180] == 360 exactly, so the lookup
+ * returns bit-identical values for the full [0,360) range while the flash
+ * table halves to 360 bytes. */
+extern const int16_t pwmSinHalf[180];
+static inline int16_t pwmSinLookup(int16_t a)
+{
+	return (a < 180) ? pwmSinHalf[a] : (int16_t)(360 - pwmSinHalf[a - 180]);
+}
 extern uint16_t step_delay;
 extern uint16_t gate_drive_offset;
 extern uint16_t motor_kv;

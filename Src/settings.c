@@ -21,15 +21,15 @@ void loadEEpromSettings(void)
 {
 	read_flash_bin(eepromBuffer.buffer, eeprom_address, sizeof(eepromBuffer.buffer));
 	if (eepromBuffer.eeprom_version < EEPROM_VERSION) {
-		eepromBuffer.max_ramp = 160;		    // 0.1% per ms to 25% per ms
-		eepromBuffer.minimum_duty_cycle = 1;	    // 0.2% to 51 percent
-		eepromBuffer.disable_stick_calibration = 0; //
-		eepromBuffer.absolute_voltage_cutoff = 10;  // voltage level 1 to 100 in 0.5v increments
-		eepromBuffer.current_P = 100;		    // 0-255
-		eepromBuffer.current_I = 0;		    // 0-255
-		eepromBuffer.current_D = 100;		    // 0-255
-		eepromBuffer.active_brake_power = 0;	    // 1-5 percent duty cycle
-		eepromBuffer.reserved_eeprom_3[0] = 0;	    //14-16  for crsf input
+		eepromBuffer.max_ramp = TARGET_DEFAULT_MAX_RAMP; // 0.1% per ms steps (see targets.h)
+		eepromBuffer.minimum_duty_cycle = 1;		 // 0.2% to 51 percent
+		eepromBuffer.disable_stick_calibration = 0;	 //
+		eepromBuffer.absolute_voltage_cutoff = 10;	 // voltage level 1 to 100 in 0.5v increments
+		eepromBuffer.current_P = 100;			 // 0-255
+		eepromBuffer.current_I = 0;			 // 0-255
+		eepromBuffer.current_D = 100;			 // 0-255
+		eepromBuffer.active_brake_power = 0;		 // 1-5 percent duty cycle
+		eepromBuffer.reserved_eeprom_3[0] = 0;		 //14-16  for crsf input
 		eepromBuffer.reserved_eeprom_3[1] = 0;
 		eepromBuffer.reserved_eeprom_3[2] = 0;
 		eepromBuffer.reserved_eeprom_3[3] = 0;
@@ -163,6 +163,13 @@ void loadEEpromSettings(void)
 			EDT_ARMED = 1;
 		}
 
+		// Reset to compile defaults first so this load is idempotent: the
+		// eeprom value below only lowers (min semantics), and the learned
+		// ramp back-off (faultDesyncEpisodeCharge) clamps these at runtime
+		// - a settings write is the documented way to restore them.
+		max_ramp_startup = RAMP_SPEED_STARTUP;
+		max_ramp_low_rpm = RAMP_SPEED_LOW_RPM;
+		max_ramp_high_rpm = RAMP_SPEED_HIGH_RPM;
 		if (eepromBuffer.max_ramp < 10) {
 			ramp_divider = 9;
 			max_ramp_startup = eepromBuffer.max_ramp;

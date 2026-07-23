@@ -61,6 +61,13 @@ volatile uint8_t ramp_divider;
 volatile uint8_t max_ramp_startup = RAMP_SPEED_STARTUP;
 volatile uint8_t max_ramp_low_rpm = RAMP_SPEED_LOW_RPM;
 volatile uint8_t max_ramp_high_rpm = RAMP_SPEED_HIGH_RPM;
+/* Voltage-compensated working copies (runtime_loop.c, 1 kHz); the 20 kHz
+ * ramp regime reads these so the hot path pays nothing for the scaling. */
+volatile uint8_t max_ramp_startup_vcomp = RAMP_SPEED_STARTUP;
+volatile uint8_t max_ramp_low_rpm_vcomp = RAMP_SPEED_LOW_RPM;
+volatile uint8_t max_ramp_high_rpm_vcomp = RAMP_SPEED_HIGH_RPM;
+/* BEMF-headroom governor ceiling (runtime_loop.c); 2000 = disarmed/no cap */
+volatile uint16_t gov_duty_ceiling = 2000;
 char send_esc_info_flag;
 uint32_t eeprom_address = EEPROM_START_ADD;
 uint16_t prop_brake_duty_cycle = 0;
@@ -251,21 +258,18 @@ volatile char rising = 1;
 
 ////Sine Wave PWM ///////////////////
 /* Flash-resident sine table (read-only) — keeps ~720 B out of F051 RAM. */
-const int16_t pwmSin[] = {
+/* First half-period only: the full 360-entry table satisfies
+ * pwmSin[i] + pwmSin[i+180] == 360 EXACTLY (verified against the
+ * original), so pwmSinLookup (motor_runtime.h) reconstructs the
+ * second half bit-identically and the flash table halves to 360 B. */
+const int16_t pwmSinHalf[180] = {
 	180, 183, 186, 189, 193, 196, 199, 202, 205, 208, 211, 214, 217, 220, 224, 227, 230, 233, 236, 239, 242, 245, 247, 250, 253, 256,
 	259, 262, 265, 267, 270, 273, 275, 278, 281, 283, 286, 288, 291, 293, 296, 298, 300, 303, 305, 307, 309, 312, 314, 316, 318, 320,
 	322, 324, 326, 327, 329, 331, 333, 334, 336, 337, 339, 340, 342, 343, 344, 346, 347, 348, 349, 350, 351, 352, 353, 354, 355, 355,
 	356, 357, 357, 358, 358, 359, 359, 359, 360, 360, 360, 360, 360, 360, 360, 360, 360, 359, 359, 359, 358, 358, 357, 357, 356, 355,
 	355, 354, 353, 352, 351, 350, 349, 348, 347, 346, 344, 343, 342, 340, 339, 337, 336, 334, 333, 331, 329, 327, 326, 324, 322, 320,
 	318, 316, 314, 312, 309, 307, 305, 303, 300, 298, 296, 293, 291, 288, 286, 283, 281, 278, 275, 273, 270, 267, 265, 262, 259, 256,
-	253, 250, 247, 245, 242, 239, 236, 233, 230, 227, 224, 220, 217, 214, 211, 208, 205, 202, 199, 196, 193, 189, 186, 183, 180, 177,
-	174, 171, 167, 164, 161, 158, 155, 152, 149, 146, 143, 140, 136, 133, 130, 127, 124, 121, 118, 115, 113, 110, 107, 104, 101, 98,
-	95,  93,  90,  87,  85,	 82,  79,  77,	74,  72,  69,  67,  64,	 62,  60,  57,	55,  53,  51,  48,  46,	 44,  42,  40,	38,  36,
-	34,  33,  31,  29,  27,	 26,  24,  23,	21,  20,  18,  17,  16,	 14,  13,  12,	11,  10,  9,   8,   7,	 6,   5,   5,	4,   3,
-	3,   2,	  2,   1,   1,	 1,   0,   0,	0,   0,	  0,   0,   0,	 0,   0,   1,	1,   1,	  2,   2,   3,	 3,   4,   5,	5,   6,
-	7,   8,	  9,   10,  11,	 12,  13,  14,	16,  17,  18,  20,  21,	 23,  24,  26,	27,  29,  31,  33,  34,	 36,  38,  40,	42,  44,
-	46,  48,  51,  53,  55,	 57,  60,  62,	64,  67,  69,  72,  74,	 77,  79,  82,	85,  87,  90,  93,  95,	 98,  101, 104, 107, 110,
-	113, 115, 118, 121, 124, 127, 130, 133, 136, 140, 143, 146, 149, 152, 155, 158, 161, 164, 167, 171, 174, 177};
+	253, 250, 247, 245, 242, 239, 236, 233, 230, 227, 224, 220, 217, 214, 211, 208, 205, 202, 199, 196, 193, 189, 186, 183};
 
 // int sin_divider = 2;
 int16_t phase_A_position;
