@@ -9,7 +9,12 @@ LR_IROM1 0x08001000 0x00020000  {    ; load region size_region
    .ANY (+RO)
    .ANY (+XO)
   }
-  RW_IRAM1 0x20000000 0x00008000  {  ; RW data
+  ; Survives NVIC_SystemReset for post-reset boot sound cookie (matches gcc .noinit)
+  RW_NOINIT 0x20000000 UNINIT 0x00000010  {
+   *(.noinit)
+   *(.noinit*)
+  }
+  RW_IRAM1 0x20000010 0x00007FF0  {  ; RW data (rest of 32 KB SRAM)
    .ANY (+RW +ZI)
   }
 }
