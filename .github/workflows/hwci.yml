@@ -60,13 +60,10 @@ jobs:
       - name: Ensure ARM toolchain
         shell: bash
         run: |
-          # make/tools.mk pins ARM_SDK_PREFIX to a specific xPack version under
-          # tools/linux/ (currently 15.2.1-1.1). A system gcc on PATH or an
-          # older extracted xpack does NOT satisfy the build — install when
-          # the exact pinned binary is missing.
-          if [ ! -x tools/linux/xpack-arm-none-eabi-gcc-15.2.1-1.1/bin/arm-none-eabi-gcc ]; then
-            make arm_sdk_install
-          fi
+          # Pin is XPACK_GCC_VER in make/tools.mk (xPack GCC 15). Install if
+          # missing; arm_sdk_check fails on wrong/missing major version.
+          make arm_sdk_install
+          make arm_sdk_check
 
       - name: Install harness
         shell: bash

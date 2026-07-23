@@ -29,23 +29,20 @@ if [ -z "$ELF" ] || [ ! -f "$ELF" ]; then
   exit 2
 fi
 
+# Prefer the pinned xPack 15 size(1); never use distro gcc-arm-none-eabi first.
 SIZE_BIN="${SIZE_BIN:-}"
 if [ -z "$SIZE_BIN" ]; then
-  if command -v arm-none-eabi-size >/dev/null 2>&1; then
-    SIZE_BIN=arm-none-eabi-size
-  else
-    # Prefer the repo xPack toolchain if present
-    for c in \
-      tools/linux/xpack-arm-none-eabi-gcc-15.2.1-1.1/bin/arm-none-eabi-size \
-      tools/linux/xpack-arm-none-eabi-gcc-14.2.1-1.1/bin/arm-none-eabi-size \
-      tools/linux/xpack-arm-none-eabi-gcc-10.3.1-2.3/bin/arm-none-eabi-size
-    do
-      if [ -x "$ROOT/$c" ]; then SIZE_BIN="$ROOT/$c"; break; fi
-    done
-  fi
+  for c in \
+    tools/linux/xpack-arm-none-eabi-gcc-15.2.1-1.1/bin/arm-none-eabi-size \
+    tools/macos/xpack-arm-none-eabi-gcc-15.2.1-1.1/bin/arm-none-eabi-size \
+    tools/windows/xpack-arm-none-eabi-gcc-15.2.1-1.1/bin/arm-none-eabi-size.exe
+  do
+    if [ -x "$ROOT/$c" ]; then SIZE_BIN="$ROOT/$c"; break; fi
+  done
 fi
 if [ -z "$SIZE_BIN" ]; then
-  echo "error: arm-none-eabi-size not found" >&2
+  echo "error: pinned arm-none-eabi-size not found under tools/*/xpack-arm-none-eabi-gcc-15.2.1-1.1/" >&2
+  echo "       run: make arm_sdk_install" >&2
   exit 127
 fi
 

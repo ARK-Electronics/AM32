@@ -146,7 +146,8 @@ LDFLAGS_$(2) = $(xLDFLAGS_COMMON) $(LDFLAGS_$(1)) $(if $(xLDSCRIPT),-T$(xLDSCRIP
 
 -include $$($(2)_BASENAME).d
 
-$$($(2)_BASENAME).elf: $$(SRC_APP_$(2)) $$(SRC_$(1)) $(xSRC)
+# Cross targets require the pinned xPack GCC 15 (see make/tools.mk). SITL is native.
+$$($(2)_BASENAME).elf: $(if $(NATIVE_$(1)),,arm_sdk_check) $$(SRC_APP_$(2)) $$(SRC_$(1)) $(xSRC)
 	@$(ECHO) Compiling $$(notdir $$@)
 	$(QUIET)$(MKDIR) -p $(OBJ)
 	$(QUIET)$(xCC) $$(CFLAGS_$(2)) $$(LDFLAGS_$(2)) -MMD -MP -MF $$(@:.elf=.d) -o $$(@) $$(SRC_APP_$(2)) $$(SRC_$(1)) $(xSRC) $(LDLIBS_$(1))
@@ -161,6 +162,12 @@ $(foreach MCU,$(MCU_TYPES),$(foreach TARGET,$(TARGETS_$(MCU)), $(eval $(call CRE
 
 # include the targets for installing tools
 include $(ROOT)/make/tools_install.mk
+
+# Fail fast if the pinned xPack Arm GCC is missing or not GCC 15.x.
+# Used as a prereq on every cross-compile firmware target.
+.PHONY: arm_sdk_check
+arm_sdk_check:
+	$(QUIET)bash scripts/check-arm-sdk.sh "$(ARM_SDK_PREFIX)" "$(XPACK_GCC_VER)"
 
 # useful target to list all of the board targets so you can see what
 # make target to use for your board

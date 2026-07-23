@@ -12,11 +12,13 @@ echo "==> apt packages"
 sudo apt-get update
 sudo apt-get install -y build-essential git python3-venv python3-pip openocd usbutils
 
-echo "==> ARM toolchain"
-if ! ls "$REPO_ROOT"/tools/linux/*/bin/arm-none-eabi-gcc >/dev/null 2>&1 \
-   && ! command -v arm-none-eabi-gcc >/dev/null 2>&1; then
-  ( cd "$REPO_ROOT" && make arm_sdk_install ) || sudo apt-get install -y gcc-arm-none-eabi
+echo "==> ARM toolchain (pinned xPack GCC 15 — no distro fallback)"
+# make/tools.mk pins tools/linux/xpack-arm-none-eabi-gcc-15.2.1-1.1/.
+# Distro gcc-arm-none-eabi (often 10.x/13.x) must not satisfy this check.
+if [ ! -x "$REPO_ROOT"/tools/linux/xpack-arm-none-eabi-gcc-15.2.1-1.1/bin/arm-none-eabi-gcc ]; then
+  ( cd "$REPO_ROOT" && make arm_sdk_install )
 fi
+( cd "$REPO_ROOT" && make arm_sdk_check )
 
 echo "==> udev rules (ST-Link + serial symlinks)"
 sudo cp "$HERE/99-hwci.rules" /etc/udev/rules.d/99-hwci.rules

@@ -55,8 +55,10 @@ In-the-loop bench automation for the **ARK 4IN1** (and related F051 work): build
 IDE project trees (Keil / MRS) are **not** maintained in this fork. Use the Makefile and the pinned **xPack GNU Arm Embedded GCC** (see `make/tools.mk`).
 
 ```bash
-# Install the pinned Arm toolchain into tools/<os>/
+# Install the pinned xPack GNU Arm Embedded GCC 15 into tools/<os>/
+# (required — distro gcc-arm-none-eabi is not used for firmware builds)
 make arm_sdk_install
+make arm_sdk_check          # optional: confirm GCC 15.x at the pin path
 
 # List / build targets (examples)
 make targets
