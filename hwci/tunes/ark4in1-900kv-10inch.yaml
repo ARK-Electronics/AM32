@@ -1,12 +1,11 @@
 # Full auto-tune for 900KV + HQProp 10x5x3 (3-blade 10") on ARK 4IN1 (6S).
-# Same stage shape as ark4in1-2807-7035 / example.yaml; probe ceiling and
-# safety are capped for a heavy 10" load (lower eRPM, higher torque/current
-# per % throttle than 5–7" props — do not climb to 90%).
+# Efficiency probe staircase through 70%; safety sized for 10" load (not 5").
 name: ark4in1-900kv-10inch
 description: >
   Tune advance/pwm/mode/ramp/min_duty for a 900KV motor + HQProp 10x5x3 on
-  the ARK 4IN1 bench (6S). Cruise-weighted g/W at mid throttle; hard demag /
-  jitter / temp gates; min_duty crawl for DShot-idle sustain on the 10".
+  the ARK 4IN1 bench (6S). Cruise-weighted g/W through 70% throttle; hard
+  demag/jitter/temp gates; bubble-search max_ramp; min_duty crawl for DShot
+  idle on the 10".
 
 battery_cells: 6
 
@@ -18,18 +17,18 @@ thermal:
   max_start_fet_temp_c: 60.0
 
 probe:
-  # First full-tune pass aborted: default settings hit 52 A + demag at t50 on
-  # this 10"/6S setup. Cap the probe at 35% and allow short current spikes.
-  points: {t15: 0.15, t20: 0.20, t25: 0.25, t30: 0.30, t35: 0.35}
+  # Efficiency staircase to 70% (user-requested ceiling for this prop).
+  points: {t20: 0.20, t30: 0.30, t40: 0.40, t50: 0.50, t60: 0.60, t70: 0.70}
   dwell_s: 4.0
   safety:
-    max_current_a: 55.0
-    max_thrust_n: 45.0
-    max_rpm: 9000
+    max_current_a: 90.0
+    max_thrust_n: 60.0
+    max_rpm: 15000
 
 objective:
-  weights: {t15: 1.0, t20: 2.0, t25: 2.0, t30: 1.5, t35: 1.0}
-  min_power_w: 10.0
+  # Weight cruise mid-band; still score 70% lightly.
+  weights: {t20: 1.0, t30: 2.0, t40: 2.0, t50: 1.5, t60: 1.0, t70: 0.5}
+  min_power_w: 15.0
   noise_floor_pct: 2.0
 
 constraints:
@@ -74,8 +73,6 @@ stages:
     sweep: advance_level
     search: climb
     polish_radius: 4
-  # Bubble-search max_ramp from the floor + probe-scaled snap (not 0.30→0.95
-  # on heavy props). See hwci.tuner.session._run_ramp_measure_stage.
   - name: ramp
     measure: ramp_rate
     margin: 0.8
@@ -84,8 +81,6 @@ stages:
     margin: 1.15
 
 finals:
-  # Rebuild from probe.points only — do not use full efficiency_sweep (to 100%)
-  # on a 10" prop.
   profile: tune_probe
   pattern: ABBA
   repeats: 1
