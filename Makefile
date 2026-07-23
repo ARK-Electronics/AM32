@@ -141,8 +141,13 @@ $(eval SRC_APP_$(2) := $(SRC_COMMON_BASE)$(if $(call has_brushed_suffix,$(2)), $
 $(eval xCFLAGS_COMMON := $(if $(CFLAGS_COMMON_$(1)),$(CFLAGS_COMMON_$(1)),$(CFLAGS_COMMON)))
 $(eval xLDFLAGS_COMMON := $(if $(LDFLAGS_COMMON_$(1)),$(LDFLAGS_COMMON_$(1)),$(LDFLAGS_COMMON)))
 
-CFLAGS_$(2) = -DAM32_MCU=\"$(MCU)\" $(MCU_$(1)) -D$(2) $(CFLAGS_$(1)) $(xCFLAGS_COMMON) $(xCFLAGS)
-LDFLAGS_$(2) = $(xLDFLAGS_COMMON) $(LDFLAGS_$(1)) $(if $(xLDSCRIPT),-T$(xLDSCRIPT))
+# App-side bootloader update: embed BL image on F051 unless HWCI_PERF=1.
+# The 4 KiB image + update glue is ~1 KiB over non-LTO headroom on F051, so
+# EMBED builds use -flto. HWCI stays non-LTO and omits the image.
+CFLAGS_$(2) = -DAM32_MCU=\"$(MCU)\" $(MCU_$(1)) -D$(2) $(CFLAGS_$(1)) $(xCFLAGS_COMMON) $(xCFLAGS) \
+	$(if $(filter F051,$(1)),$(if $(filter 1,$(HWCI_PERF)),,-DEMBED_BOOTLOADER -flto))
+LDFLAGS_$(2) = $(xLDFLAGS_COMMON) $(LDFLAGS_$(1)) $(if $(xLDSCRIPT),-T$(xLDSCRIPT)) \
+	$(if $(filter F051,$(1)),$(if $(filter 1,$(HWCI_PERF)),,-flto))
 
 -include $$($(2)_BASENAME).d
 

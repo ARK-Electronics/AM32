@@ -262,6 +262,7 @@ an settings option)
 #endif
 
 #include "version.h"
+#include "bootloader_update.h"
 
 // firmware build options !! fixed speed and duty cycle modes are not to be used
 // with sinusoidal startup !!
@@ -299,6 +300,8 @@ int main(void)
 	checkDeviceInfo();
 	initCorePeripherals();
 	enableCorePeripherals();
+	/* May program BL region and NVIC_SystemReset when image differs. */
+	maybe_update_bootloader();
 	loadEEpromSettings();
 #endif
 
