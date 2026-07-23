@@ -472,14 +472,18 @@ void setInput()
 	if (zc_demag_run > zc_untrusted_steps) {
 		zc_untrusted_steps = zc_demag_run;
 	}
-	if (!old_routine && running && zc_untrusted_steps >= 2) {
+	// zc_grind_hold_ms keeps the cut engaged through a blind-grind (faults.c):
+	// without it a single accepted crossing resets zc_blind_steps, the cap
+	// releases, and duty re-slews into the next spike (bench: 102 A limit
+	// cycle at 19.5% miss rate, pr48-snap-rail-1).
+	if (!old_routine && running && (zc_untrusted_steps >= 2 || zc_grind_hold_ms)) {
 		/* Fixed protective cut — do NOT raise the floor with EEPROM
 		 * min_startup_duty / startup power. A misconfigured high
 		 * startup duty is exactly what this cut must bound; scaling
 		 * it away left wrong-phase drive near full heat. Worst case
 		 * the motor coasts and the stall rail restarts (or the
 		 * episode bucket latches). */
-		uint16_t blind_cap = (zc_untrusted_steps >= 4) ? 250 : 500;
+		uint16_t blind_cap = (zc_untrusted_steps >= 4 || zc_grind_hold_ms) ? 250 : 500;
 		if (duty_cycle_setpoint > blind_cap) {
 			duty_cycle_setpoint = blind_cap;
 		}

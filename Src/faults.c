@@ -153,7 +153,41 @@ void faultUpdateBemfTimeoutPolicy(void)
 #define DESYNC_BACKOFF_STEP_MS 25
 #define DESYNC_BACKOFF_MAX_MS 500
 
+/*
+ * Blind-GRIND rail. The episode rail above only sees DISCRETE failures
+ * (jump desync, stall trip). Bench 2026-07-23 (pr48-snap-rail-1, 900KV +
+ * 10x5x3 6S, snap 0.20->0.55): a spinning snap can drop the loop into a
+ * CONTINUOUS partial desync that sits below every threshold - 423 blind
+ * steps/s at a 19.5% miss rate (miss bucket needs >25% and net-drains;
+ * consecutive counter resets on every accepted crossing; CI step +45% is
+ * under the jump check's 50%; the stall rail never fires because blind
+ * steps keep resetting INTERVAL_TIMER) - while the power cut engages and
+ * releases in a limit cycle (one accepted crossing resets zc_blind_steps,
+ * duty re-slews at max_ramp, spike to 102 A, desync, repeat).
+ *
+ * The unambiguous signal is the blind-step RATE: healthy runs total 9-27
+ * blind steps per RUN; the grind produces 40+ per 100 ms. Sample
+ * zc_blind_window_count each 100 ms; ONE hot window holds the power cut
+ * AND forces the stall rail (mask + kick INTERVAL_TIMER, same primitives
+ * as the blind-limit handoff), which restarts the loop and charges the
+ * episode bucket (zero_crosses is far above 100 in a grind), so
+ * repetition escalates through backoff to the latch like any other
+ * episode source.
+ *
+ * Restart on the FIRST hot window, not after N consecutive: requiring
+ * consecutive hot windows is self-defeating (bench pr48-snap-rail-2) -
+ * the held cut drops the blind rate below threshold, the streak resets,
+ * no restart ever fires, and each hold expiry re-slews duty into a fresh
+ * spike (33-88 A at ~600 ms period). The detection margin carries a
+ * single-window trigger, and a false trip costs one restart plus one
+ * episode charge that drains in ~1.2 s of healthy running.
+ */
+#define GRIND_WINDOW_MS 100
+#define GRIND_WINDOW_BLIND_LIMIT 15 /* >=150 blind/s = grind; healthy bursts stay single-digit */
+#define GRIND_HOLD_MS 250
+
 static uint8_t desync_episode_drain_ms;
+static uint8_t grind_window_ms;
 
 static void desync_episode_apply_backoff(void)
 {
@@ -203,6 +237,30 @@ void faultDesyncEpisodeTick1kHz(void)
 #ifndef BRUSHED_MODE
 	if (desync_restart_holdoff_ms > 0) {
 		desync_restart_holdoff_ms--;
+	}
+	if (zc_grind_hold_ms > 0) {
+		zc_grind_hold_ms--;
+	}
+
+	/* Blind-grind window (see block comment above the constants). */
+	if (++grind_window_ms >= GRIND_WINDOW_MS) {
+		grind_window_ms = 0;
+		uint8_t blind_in_window = zc_blind_window_count;
+		zc_blind_window_count = 0; // a step between read and clear is one lost count - fine
+		if (blind_in_window >= GRIND_WINDOW_BLIND_LIMIT && running && !old_routine) {
+			// Hot window: hold the power cut (bridges the gap until the
+			// restart takes and covers any deferred path) and force the
+			// stall rail, same primitives as the blind-limit handoff in
+			// PeriodElapsedCallback: with phase interrupts masked and
+			// the deadline disarmed, nothing can reset INTERVAL_TIMER
+			// before the main loop runs faultHandleBemfIntervalStall,
+			// which restarts and charges the episode bucket.
+			zc_grind_hold_ms = GRIND_HOLD_MS;
+			maskPhaseInterrupts();
+			DISABLE_COM_TIMER_INT();
+			zc_deadline_armed = 0;
+			SET_INTERVAL_TIMER_COUNT(46000);
+		}
 	}
 
 	/* Drain only in established, trusted closed loop. bemf_timeout_happened

@@ -37,6 +37,9 @@ extern volatile uint8_t zc_miss_bucket;
 extern volatile uint8_t zc_pre_seen;
 extern volatile uint8_t zc_demag_run;
 extern volatile uint32_t zc_demag_accepts;
+/* Blind-grind rail (faults.c): blind steps this 100 ms window / cut hold */
+extern volatile uint8_t zc_blind_window_count;
+extern volatile uint16_t zc_grind_hold_ms;
 extern uint8_t filter_level;
 extern uint8_t bad_count;
 extern uint8_t bad_count_threshold;

@@ -99,6 +99,9 @@ RAM_FUNC void PeriodElapsedCallback()
 		blind = 1;
 		zc_blind_steps++;
 		zc_miss_bucket += ZC_MISS_BUCKET_INC;
+		if (zc_blind_window_count < 255) {
+			zc_blind_window_count++; // grind-rate window (faults.c, 1 kHz)
+		}
 		HWCI_PERF_BLIND_STEP();
 		// Take the full elapsed time as the (late) crossing measurement
 		// and commutate now. The inflated interval feeds the average so
@@ -342,6 +345,7 @@ void startMotor()
 		zc_deadline_armed = 0;
 		zc_blind_steps = 0;
 		zc_miss_bucket = 0;
+		zc_blind_window_count = 0;
 		zc_pre_seen = 1;
 		zc_demag_run = 0;
 		commutate();

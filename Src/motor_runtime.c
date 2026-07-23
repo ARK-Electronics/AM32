@@ -54,6 +54,9 @@ volatile uint8_t zc_miss_bucket = 0;
 volatile uint8_t zc_pre_seen = 0;
 volatile uint8_t zc_demag_run = 0;
 volatile uint32_t zc_demag_accepts = 0;
+/* Blind-grind rail (faults.c): blind steps this 100 ms window / cut hold */
+volatile uint8_t zc_blind_window_count = 0;
+volatile uint16_t zc_grind_hold_ms = 0;
 volatile uint8_t ramp_divider;
 volatile uint8_t max_ramp_startup = RAMP_SPEED_STARTUP;
 volatile uint8_t max_ramp_low_rpm = RAMP_SPEED_LOW_RPM;
