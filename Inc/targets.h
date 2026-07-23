@@ -14,7 +14,6 @@
 #ifndef USE_MAKE
 // convenience defines for IDE builds without make - pick one board
 // #define ARK_4IN1_F051
-// #define ARK_4IN1_RAMP_F051
 // #define AM32REF_F051
 // #define REF_G431
 // #define AM32_SITL_CAN
@@ -101,30 +100,15 @@
 #	endif
 #endif
 
-#ifdef ARK_4IN1_RAMP_F051
-#	define FILE_NAME "ARK_4IN1_RAMP_F051"
-#	define FIRMWARE_NAME "ARK 4IN1 SLO"
-#	define DEAD_TIME 25
-#	define HARDWARE_GROUP_F0_B
-#	define MILLIVOLT_PER_AMP 10
-#	define CURRENT_OFFSET 25 // millivolts
-#	define TARGET_VOLTAGE_DIVIDER 210
-#	define VOLTAGE_ADC_CHANNEL LL_ADC_CHANNEL_6
-#	define VOLTAGE_ADC_PIN LL_GPIO_PIN_6
-#	define CURRENT_ADC_CHANNEL LL_ADC_CHANNEL_3
-#	define CURRENT_ADC_PIN LL_GPIO_PIN_3
-#	define USE_SERIAL_TELEMETRY
-#	define USE_DRV8328_NSLEEP
-#	define NSLEEP_PORT GPIOA
-#	define NSLEEP_PIN LL_GPIO_PIN_15
-#	define USE_DRV8328_NFAULT
-#	define NFAULT_PORT GPIOB
-#	define NFAULT_PIN LL_GPIO_PIN_5
-#	define TARGET_MIN_BEMF_COUNTS 3
-#	define RAMP_SPEED_LOW_RPM 1
-#	define RAMP_SPEED_HIGH_RPM 1
-#	define LOOP_FREQUENCY_HZ 10000
-#endif
+/*
+ * ARK_4IN1_RAMP_F051 ("ARK 4IN1 SLO") removed: its entire delta was a
+ * compile-frozen 0.5%/ms ramp (RAMP_SPEED_LOW/HIGH_RPM 1 at a 10 kHz
+ * loop). The regular firmware reaches the identical rate as an EEPROM
+ * setting - max_ramp = 5 (fine mode, 0.1%/ms steps, all regimes) - and
+ * additionally voltage-compensates it, bounds slip current with the
+ * BEMF-headroom governor, and latches misconfiguration via the desync
+ * rails. Heavy-prop builds are a config preset, not a second firmware.
+ */
 
 #ifndef FIRMWARE_NAME
 /* if you get this then you have forgotten to add the section for your target above */
