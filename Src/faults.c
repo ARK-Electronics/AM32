@@ -17,6 +17,7 @@
 #include "targets.h"
 #include "esc_state.h"
 #include "IO.h"
+#include "sounds.h"
 
 #ifdef USE_RGB_LED
 extern void setIndividualRGBLed(uint8_t, uint8_t, uint8_t);
@@ -49,6 +50,7 @@ RAM_FUNC void faultSignalTimeoutTick(void)
 	if (getInputPinState()) {
 		signaltimeout++;
 		if (signaltimeout > LOOP_FREQUENCY_HZ) {
+			bootSoundMarkSignalLost();
 			NVIC_SystemReset();
 		}
 	} else {
@@ -71,6 +73,7 @@ void faultPollSignalTimeout(void)
 			for (int i = 0; i < 64; i++) {
 				dma_buffer[i] = 0;
 			}
+			bootSoundMarkSignalLost();
 			NVIC_SystemReset();
 		}
 		if (signaltimeout > LOOP_FREQUENCY_HZ << 1) { // 2 second when not armed
@@ -82,6 +85,7 @@ void faultPollSignalTimeout(void)
 			for (int i = 0; i < 64; i++) {
 				dma_buffer[i] = 0;
 			}
+			bootSoundMarkSignalLost();
 			NVIC_SystemReset();
 		}
 	}

@@ -105,6 +105,7 @@ Pitch below is **relative** (higher PWM timer prescaler → lower pitch). Exact 
 |------------------|-----------------|----------|---------|
 | Power-up (brushless) | Morse **“ARK”** (·– / ·–· / –·–) rising C6 → E6 → G6 (or custom melody) | `playStartupTune` | Firmware booted and is ready for input |
 | Power-up (brushed build) | 4 rising beeps | `playBrushedStartupTune` | Brushed-mode startup |
+| Signal lost (after soft-reset) | Single short low blip on C5 (~70 ms) | `playSignalLostTone` | RC/input timeout; distinct from the ARK boot tune |
 | Arm / throttle zero accepted | Morse **“R”** (·–·) on G6 | `playInputTune` | ESC armed / input lock-in (“roger”) |
 | Arm + cell LVC enabled | That “R” **once per cell** | `playInputTune` × N | Detected pack cell count (`Vbat / 3.70`) |
 | Stick cal entered (PWM) | Descending whoop/sweep | `playBeaconTune3` | Entered servo high/low calibration |
@@ -120,7 +121,8 @@ Pitch below is **relative** (higher PWM timer prescaler → lower pitch). Exact 
 
 | Function | When | Pattern |
 |----------|------|---------|
-| **`playStartupTune`** | Normal brushless boot (after init; also CRSF path) | If EEPROM custom tune byte 0 is programmed (not `0xFF`): plays **BlueJay-compatible** melody from `eepromBuffer.tune[]` via `playBlueJayTune`. Otherwise default: the **ARK signature tune** — “ARK” in morse code (·– / ·–· / –·–), one letter per step up a C major arpeggio (C6 → E6 → G6), ~1.4 s total. |
+| **`playStartupTune`** | Normal brushless boot (after init; also CRSF path) | If the previous run soft-reset from an RC **signal timeout**, plays **`playSignalLostTone`** instead (see below). Else if EEPROM custom tune byte 0 is programmed (not `0xFF`): plays **BlueJay-compatible** melody from `eepromBuffer.tune[]` via `playBlueJayTune`. Otherwise default: the **ARK signature tune** — “ARK” in morse code (·– / ·–· / –·–), one letter per step up a C major arpeggio (C6 → E6 → G6), ~1.4 s total. |
+| **`playSignalLostTone`** | Soft-reset after armed (~0.5 s) or disarmed (~2 s) input timeout (`faultPollSignalTimeout` → `NVIC_SystemReset`) | **One short low blip** on C5 (≈ 523 Hz, ~70 ms). Marked via a `.noinit` cookie before reset so cold boot still plays the full ARK tune. |
 | **`playBrushedStartupTune`** | `BRUSHED_MODE` builds only | **Four rising beeps** (~300 ms), phases 1–4 (prescalers 40 → 30 → 25 → 20). |
 | **`playBlueJayTune`** | Custom startup only | Notes/rests encoded in EEPROM tune blob (configurator “custom startup music”). Inter-note pause can scale with tune header byte 3. |
 

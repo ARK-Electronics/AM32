@@ -114,6 +114,7 @@ void playBlueJayTune(void)
 }
 
 // equal-tempered pitches of the ARK signature arpeggio
+#define ARK_NOTE_C5 523
 #define ARK_NOTE_C6 1047
 #define ARK_NOTE_E6 1319
 #define ARK_NOTE_G6 1568
@@ -122,6 +123,29 @@ void playBlueJayTune(void)
 // arm/beacon tunes run inside the control loop with IRQs off, so they use a
 // faster dot to keep the busy-wait no longer than the old ~300 ms tune
 #define ARK_ARM_MORSE_UNIT_MS 40
+
+// Survives NVIC_SystemReset (SRAM retained; not zeroed if placed in .noinit).
+// Power-on leaves garbage so the magic check fails and we play the full ARK tune.
+#define BOOT_SOUND_MAGIC 0xA32B5001u
+#define BOOT_SOUND_SIGNAL_LOST 1u
+
+static volatile uint32_t boot_sound_cookie[2] __attribute__((section(".noinit")));
+
+void bootSoundMarkSignalLost(void)
+{
+	boot_sound_cookie[0] = BOOT_SOUND_MAGIC;
+	boot_sound_cookie[1] = BOOT_SOUND_SIGNAL_LOST;
+}
+
+static uint8_t bootSoundTakeSignalLost(void)
+{
+	if (boot_sound_cookie[0] == BOOT_SOUND_MAGIC && boot_sound_cookie[1] == BOOT_SOUND_SIGNAL_LOST) {
+		boot_sound_cookie[0] = 0;
+		boot_sound_cookie[1] = 0;
+		return 1;
+	}
+	return 0;
+}
 
 static void playArkMorseLetter(const char *code, uint16_t freq, uint16_t unit_ms)
 {
@@ -148,8 +172,27 @@ static void playArkTune(void)
 	playArkMorseLetter("-.-", ARK_NOTE_G6, ARK_MORSE_UNIT_MS); // K
 }
 
+// Short, low, single blip after RC signal timeout soft-reset — not the ARK boot
+void playSignalLostTone(void)
+{
+	__disable_irq();
+	RELOAD_WATCHDOG_COUNTER();
+	comStep(3);
+	playBJNote(ARK_NOTE_C5, 70);
+	allOff();
+	SET_PRESCALER_PWM(0);
+	signaltimeout = 0;
+	SET_AUTO_RELOAD_PWM(TIMER1_MAX_ARR);
+	__enable_irq();
+}
+
 void playStartupTune()
 {
+	// Signal-timeout path soft-resets; play a short lost-tone instead of full ARK
+	if (bootSoundTakeSignalLost()) {
+		playSignalLostTone();
+		return;
+	}
 	__disable_irq();
 	comStep(3);
 	if (eepromBuffer.tune[0] != ERASED_FLASH_BYTE) {
