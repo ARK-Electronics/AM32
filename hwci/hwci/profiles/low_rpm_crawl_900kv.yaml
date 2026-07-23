@@ -1,0 +1,31 @@
+name: low_rpm_crawl_900kv
+description: >
+  Long dwells at very low throttle to diagnose rough low-speed sound on
+  900KV noprop: open-loop handoff, ZC jitter, desyncs, current spikes.
+sample_rate_hz: 200
+arm_settle_s: 3.0
+pole_pairs: 7
+steady_tail_fraction: 0.6
+
+safety:
+  max_current_a: 15.0
+  max_thrust_n: 2.0
+  max_rpm: 15000
+  max_motor_temp_c: 80.0
+
+segments:
+  - {label: idle,    throttle: 0.00, duration_s: 2.0}
+  - {label: ramp05,  throttle: 0.05, duration_s: 2.0, ramp: true}
+  - {label: hold05,  throttle: 0.05, duration_s: 8.0, steady: true}
+  - {label: ramp08,  throttle: 0.08, duration_s: 2.0, ramp: true}
+  - {label: hold08,  throttle: 0.08, duration_s: 6.0, steady: true}
+  - {label: ramp10,  throttle: 0.10, duration_s: 2.0, ramp: true}
+  - {label: hold10,  throttle: 0.10, duration_s: 6.0, steady: true}
+  - {label: ramp12,  throttle: 0.12, duration_s: 2.0, ramp: true}
+  - {label: hold12,  throttle: 0.12, duration_s: 6.0, steady: true}
+  - {label: ramp15,  throttle: 0.15, duration_s: 2.0, ramp: true}
+  - {label: hold15,  throttle: 0.15, duration_s: 6.0, steady: true}
+  - {label: ramp20,  throttle: 0.20, duration_s: 2.0, ramp: true}
+  - {label: hold20,  throttle: 0.20, duration_s: 4.0, steady: true}
+  - {label: rampdn,  throttle: 0.00, duration_s: 3.0, ramp: true}
+  - {label: stop,    throttle: 0.00, duration_s: 2.0}

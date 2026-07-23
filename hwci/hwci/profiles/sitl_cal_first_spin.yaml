@@ -1,0 +1,22 @@
+name: sitl_cal_first_spin
+description: >
+  SITL-calibration first spin (matches scripts/esc_measure.py hold --throttle 0.1).
+  Sanity check before the full staircase: arm, spin gently, confirm RPM/V/I
+  look healthy. ~12 s. Safe with prop (Gemfan 7035) or noprop on 2807 1300KV 6S.
+sample_rate_hz: 100
+arm_settle_s: 2.0
+steady_tail_fraction: 0.5
+pole_pairs: 7
+
+safety:
+  max_current_a: 25.0
+  max_thrust_n: 20.0
+  max_rpm: 15000
+  max_motor_temp_c: 90.0
+
+segments:
+  - {label: idle,   throttle: 0.00, duration_s: 2.0}
+  - {label: ramp,   throttle: 0.10, duration_s: 1.5, ramp: true}
+  - {label: hold10, throttle: 0.10, duration_s: 6.0, steady: true}
+  - {label: rampdn, throttle: 0.00, duration_s: 2.0, ramp: true}
+  - {label: stop,   throttle: 0.00, duration_s: 1.0}

@@ -468,6 +468,14 @@ void setInput()
 	// rotor position is known but the drive phase is not trusted, and the
 	// current reduction is itself the recovery mechanism (shorter demag
 	// re-exposes the pre-crossing dwell).
+	// BEMF-headroom governor (runtime_loop.c): duty may not exceed the
+	// equilibrium duty implied by the live eRPM plus a fixed voltage
+	// headroom - bounds slip current / demag duration on heavy props
+	// without a per-motor shunt. 2000 while disarmed (estimator not yet
+	// confident), so this is a no-op until ~0.3 s of steady running.
+	if (!old_routine && running && zero_crosses > 150 && duty_cycle_setpoint > gov_duty_ceiling) {
+		duty_cycle_setpoint = gov_duty_ceiling;
+	}
 	uint8_t zc_untrusted_steps = zc_blind_steps;
 	if (zc_demag_run > zc_untrusted_steps) {
 		zc_untrusted_steps = zc_demag_run;
@@ -629,25 +637,20 @@ RAM_FUNC void tenKhzRoutine()
 		}
 		if (ramp_count > ramp_divider) {
 			ramp_count = 0;
-#	ifdef VOLTAGE_BASED_RAMP
-			uint16_t voltage_based_max_change = map(battery_voltage, 800, 2200, 10, 1);
-			if (average_interval > 200) {
-				max_duty_cycle_change = voltage_based_max_change;
-			} else {
-				max_duty_cycle_change = voltage_based_max_change * 3;
-			}
-#	else
+			// Single ramp path for all targets: the legacy compile-time
+			// VOLTAGE_BASED_RAMP variant (no target defined it) is
+			// subsumed by the runtime voltage compensation - _vcomp are
+			// the working copies scaled by measured Vbat at 1 kHz
+			// (runtimeTransientGovernorTick): same VOLTS/ms on any pack.
 			if (zero_crosses < 150 || last_duty_cycle < 150) {
-				max_duty_cycle_change = max_ramp_startup;
+				max_duty_cycle_change = max_ramp_startup_vcomp;
 			} else {
 				if (average_interval > 500) {
-					max_duty_cycle_change = max_ramp_low_rpm;
+					max_duty_cycle_change = max_ramp_low_rpm_vcomp;
 				} else {
-					max_duty_cycle_change = max_ramp_high_rpm;
+					max_duty_cycle_change = max_ramp_high_rpm_vcomp;
 				}
 			}
-
-#	endif
 #	ifdef CUSTOM_RAMP
 			//         max_duty_cycle_change = eepromBuffer[30];
 #	endif
