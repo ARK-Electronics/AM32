@@ -653,8 +653,13 @@ class Tuner:
                  f"{None if winner_val is None else {'minimum_duty_cycle': winner_val}}")
 
     def _run_ramp_measure_stage(self, stage: StageSpec) -> None:
-        """Physics-based max_ramp: measure, compute, verify with backoff,
-        fall back to lower-ranked advance values if needed."""
+        """Physics-based max_ramp: measure, compute, bubble-search verify.
+
+        Verify no longer starts at the field ceiling and multiplies down by
+        0.7 (that forced a long desync thrash on heavy props). It climbs from
+        the safe floor (exponential probe + binary refine) so failed trials
+        are rare and bounded.
+        """
         f = resolve_field("max_ramp", None)
         indices: list[int] = []
 
@@ -666,14 +671,14 @@ class Tuner:
             indices.append(e["index"])
             if e.get("disqualified"):
                 self.log(f"stage {stage.name}: measurement run disqualified "
-                         f"({e['disqualified']}); falling back to a direct "
-                         "max_ramp search from the ceiling")
+                         f"({e['disqualified']}); falling back to bubble "
+                         "search on max_ramp from the floor")
                 return None, None
             stats = mech_ramp_stats(self._trial_rows(e))
             if stats is None:
                 self.log(f"stage {stage.name}: no usable step response in "
-                         "the measurement run; falling back to a direct "
-                         "max_ramp search from the ceiling")
+                         "the measurement run; falling back to bubble "
+                         "search on max_ramp from the floor")
                 return None, None
             limit = ramp_measure_profile(self.spec).safety.max_current_a
             budget = max(0.75 * (limit or RAMP_TRANSIENT_MAX_CURRENT_A)
@@ -687,26 +692,76 @@ class Tuner:
                 f"-> max_ramp {computed}")
             return stats, computed
 
-        def verify_with_backoff(base_ov: dict, start_v: int) -> Optional[int]:
-            v = start_v
-            while True:
-                ev = self._trial(TrialPlan(
-                    stage=stage.name, kind="verify",
-                    overrides={**base_ov, "max_ramp": v},
-                    profile=step_profile(self.spec)))
-                indices.append(ev["index"])
-                if not ev.get("disqualified"):
-                    return v
-                nxt = max(f.lo, int(v * 0.7))
-                if nxt == v:
-                    return None         # already at the floor: no winner
-                self.log(f"stage {stage.name}: verify failed at max_ramp "
-                         f"{v}; backing off to {nxt}")
-                v = nxt
+        def try_verify(base_ov: dict, v: int) -> bool:
+            ev = self._trial(TrialPlan(
+                stage=stage.name, kind="verify",
+                overrides={**base_ov, "max_ramp": v},
+                profile=step_profile(self.spec)))
+            indices.append(ev["index"])
+            ok = not ev.get("disqualified")
+            if ok:
+                self.log(f"stage {stage.name}: max_ramp {v} PASS")
+            else:
+                self.log(f"stage {stage.name}: max_ramp {v} FAIL "
+                         f"({ev.get('disqualified')})")
+            return ok
+
+        def verify_bubble_search(base_ov: dict,
+                                 hint: Optional[int]) -> Optional[int]:
+            """Largest safe max_ramp via floor-first bubble + binary refine.
+
+            1. Prove ``f.lo`` is safe (else no winner).
+            2. If ``hint`` is above the floor, try it (one shot): on pass,
+               bubble up from hint; on fail, binary-search (lo, hint).
+            3. Else geometric climb from the floor until first fail, then
+               binary-search the gap.
+            """
+            if not try_verify(base_ov, f.lo):
+                return None
+            last_pass = f.lo
+            first_fail: Optional[int] = None
+
+            def bubble_up(start: int) -> int:
+                """Geometric climb from a known-good value; returns last pass."""
+                nonlocal first_fail
+                cur = start
+                while cur < f.hi:
+                    nxt = min(f.hi, max(cur + 1, int(cur * 2)))
+                    if nxt == cur:
+                        break
+                    if try_verify(base_ov, nxt):
+                        cur = nxt
+                    else:
+                        first_fail = nxt
+                        break
+                return cur
+
+            def binary_between(lo_ok: int, hi_fail: int) -> int:
+                lo, hi = lo_ok, hi_fail
+                while hi - lo > 1:
+                    mid = (lo + hi) // 2
+                    if try_verify(base_ov, mid):
+                        lo = mid
+                    else:
+                        hi = mid
+                return lo
+
+            if hint is not None and f.lo < hint <= f.hi:
+                if try_verify(base_ov, hint):
+                    last_pass = bubble_up(hint)
+                else:
+                    first_fail = hint
+                    return binary_between(last_pass, first_fail)
+            else:
+                last_pass = bubble_up(last_pass)
+
+            if first_fail is None:
+                return last_pass
+            return binary_between(last_pass, first_fail)
 
         stats, computed = measure_and_compute()
-        winner_val = verify_with_backoff(
-            self._merged(stage, {}), computed if computed is not None else f.hi)
+        winner_val = verify_bubble_search(
+            self._merged(stage, {}), computed)
 
         winner_ov: Optional[dict] = None   # None => the top incumbent won
         if winner_val is None:
@@ -719,7 +774,7 @@ class Tuner:
             for cand in candidates:
                 self.log(f"stage {stage.name}: retrying ramp certification "
                          f"at {cand or '(firmware defaults)'}")
-                wv = verify_with_backoff({**cand, **stage.fixed}, f.hi)
+                wv = verify_bubble_search({**cand, **stage.fixed}, computed)
                 if wv is not None:
                     winner_val, winner_ov = wv, cand
                     self.log(f"stage {stage.name}: {cand or '(defaults)'} "
@@ -745,6 +800,7 @@ class Tuner:
                          else {k: round(v, 3) for k, v in stats.items()}),
             "computed_max_ramp": computed,
             "used_fallback_settings": winner_ov,
+            "search": "bubble",
             "trials": indices,
         }
         self._save()
