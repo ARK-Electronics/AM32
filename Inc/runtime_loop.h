@@ -19,6 +19,9 @@ void runtimeUpdateVariablePwm(uint16_t *last_tim1_arr);
 /* Desync detect from average interval jump. */
 void runtimeProcessDesyncCheck(void);
 
+/* Sample the comparator for the pre-crossing dwell (demag-late detection). */
+void runtimeSampleBemfPreLevel(void);
+
 /* DShot vs COM/COMP IRQ priority when telemetry is active. */
 void runtimeUpdateDshotIrqPriority(void);
 

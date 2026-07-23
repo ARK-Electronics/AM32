@@ -138,6 +138,31 @@ void runtimeProcessDesyncCheck(void)
 	}
 }
 
+void runtimeSampleBemfPreLevel(void)
+{
+	// Demag-late crossing detection, sampling half. In a healthy window the
+	// floating phase dwells at the PRE-crossing comparator level from demag
+	// end until the crossing - at the commutation rates this check covers
+	// (CI > 500 ticks = 250 us+) that dwell spans many main-loop passes, so
+	// a single flag set from here is reliable. In the mistimed-lock failure
+	// (bench 2026-07-22: snap starts settle ~30% slow at 8-10x current) the
+	// freewheel demag clamp holds the phase at the POST-crossing level for
+	// the entire window, the EXTI edge fires only when demag ends, and the
+	// confirm loop accepts it instantly (0 rejects/zc measured vs ~11
+	// healthy) - commutation runs consistently late off demag duration, and
+	// higher current makes demag longer, which is the self-locking spiral.
+	// This flag is the discriminator: an accepted crossing with no observed
+	// pre-level dwell is a demag-late detection (see interruptRoutine).
+	// Between the accept and the next commutation the comparator holds the
+	// post-crossing level of the OLD window, which never equals the current
+	// `rising`, so sampling needs no window-phase gate.
+	if (running && !old_routine && commutation_interval > 500) {
+		if (getCompOutputLevel() == rising) {
+			zc_pre_seen = 1;
+		}
+	}
+}
+
 void runtimeUpdateDshotIrqPriority(void)
 {
 #if !defined(MCU_G031) && !defined(NEED_INPUT_READY)
