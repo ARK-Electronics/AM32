@@ -279,6 +279,43 @@ RAM_FUNC void interruptRoutine()
 	maskPhaseInterrupts();
 	zc_deadline_armed = 0; // COM_TIMER now times commutation, not the missed-ZC deadline
 	zc_blind_steps = 0;
+	// Demag-late crossing detection, decision half (sampler:
+	// runtimeSampleBemfPreLevel). No pre-crossing dwell observed since the
+	// last commutation means this edge is the freewheel demag clamp
+	// releasing over an already-past crossing - the loop is commutating
+	// late by the demag duration. Late drive raises current and more
+	// current lengthens demag, so left alone this settles into a stable
+	// mistimed lock (bench 2026-07-22: ~30% slow at 8-10x current on ~1/3
+	// of warm snap starts, 100% of hot ones; never self-heals; invisible
+	// to the desync jump check and the trust rail because the interval is
+	// steady and fast-looking). Charge the miss bucket and let the
+	// consecutive counter drive the same power cut as blind steps
+	// (control_loop): less current shortens demag, the pre-level dwell
+	// reappears and the loop re-times itself - the firmware equivalent of
+	// the throttle-blip escape verified on the bench. Sustained demag-late
+	// accepts escalate to the stall rail exactly like a sustained miss
+	// rate. Gated to CI > 500 (250 us+), where the healthy pre-level dwell
+	// spans many main-loop passes so the sampler cannot miss it.
+	//
+	// The response is the power cut ONLY - no miss-bucket charge, no stall
+	// rail. Normal spool-up under load is genuinely demag-late for long
+	// stretches (high slip current), so any restart escalation turns every
+	// hard start into a kick loop (bench: 2-3 restarts and ~10 desyncs per
+	// 2 s start attempt with bucket escalation enabled). The cut is
+	// self-resolving in both cases: during spool-up it bounds accel
+	// current until slip drops, and in the mistimed lock it collapses the
+	// current that sustains the wrong timing. A loop that stays demag-late
+	// forever just stays current-limited - strictly better than the 8-10x
+	// current of the untreated lock.
+	if (commutation_interval > 500 && !zc_pre_seen) {
+		zc_demag_accepts++;
+		if (zc_demag_run < 255) {
+			zc_demag_run++;
+		}
+	} else {
+		zc_demag_run = 0;
+	}
+	zc_pre_seen = 0;
 	if (zc_miss_bucket) {
 		zc_miss_bucket--; // accepted crossing drains the miss-rate bucket
 	}
@@ -301,6 +338,8 @@ void startMotor()
 		zc_deadline_armed = 0;
 		zc_blind_steps = 0;
 		zc_miss_bucket = 0;
+		zc_pre_seen = 1;
+		zc_demag_run = 0;
 		commutate();
 		commutation_interval = 10000;
 		SET_INTERVAL_TIMER_COUNT(5000);

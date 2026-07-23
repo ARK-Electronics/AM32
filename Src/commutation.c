@@ -209,5 +209,10 @@ void zcfoundroutine()
 		zc_deadline_armed = 0;
 		zc_blind_steps = 0;
 		zc_miss_bucket = 0;
+		// Seed the pre-level flag: the main-loop sampler only runs in
+		// interrupt mode, so the first closed-loop window has no dwell
+		// history yet and must not read as demag-late.
+		zc_pre_seen = 1;
+		zc_demag_run = 0;
 	}
 }

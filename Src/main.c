@@ -507,6 +507,7 @@ int main(void)
 		}
 
 		faultUpdateBemfTimeoutPolicy();
+		runtimeSampleBemfPreLevel();
 		runtimeProcessDesyncCheck();
 		runtimeUpdateDshotIrqPriority();
 		runtimeSendTelemetryIfNeeded();

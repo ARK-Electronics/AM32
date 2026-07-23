@@ -454,8 +454,17 @@ void setInput()
 	// (max_ramp_startup while zero_crosses < 150 - live here, since blind
 	// stepping arms at 100). The 20 kHz tick may overwrite last_duty_cycle
 	// once before it sees the cap; the next DShot frame re-applies it.
-	if (!old_routine && running && zc_blind_steps >= 2) {
-		uint16_t blind_cap = (zc_blind_steps >= 4) ? 250 : 500;
+	// zc_demag_run feeds the same cut: consecutive demag-late accepts mean
+	// the loop is commutating late off the demag duration (bemf_zc.c) - the
+	// rotor position is known but the drive phase is not trusted, and the
+	// current reduction is itself the recovery mechanism (shorter demag
+	// re-exposes the pre-crossing dwell).
+	uint8_t zc_untrusted_steps = zc_blind_steps;
+	if (zc_demag_run > zc_untrusted_steps) {
+		zc_untrusted_steps = zc_demag_run;
+	}
+	if (!old_routine && running && zc_untrusted_steps >= 2) {
+		uint16_t blind_cap = (zc_untrusted_steps >= 4) ? 250 : 500;
 		if (blind_cap < min_startup_duty) {
 			blind_cap = min_startup_duty;
 		}
