@@ -41,10 +41,17 @@ def _run_throttle(sitl, state_stream, ptype, value, rpm_lo, rpm_hi,
                 assert edt_vals.get('temp') == 25, edt_vals
                 assert 14 < edt_vals.get('volt', 0) < 18, edt_vals
 
-        # must stop again at zero throttle
+        # must stop again at zero throttle. Poll with a deadline instead of
+        # asserting after a fixed sleep: the coast-down is wall-clock
+        # physics, and on a loaded CI runner a fixed window races it
+        # (observed 570 rpm at the old 3 s check - a pass locally 8/8).
         tx.value = 0
-        time.sleep(stop_s)
-        rpm = rpm_from_state(sim, 0.3)
+        deadline = time.time() + stop_s + 4.0
+        rpm = float('inf')
+        while time.time() < deadline:
+            rpm = rpm_from_state(sim, 0.3)
+            if rpm < 500:
+                break
         assert rpm < 500, 'motor did not stop: rpm=%.0f' % rpm
     finally:
         tx.stop()
