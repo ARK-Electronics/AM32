@@ -98,6 +98,16 @@
 	 * unconfigured worst case; per-airframe provisioning still writes the
 	 * tuned value (10": 1) - this is only the blank-eeprom fallback. */
 #	define TARGET_DEFAULT_MAX_RAMP 40
+/* Ramp-regime CEILINGS (eeprom max_ramp can only lower below these, so
+	 * they bound the fastest reachable slew). Generic fallbacks 16/6 are
+	 * racing values; ARK vehicles are 5-10"+ PX4 craft where 8%%/ms full-
+	 * stick authority (0->100%% in 12.5 ms) is already far above controller
+	 * dynamics. Startup stays at the generic 2 - it governs spool-up
+	 * reliability, and SLO never overrode it either. NOT changed in the
+	 * global fallbacks: AM32REF_F051 / REF_G431 stay upstream-identical
+	 * for A/B reference. */
+#	define RAMP_SPEED_LOW_RPM 3
+#	define RAMP_SPEED_HIGH_RPM 8
 /* Closed-loop when commutation_interval < this (0.5 us ticks). Default
 	 * F051 fallback is 2000; noprop ~1k RPM has CI~2700 so the ESC stayed
 	 * open-loop (rough low-speed sound). Bench sweep on 900KV noprop:
