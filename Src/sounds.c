@@ -204,20 +204,14 @@ void playDuskingTune()
 	SET_AUTO_RELOAD_PWM(TIMER1_MAX_ARR);
 }
 
+// dshot beacon 4 / deferred arm beep: same morse "R" as playInputTune but
+// one arpeggio step lower so the beacon is distinguishable by pitch
 void playInputTune2()
 {
-	SET_AUTO_RELOAD_PWM(TIM1_AUTORELOAD);
 	__disable_irq();
 	RELOAD_WATCHDOG_COUNTER();
-	SET_PRESCALER_PWM(60);
-	setCaptureCompare();
 	comStep(1);
-	delayMillis(75);
-	SET_PRESCALER_PWM(80);
-	delayMillis(75);
-	SET_PRESCALER_PWM(90);
-	RELOAD_WATCHDOG_COUNTER();
-	delayMillis(75);
+	playArkMorseLetter(".-.", 1319); // R on E6
 	allOff();
 	SET_PRESCALER_PWM(0);
 	signaltimeout = 0;
@@ -225,19 +219,14 @@ void playInputTune2()
 	__enable_irq();
 }
 
+// signal input lock / armed: morse "R" (.-.) — "roger, signal received" —
+// on the top note of the ARK startup arpeggio
 void playInputTune()
 {
 	__disable_irq();
-	SET_AUTO_RELOAD_PWM(TIM1_AUTORELOAD);
 	RELOAD_WATCHDOG_COUNTER();
-	SET_PRESCALER_PWM(80);
-	setCaptureCompare();
 	comStep(3);
-	delayMillis(100);
-	SET_PRESCALER_PWM(70);
-	delayMillis(100);
-	SET_PRESCALER_PWM(40);
-	delayMillis(100);
+	playArkMorseLetter(".-.", 1568); // R on G6
 	allOff();
 	SET_PRESCALER_PWM(0);
 	signaltimeout = 0;
