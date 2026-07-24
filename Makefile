@@ -40,7 +40,7 @@ LIBS := -lnosys
 # extract version from Inc/version.h
 VERSION_MAJOR := $(shell $(FGREP) "define VERSION_MAJOR" $(MAIN_INC_DIR)/version.h | $(CUT) -d" " -f3 )
 VERSION_MINOR := $(shell $(FGREP) "define VERSION_MINOR" $(MAIN_INC_DIR)/version.h | $(CUT) -d" " -f3 )
-# optional fork tag (quoted string in version.h), e.g. ark -> 2.20-ark
+# optional fork tag (quoted string in version.h), e.g. ark -> 3.0-ark
 VERSION_TAG := $(shell $(FGREP) "define VERSION_TAG" $(MAIN_INC_DIR)/version.h | $(CUT) -d\" -f2 )
 
 # Artifact version: MAJOR.MINOR[-TAG]. TAG marks ARK-fork builds vs upstream.
